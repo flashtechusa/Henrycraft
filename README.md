@@ -6,35 +6,45 @@ Custom Henry Minecraft style game.
 
 **https://flashtechusa.github.io/Henrycraft/**
 
-That link is the one to send to Henry. It works on any computer or tablet with a
+That's the link to send to Henry. It works on any computer or tablet with a
 browser &mdash; nothing to install.
 
-## How hosting works
+## One-time setup (do this once)
 
-The whole game is one file, `index.html`, at the root of this repo.
+The link above only works after GitHub Pages is switched on. It takes one click
+and only the repo owner can do it:
 
-Every time `index.html` changes on the `main` branch, the workflow in
-`.github/workflows/deploy-pages.yml` republishes the site automatically. There is
-nothing to click after a change &mdash; give it about a minute and refresh the
-page. (A hard refresh, `Ctrl+Shift+R` or `Cmd+Shift+R`, helps if the browser is
-holding on to the old version.)
+1. Go to **Settings** &rarr; **Pages** (left sidebar).
+2. Under **Build and deployment** &rarr; **Source**, choose **Deploy from a branch**.
+3. Set **Branch** to `main` and the folder to `/ (root)`, then click **Save**.
 
-## Editing the game
+Wait a minute or two, then open the play link. After this, it stays on forever.
 
-1. Open [`index.html`](index.html) here on GitHub.
-2. Click the pencil icon to edit it.
-3. Make the change and click **Commit changes**.
-4. Wait about a minute, then refresh the play link.
+## Making changes
 
-To see how a deploy is going, open the **Actions** tab.
+The whole game is one file: [`index.html`](index.html) at the root of this repo.
 
-### One important note about editing
+1. Click `index.html` above.
+2. Click the pencil icon to edit.
+3. Make the change, then click **Commit changes**.
+4. Wait about a minute and refresh the play link.
+
+Every commit to `main` republishes the site automatically. If the page looks
+stale, do a hard refresh: `Ctrl+Shift+R` on Windows, `Cmd+Shift+R` on a Mac.
+
+## Important: what to put in index.html
 
 `index.html` must contain the game's real **source code** &mdash; the file that
-starts with `<!DOCTYPE html>` and contains the `<style>` and `<script>` tags.
+starts with `<!DOCTYPE html>` and has `<style>` and `<script>` tags inside it.
 
-If you open the game in a browser, select the page and copy it, you only get the
-*words you can see* &mdash; the code that makes it work gets left behind. To get
-the real thing: open the game file in a text editor (Notepad, TextEdit, VS Code)
-and copy everything from there. In a browser, `Ctrl+U` / `Cmd+Option+U` shows the
-real source.
+If you open the game in a browser, select the page, and copy it, you only get the
+*words you can see*; all the code that makes it work is left behind. To get the
+real thing:
+
+- **Best:** open the game file in a text editor (Notepad, TextEdit, VS Code),
+  select all, copy.
+- **In a browser:** press `Ctrl+U` (Windows) or `Cmd+Option+U` (Mac) to show the
+  page source, then select all and copy from there.
+
+A working game of this kind is usually tens of thousands of characters. If what
+you pasted is only a few hundred, it's the text and not the code.
