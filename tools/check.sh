@@ -19,9 +19,17 @@ STATIC_ONLY=0
 
 pass=0 fail=0 skip=0
 
-ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
-bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [[ -n "${2:-}" ]] && printf '        %s\n' "$2"; fail=$((fail+1)); }
-meh()  { printf '  \033[33mSKIP\033[0m  %s\n' "$1"; [[ -n "${2:-}" ]] && printf '        %s\n' "$2"; skip=$((skip+1)); }
+# Colour only when writing to a terminal, so CI logs and the job summary stay
+# free of escape codes.
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  C_OK=$'\033[32m'; C_BAD=$'\033[31m'; C_SKIP=$'\033[33m'; C_OFF=$'\033[0m'
+else
+  C_OK=''; C_BAD=''; C_SKIP=''; C_OFF=''
+fi
+
+ok()   { printf '  %sPASS%s  %s\n' "$C_OK" "$C_OFF" "$1"; pass=$((pass+1)); }
+bad()  { printf '  %sFAIL%s  %s\n' "$C_BAD" "$C_OFF" "$1"; [[ -n "${2:-}" ]] && printf '        %s\n' "$2"; fail=$((fail+1)); }
+meh()  { printf '  %sSKIP%s  %s\n' "$C_SKIP" "$C_OFF" "$1"; [[ -n "${2:-}" ]] && printf '        %s\n' "$2"; skip=$((skip+1)); }
 
 # Both files below deliberately *document* the things these checks look for -
 # the manifest explains the missing INTERNET permission, the Activity explains

@@ -47,7 +47,18 @@ jobs:
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Run the verification checks
-        run: bash tools/check.sh
+        run: |
+          set +e
+          bash tools/check.sh | tee /tmp/checks.txt
+          rc=${PIPESTATUS[0]}
+          {
+            echo '## Verification checks'
+            echo ''
+            echo '```'
+            cat /tmp/checks.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
 
       - name: Name the APK
         id: apk
