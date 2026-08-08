@@ -1,28 +1,38 @@
 # Henrycraft
 
-Custom Henry Minecraft style game.
+Henry's blocky world — a gentle voxel sandbox. No monsters, no falling damage,
+no night. Walk, dig, build, fly, and find 10 hidden stars.
 
 ## Play it
 
 **https://flashtechusa.github.io/Henrycraft/**
 
 That's the link to send to Henry. It works on any computer or tablet with a
-browser &mdash; nothing to install.
+browser — nothing to install.
 
 ## One-time setup (do this once)
 
-The link above only works after GitHub Pages is switched on. It takes one click
+The link above only works after GitHub Pages is switched on. It takes one click,
 and only the repo owner can do it:
 
-1. Go to **Settings** &rarr; **Pages** (left sidebar).
-2. Under **Build and deployment** &rarr; **Source**, choose **Deploy from a branch**.
+1. Go to **Settings** → **Pages** (left sidebar).
+2. Under **Build and deployment** → **Source**, choose **Deploy from a branch**.
 3. Set **Branch** to `main` and the folder to `/ (root)`, then click **Save**.
 
-Wait a minute or two, then open the play link. After this, it stays on forever.
+Wait a minute or two, then open the play link. After this it stays on for good.
+
+## Controls
+
+**Computer** — `W A S D` walk, mouse looks, click digs, right-click builds,
+`Space` jumps, `Q` digs down, `E` digs up, `F` toggles flying (`Space` up,
+`Shift` down), `1`–`9` pick a block, `V` swaps view, `M` mutes, `Esc` pauses.
+
+**Tablet or phone** — left stick walks and turns, buttons on the right dig,
+build, jump and fly. Turn the device sideways.
 
 ## Making changes
 
-The whole game is one file: [`index.html`](index.html) at the root of this repo.
+The whole game is one file: [`index.html`](index.html).
 
 1. Click `index.html` above.
 2. Click the pencil icon to edit.
@@ -30,21 +40,21 @@ The whole game is one file: [`index.html`](index.html) at the root of this repo.
 4. Wait about a minute and refresh the play link.
 
 Every commit to `main` republishes the site automatically. If the page looks
-stale, do a hard refresh: `Ctrl+Shift+R` on Windows, `Cmd+Shift+R` on a Mac.
+stale, hard-refresh: `Ctrl+Shift+R` on Windows, `Cmd+Shift+R` on a Mac.
 
-## Important: what to put in index.html
+## Notes for whoever edits this next
 
-`index.html` must contain the game's real **source code** &mdash; the file that
-starts with `<!DOCTYPE html>` and has `<style>` and `<script>` tags inside it.
+**Saving.** The world saves itself every 4 seconds into the browser's
+`localStorage`, under the key `henrycraft-world-v1`. Only the seed and Henry's
+own block changes are stored, not the whole world, so a save stays tiny — a
+couple of hundred bytes.
 
-If you open the game in a browser, select the page, and copy it, you only get the
-*words you can see*; all the code that makes it work is left behind. To get the
-real thing:
+The save is per-browser and per-device. Henry's world on the iPad is not the
+same world as on the laptop, and clearing the browser's site data wipes it.
+There is no server, so nothing is shared between devices.
 
-- **Best:** open the game file in a text editor (Notepad, TextEdit, VS Code),
-  select all, copy.
-- **In a browser:** press `Ctrl+U` (Windows) or `Cmd+Option+U` (Mac) to show the
-  page source, then select all and copy from there.
-
-A working game of this kind is usually tens of thousands of characters. If what
-you pasted is only a few hundred, it's the text and not the code.
+**3D engine.** The page loads three.js r128 from cdnjs. It is the only thing
+here that comes from outside this repo. If a network blocks cdnjs, the game
+shows a "3D engine could not load" message instead of starting; downloading
+`three.min.js` into this repo and pointing the `<script src>` at it would make
+the game fully self-contained.
