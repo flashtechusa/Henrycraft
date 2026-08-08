@@ -156,6 +156,46 @@ body.flying #pads #btnDigDown,#pads #btnDigUp{
 }
 body.touch #hint{display:none}
 
+/* A phone held sideways leaves only about 300px of height once the browser's
+   own toolbar is showing. The action pads are bottom-anchored and grow upward -
+   four rows plus gaps come to 280px, so on a phone they ran off the top of the
+   screen and sat on the view/sound/menu chips. A tablet has 700px+ and never
+   hits this. Shrink the controls to fit; the buttons stay comfortably bigger
+   than the 44px minimum touch target. */
+@media (max-height:520px){
+  #topLeft,#topRight{top:calc(env(safe-area-inset-top) + 8px)}
+  #topRight .icon{padding:6px 8px;font-size:16px;min-width:38px}
+  #logo{font-size:12px}
+  #starChip{font-size:14px}
+  #starChip b{font-size:16px}
+
+  #pads{
+    right:calc(env(safe-area-inset-right) + 10px);
+    bottom:calc(env(safe-area-inset-bottom) + 10px);
+    grid-template-columns:repeat(2,66px);gap:6px;
+  }
+  #pads .blockbtn{height:46px;border-radius:10px;font-size:10px;gap:1px}
+  #pads .blockbtn i{font-size:15px}
+  #pads #btnDown{height:36px;gap:6px}
+
+  #stick{
+    left:calc(env(safe-area-inset-left) + 12px);
+    bottom:calc(env(safe-area-inset-bottom) + 12px);
+    width:104px;height:104px;
+  }
+  #knob{width:46px;height:46px;margin:-23px 0 0 -23px}
+
+  body.touch #blockBtn{
+    left:calc(env(safe-area-inset-left) + 40px);
+    bottom:calc(env(safe-area-inset-bottom) + 126px);
+    width:52px;height:52px;
+  }
+  #pickerGrid{grid-template-columns:repeat(6,46px)}
+  #pickerGrid .slot{width:46px;height:46px}
+  .pickcard{padding:10px 12px}
+  .pickhead{margin-bottom:6px;font-size:11px}
+}
+
 /* ---------- overlays ---------- */
 .overlay{
   position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;
@@ -1642,6 +1682,11 @@ var stickCX=0, stickCY=0, STICK_R=52;
 function stickCenter(){
   var r=stickEl.getBoundingClientRect();
   stickCX=r.left+r.width/2; stickCY=r.top+r.height/2;
+  /* Measure the travel rather than assuming it. The stick shrinks on a phone,
+     and a fixed radius there would both let the knob slide outside the ring and
+     peg the input at full speed halfway through the throw. 132px wide gives
+     back the 52 this was originally tuned with. */
+  if(r.width) STICK_R=Math.max(24,r.width/2-14);
 }
 window.addEventListener('touchstart',function(e){
   if(!playing) return;
