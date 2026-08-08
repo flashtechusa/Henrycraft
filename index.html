@@ -73,7 +73,9 @@ canvas{display:block;position:fixed;inset:0}
 #palette{
   position:absolute;left:50%;transform:translateX(-50%);
   bottom:calc(env(safe-area-inset-bottom) + 14px);
-  display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:min(96vw,760px);
+  /* Wider than it used to be: 19 blocks at 760px wrapped to three rows even on
+     a big screen. At 900 it is two rows almost everywhere. */
+  display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:min(96vw,900px);
   pointer-events:auto;
 }
 .slot{
@@ -121,7 +123,9 @@ body.touch #blockBtn{
   font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
   color:var(--sun);text-align:center;margin-bottom:10px
 }
-#pickerGrid{display:grid;grid-template-columns:repeat(6,58px);gap:8px}
+/* 19 blocks. Seven across gives three rows with one slot spare; six across
+   would need a fourth row, which does not fit a phone held sideways. */
+#pickerGrid{display:grid;grid-template-columns:repeat(7,58px);gap:8px}
 #pickerGrid .slot{width:58px;height:58px}
 
 #stick{
@@ -198,7 +202,7 @@ body.touch #hint{display:none}
     bottom:calc(env(safe-area-inset-bottom) + 126px);
     width:52px;height:52px;
   }
-  #pickerGrid{grid-template-columns:repeat(6,46px)}
+  #pickerGrid{grid-template-columns:repeat(7,46px)}
   #pickerGrid .slot{width:46px;height:46px}
   .pickcard{padding:10px 12px}
   .pickhead{margin-bottom:6px;font-size:11px}
@@ -383,7 +387,10 @@ var NCX=WX/CHUNK, NCZ=WZ/CHUNK;
 var STAR_GOAL=10;
 
 var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
-    BRICK=8,GLASS=9,GOLD=10,DIAMOND=11,RAINBOW=12,WATER=13,BEDROCK=14;
+    BRICK=8,GLASS=9,GOLD=10,DIAMOND=11,RAINBOW=12,WATER=13,BEDROCK=14,
+    /* Henry's wishlist. Appended, so every id above keeps its number and old
+       saves still load - the save file stores these ids directly. */
+    COAL=15,COPPER=16,LAPIS=17,EMERALD=18,OBSIDIAN=19,ENCHANT=20,FIRE=21;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -401,8 +408,39 @@ DEFS[DIAMOND]={name:'Diamond', tiles:[12,12,12]};
 DEFS[RAINBOW] ={name:'Rainbow', tiles:[13,13,13]};
 DEFS[WATER]   ={name:'Water',   tiles:[14,14,14], transparent:true, liquid:true};
 DEFS[BEDROCK] ={name:'Bedrock', tiles:[15,15,15], unbreakable:true};
+DEFS[COAL]    ={name:'Coal',    tiles:[16,16,16]};
+DEFS[COPPER]  ={name:'Copper',  tiles:[17,17,17]};
+DEFS[LAPIS]   ={name:'Lapis',   tiles:[18,18,18]};
+DEFS[EMERALD] ={name:'Emerald', tiles:[19,19,19]};
+DEFS[OBSIDIAN]={name:'Obsidian',tiles:[20,20,20]};
+DEFS[ENCHANT] ={name:'Enchanting', tiles:[22,21,21]};
+/* Placed by the Flint & Steel palette entry. glow makes it self-lit rather than
+   shaded like ordinary terrain; see the glow group in buildChunk. Purely
+   decorative - nothing anywhere spreads it, puts it out, or takes damage from
+   it, and it digs away like any other block. */
+DEFS[FIRE]    ={name:'Flint & Steel', tiles:[23,23,23], glow:true};
 
-var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW];
+var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
+             COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
+
+/* Where each ore lives, in absolute block heights. Bedrock is y=0, so the
+   obsidian band sits directly on top of it.
+
+   Ordered rarest first: a vein only ever replaces STONE, so whatever runs first
+   gets its pick of the rock. Running coal first would let the common ores crowd
+   out the rare ones and a world could come out with no emerald in it at all.
+
+   The tests read this same table, so the depth rules and the numbers here can
+   never drift apart. */
+var ORE_BANDS=[
+  {id:OBSIDIAN, minY:1,  maxY:2,  veins:16, lo:2, hi:5},   /* deepest, small pockets */
+  {id:EMERALD,  minY:1,  maxY:4,  veins:14, lo:2, hi:4},   /* rare, deep, a real find */
+  {id:DIAMOND,  minY:1,  maxY:5,  veins:22, lo:3, hi:6},
+  {id:LAPIS,    minY:4,  maxY:11, veins:34, lo:3, hi:6},   /* middling depth */
+  {id:GOLD,     minY:1,  maxY:12, veins:42, lo:4, hi:8},
+  {id:COPPER,   minY:2,  maxY:16, veins:78, lo:5, hi:9},   /* common, upper stone */
+  {id:COAL,     minY:2,  maxY:18, veins:92, lo:5, hi:10}
+];
 
 /* ---------------- tiny utilities ---------------- */
 function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
@@ -425,7 +463,11 @@ function mulberry32(a){
 }
 
 /* ---------------- procedural texture atlas ---------------- */
-var ACOLS=4, AROWS=4, TP=32;
+/* 8x8 = 64 slots. A tile's position is derived from its index (index % ACOLS,
+   index / ACOLS) here, in the UV maths in buildChunk, in tileAverage and in
+   swatchURL, so widening the grid reflows every tile on its own and the tile
+   numbers in DEFS above stay correct. Nothing needs re-pointing by hand. */
+var ACOLS=8, AROWS=8, TP=32;
 var atlasCanvas=document.createElement('canvas');
 atlasCanvas.width=ACOLS*TP; atlasCanvas.height=AROWS*TP;
 
@@ -549,7 +591,116 @@ function buildAtlas(){
     fill(x,'#4f4f58'); speck(x,r,['#3d3d45','#63636d','#2f2f36'],130);
     blob(x,r,['#33333a','#5c5c66'],18);
   });
+
+  /* ---- Henry's wishlist blocks ----
+     The four ores share the stone base so they read as "something in the rock",
+     but each fleck colour and shape is different enough to tell apart at a
+     glance across a room, which is the actual requirement here. */
+  function stoneBase(x,r){
+    fill(x,'#8e8e96'); speck(x,r,['#82828a','#9b9ba3','#76767e'],110);
+  }
+  /* Ore flecks as fat plus-shapes, so they are not confusable with the stone
+     speckle underneath. */
+  function nuggets(x,r,cols,count,size){
+    for(var i=0;i<count;i++){
+      var cx=1+((r()*(14-size))|0), cy=1+((r()*(14-size))|0);
+      x.fillStyle=cols[0];
+      x.fillRect(cx,cy,size,size);
+      x.fillStyle=cols[1];
+      x.fillRect(cx,cy,size-1,1); x.fillRect(cx,cy,1,size-1);
+      x.fillStyle=cols[2];
+      x.fillRect(cx+1,cy+size-1,size-1,1); x.fillRect(cx+size-1,cy+1,1,size-1);
+    }
+  }
+  /* 16 coal - black lumps */
+  tile(16,function(x,r){
+    stoneBase(x,r);
+    nuggets(x,r,['#26262c','#3d3d47','#141418'],7,4);
+    nuggets(x,r,['#1b1b20','#333339','#0e0e11'],4,2);
+  });
+  /* 17 copper - orange-brown, with a hint of the green it weathers to */
+  tile(17,function(x,r){
+    stoneBase(x,r);
+    nuggets(x,r,['#c1703a','#e29055','#8e4d24'],7,4);
+    nuggets(x,r,['#6fae8c','#8cc7a4','#4d8a68'],3,2);
+  });
+  /* 18 lapis - deep blue, round-ish clusters */
+  tile(18,function(x,r){
+    stoneBase(x,r);
+    nuggets(x,r,['#2547a8','#3f6ad4','#16307a'],8,4);
+    nuggets(x,r,['#5b8bea','#82abf5','#3a63c0'],4,2);
+  });
+  /* 19 emerald - bright green columns, deliberately the flashiest ore */
+  tile(19,function(x,r){
+    stoneBase(x,r);
+    for(var i=0;i<5;i++){
+      var cx=2+((r()*11)|0), cy=2+((r()*10)|0);
+      x.fillStyle='#17b45c'; x.fillRect(cx,cy,3,4);
+      x.fillStyle='#4fe28d'; x.fillRect(cx,cy,2,1); x.fillRect(cx,cy,1,3);
+      x.fillStyle='#0c7f3d'; x.fillRect(cx+1,cy+3,2,1); x.fillRect(cx+2,cy+1,1,3);
+      x.fillStyle='#bdf7d6'; x.fillRect(cx,cy,1,1);
+    }
+  });
+  /* 20 obsidian - near-black purple glass, no stone showing */
+  tile(20,function(x,r){
+    fill(x,'#150f26');
+    speck(x,r,['#241a3d','#0d0918','#2f2350'],120);
+    /* a few sharp highlights so it reads as glassy rather than as a hole */
+    x.fillStyle='#4b3a7a';
+    for(var i=0;i<7;i++){
+      var sx=(r()*14)|0, sy=(r()*13)|0;
+      x.fillRect(sx,sy,1,2); x.fillRect(sx,sy,2,1);
+    }
+    x.fillStyle='#6b56a8'; x.fillRect(3,3,1,1); x.fillRect(11,9,1,1);
+  });
+  /* 21 enchanting table side - obsidian base bound in red cloth */
+  tile(21,function(x,r){
+    fill(x,'#191231'); speck(x,r,['#241a3d','#0f0a1e'],70);
+    x.fillStyle='#7d1f2b'; x.fillRect(0,2,16,3);
+    x.fillStyle='#a8303f'; x.fillRect(0,2,16,1);
+    x.fillStyle='#5a1420'; x.fillRect(0,4,16,1);
+    x.fillStyle='#d8c48a';
+    for(var i=1;i<16;i+=4) x.fillRect(i,3,1,1);
+  });
+  /* 22 enchanting table top - the open book, clearly its own face */
+  tile(22,function(x,r){
+    fill(x,'#191231'); speck(x,r,['#241a3d','#0f0a1e'],60);
+    x.fillStyle='#f2e6c8'; x.fillRect(2,4,12,8);
+    x.fillStyle='#cdbb96'; x.fillRect(2,11,12,1);
+    x.fillStyle='#7d1f2b'; x.fillRect(7,3,2,10);
+    x.fillStyle='#a8303f'; x.fillRect(7,3,2,1);
+    x.fillStyle='#8c7fb5';
+    x.fillRect(3,6,3,1); x.fillRect(3,8,4,1);
+    x.fillRect(10,6,3,1); x.fillRect(10,8,4,1);
+    x.fillStyle='#ffd94a'; x.fillRect(5,1,1,1); x.fillRect(11,2,1,1);
+  });
+  /* 23 fire - redrawn on a timer by animateFire(); this is frame 0 */
+  tile(23,function(x,r){ drawFire(x,0); });
 }
+
+/* Flint & Steel's flame. Kept as its own function so the animation can redraw
+   just this tile without rebuilding the whole atlas. */
+function drawFire(x,frame){
+  var r=mulberry32(1337+frame*7919);
+  x.fillStyle='#7a1b06'; x.fillRect(0,0,16,16);
+  /* Tongues of flame rising from the bottom edge, heights shuffled per frame. */
+  var cols=['#ff4d1a','#ff8a1f','#ffc43d','#ffe98a'];
+  for(var i=0;i<16;i++){
+    var base=9+Math.sin((i+frame*1.7)*0.9)*3.2+r()*2.6;
+    var h=Math.max(3,Math.min(16,base|0));
+    for(var y=0;y<h;y++){
+      /* hottest at the bottom, palest at the tip */
+      var t=y/h;
+      var ci = t<0.30?0 : (t<0.58?1 : (t<0.84?2:3));
+      x.fillStyle=cols[ci];
+      x.fillRect(i,16-1-y,1,1);
+    }
+  }
+  /* a couple of drifting sparks */
+  x.fillStyle='#fff3bd';
+  for(var s=0;s<3;s++) x.fillRect((r()*16)|0,(r()*7)|0,1,1);
+}
+
 buildAtlas();
 
 function tileAverage(tileIdx){
@@ -691,24 +842,33 @@ function generateWorld(){
     }
   }
 
-  /* buried treasure - gold nearer the surface, diamond down deep.
-     Sample until we actually land in stone: on a low, flat world the old
-     approach skipped most columns and left almost nothing to find. */
+  /* buried treasure. Same rejection sampling as before - keep picking points
+     until one lands in stone, because on a low flat world sampling by column
+     skipped most of the map and left almost nothing to find - but now run once
+     per ore with its own depth band and vein budget, so no world can come out
+     missing an ore just from bad luck.
+
+     Lumps are clamped to the band as well as the seed point, which is what
+     makes "obsidian only near bedrock" and "emerald only deep" exact rather
+     than approximate. */
   var ornd=mulberry32((seed^0x0d1a3)>>>0);
-  var wantVeins=160+((ornd()*70)|0), madeVeins=0, tries=0;
-  while(madeVeins<wantVeins && tries<wantVeins*14){
-    tries++;
-    var ox=2+Math.floor(ornd()*(WX-4)), oz=2+Math.floor(ornd()*(WZ-4));
-    var oy=1+Math.floor(ornd()*(WY-16));
-    if(!inside(ox,oy,oz) || blocks[idx(ox,oy,oz)]!==STONE) continue;
-    var kind=(oy<=5 && ornd()<0.6)?DIAMOND:GOLD;
-    var lumps=4+((ornd()*6)|0);
-    for(var k=0;k<lumps;k++){
-      var gx=ox+((ornd()*3)|0)-1, gy=oy+((ornd()*3)|0)-1, gz=oz+((ornd()*3)|0)-1;
-      if(!inside(gx,gy,gz)||gy<1) continue;
-      if(blocks[idx(gx,gy,gz)]===STONE) blocks[idx(gx,gy,gz)]=kind;
+  for(var oi=0;oi<ORE_BANDS.length;oi++){
+    var band=ORE_BANDS[oi];
+    var made=0, tries=0, budget=band.veins*40;
+    while(made<band.veins && tries<budget){
+      tries++;
+      var ox=2+Math.floor(ornd()*(WX-4)), oz=2+Math.floor(ornd()*(WZ-4));
+      var oy=band.minY+Math.floor(ornd()*(band.maxY-band.minY+1));
+      if(!inside(ox,oy,oz) || blocks[idx(ox,oy,oz)]!==STONE) continue;
+      var lumps=band.lo+((ornd()*(band.hi-band.lo+1))|0);
+      for(var k=0;k<lumps;k++){
+        var gx=ox+((ornd()*3)|0)-1, gy=oy+((ornd()*3)|0)-1, gz=oz+((ornd()*3)|0)-1;
+        if(!inside(gx,gy,gz)) continue;
+        if(gy<band.minY||gy>band.maxY) continue;
+        if(blocks[idx(gx,gy,gz)]===STONE) blocks[idx(gx,gy,gz)]=band.id;
+      }
+      made++;
     }
-    madeVeins++;
   }
 
   /* trees */
@@ -764,6 +924,37 @@ var matOpaque=new THREE.MeshLambertMaterial({map:atlasTex,vertexColors:true});
 var matTrans=new THREE.MeshLambertMaterial({
   map:atlasTex,vertexColors:true,transparent:true,depthWrite:false,side:THREE.DoubleSide
 });
+/* Basic rather than Lambert: it ignores scene lighting entirely, so the flame
+   shows at full texture brightness and reads as giving off light instead of
+   being lit. That is the whole trick behind the glow. */
+var matGlow=new THREE.MeshBasicMaterial({map:atlasTex,vertexColors:true});
+
+/* ---- flame animation ----------------------------------------------------
+   Only tile 23 is redrawn, then the atlas is re-uploaded. The whole atlas is
+   256x256, so a re-upload at this rate costs nothing, and it avoids having to
+   re-mesh chunks to swap UVs between frames. Skipped entirely when there is no
+   fire in the world, which is the normal case. */
+var fireFrame=0, fireClock=0, fireCount=0;
+function animateFire(dt){
+  if(fireCount<=0) return;
+  fireClock+=dt;
+  if(fireClock<0.11) return;                 /* ~9 flickers a second */
+  fireClock=0;
+  fireFrame=(fireFrame+1)&7;
+  var c=atlasCanvas.getContext('2d');
+  var tx=(23%ACOLS)*TP, ty=Math.floor(23/ACOLS)*TP;
+  c.save();
+  c.beginPath(); c.rect(tx,ty,TP,TP); c.clip();
+  c.translate(tx,ty); c.scale(TP/16,TP/16);
+  c.imageSmoothingEnabled=false;
+  drawFire(c,fireFrame);
+  c.restore();
+  atlasTex.needsUpdate=true;
+}
+function recountFire(){
+  fireCount=0;
+  for(var i=0;i<blocks.length;i++) if(blocks[i]===FIRE) fireCount++;
+}
 
 scene.add(new THREE.HemisphereLight(0xdff2ff,0x6f8a5a,0.80));
 var sun=new THREE.DirectionalLight(0xfff4d6,0.55);
@@ -828,7 +1019,7 @@ var PAD=0.03;
 
 var chunks=[];
 for(var ci=0;ci<NCX;ci++) for(var cj=0;cj<NCZ;cj++)
-  chunks.push({cx:ci,cz:cj,opaque:null,trans:null,dirty:true});
+  chunks.push({cx:ci,cz:cj,opaque:null,trans:null,glow:null,dirty:true});
 
 function chunkAt(x,z){
   var cx=Math.floor(x/CHUNK), cz=Math.floor(z/CHUNK);
@@ -847,6 +1038,7 @@ function markDirty(x,y,z){
 function buildChunk(ch){
   var P=[],N=[],U=[],C=[],I=[];      // opaque buffers
   var tP=[],tN=[],tU=[],tC=[],tI=[]; // transparent buffers
+  var gP=[],gN=[],gU=[],gC=[],gI=[]; // self-lit buffers (fire)
   var x0=ch.cx*CHUNK, z0=ch.cz*CHUNK;
 
   for(var y=0;y<WY;y++)
@@ -854,7 +1046,7 @@ function buildChunk(ch){
   for(var x=x0;x<x0+CHUNK;x++){
     var b=blocks[idx(x,y,z)];
     if(b===AIR) continue;
-    var def=DEFS[b], trans=!!def.transparent;
+    var def=DEFS[b], trans=!!def.transparent, glow=!!def.glow;
     var tint=0.955+hash2(x*31+y*17,z*13+y*7)*0.09;
 
     for(var f=0;f<6;f++){
@@ -869,7 +1061,8 @@ function buildChunk(ch){
       var u0=(tx+PAD)/ACOLS, u1=(tx+1-PAD)/ACOLS;
       var v1=1-(ty+PAD)/AROWS, v0=1-(ty+1-PAD)/AROWS;
 
-      var P_=trans?tP:P, N_=trans?tN:N, U_=trans?tU:U, C_=trans?tC:C, I_=trans?tI:I;
+      var P_=glow?gP:(trans?tP:P), N_=glow?gN:(trans?tN:N), U_=glow?gU:(trans?tU:U),
+          C_=glow?gC:(trans?tC:C), I_=glow?gI:(trans?tI:I);
       var vstart=P_.length/3;
       var ao=[0,0,0,0];
 
@@ -888,7 +1081,9 @@ function buildChunk(ch){
         var co=isOpaque(nx+F.u[0]*su+F.v[0]*sv, ny+F.u[1]*su+F.v[1]*sv, nz+F.u[2]*su+F.v[2]*sv);
         var lvl=(s1&&s2)?0:(3-((s1?1:0)+(s2?1:0)+(co?1:0)));
         ao[k]=lvl;
-        var sh=F.shade*AO_LEVEL[lvl]*tint;
+        /* Fire is lit by itself, so it keeps full brightness on every face
+           instead of picking up face shading and ambient occlusion. */
+        var sh=glow?1:(F.shade*AO_LEVEL[lvl]*tint);
         C_.push(sh,sh,sh);
       }
 
@@ -918,6 +1113,7 @@ function buildChunk(ch){
 
   ch.opaque=finish(ch.opaque,P,N,U,C,I,matOpaque);
   ch.trans =finish(ch.trans,tP,tN,tU,tC,tI,matTrans);
+  ch.glow  =finish(ch.glow, gP,gN,gU,gC,gI,matGlow);
   ch.dirty=false;
 }
 
@@ -929,6 +1125,9 @@ function flushDirty(){
 function setBlock(x,y,z,id){
   if(!inside(x,y,z)) return false;
   if(blocks[idx(x,y,z)]===id) return false;
+  /* Keep the flame count straight so animateFire can idle when nothing is lit. */
+  if(blocks[idx(x,y,z)]===FIRE) fireCount--;
+  if(id===FIRE) fireCount++;
   blocks[idx(x,y,z)]=id;
   edits[x+','+y+','+z]=id;
   markDirty(x,y,z);
@@ -1196,6 +1395,214 @@ function updateAnimals(dt){
     var legs=a.mesh.userData.legs;
     legs[0].rotation.x=sw; legs[3].rotation.x=sw;
     legs[1].rotation.x=-sw; legs[2].rotation.x=-sw;
+  }
+}
+
+/* ---------------- aquatic animals ----------------
+   Deliberately a separate list and a separate update from the land animals:
+   those walk on a height field and steer towards Henry, which is wrong in every
+   respect for something that lives in a water volume. Nothing below touches
+   animals[] or updateAnimals().
+
+   The one rule that outranks everything else here: neither of these may ever
+   move towards Henry. A shark that follows a five-year-old around is the single
+   worst thing this game could do, so the shark does not look at his position at
+   all - it swims a fixed circuit worked out when it spawns. */
+var fish=[];
+var AXOLOTL=0, SHARK=1;
+
+/* The run of water in a column, or null if there is none. */
+function waterColumn(x,z){
+  if(x<0||x>=WX||z<0||z>=WZ) return null;
+  var top=-1;
+  for(var y=WY-1;y>=0;y--){ if(getBlock(x,y,z)===WATER){ top=y; break; } }
+  if(top<0) return null;
+  var bottom=top;
+  while(bottom-1>=1 && getBlock(x,bottom-1,z)===WATER) bottom--;
+  return {top:top,bottom:bottom,depth:top-bottom+1};
+}
+function isWaterAt(x,y,z){
+  return getBlock(Math.floor(x),Math.floor(y),Math.floor(z))===WATER;
+}
+
+function buildFish(kind){
+  var g=new THREE.Group();
+  function box(w,h,d,col){
+    return new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
+                          new THREE.MeshLambertMaterial({color:srgb(col)}));
+  }
+  var tail;
+  if(kind===AXOLOTL){
+    var PINK=0xf9a8c8, PINK_DK=0xe07fa8, FRILL=0xff7fb0;
+    var body=box(0.20,0.18,0.40,PINK); g.add(body);
+    var head=box(0.24,0.20,0.20,PINK); head.position.z=0.28; g.add(head);
+    /* three frilly gills each side - the thing that makes an axolotl an axolotl */
+    [-1,1].forEach(function(s){
+      for(var i=0;i<3;i++){
+        var f=box(0.05,0.05,0.16,FRILL);
+        f.position.set(s*0.14,0.06-i*0.055,0.26);
+        f.rotation.y=s*0.5;
+        g.add(f);
+      }
+    });
+    var eyeL=box(0.05,0.05,0.04,0x1b1420); eyeL.position.set(-0.08,0.07,0.38); g.add(eyeL);
+    var eyeR=box(0.05,0.05,0.04,0x1b1420); eyeR.position.set( 0.08,0.07,0.38); g.add(eyeR);
+    /* smile, because he is five */
+    var mouth=box(0.10,0.02,0.02,0xc25f89); mouth.position.set(0,-0.02,0.385); g.add(mouth);
+    tail=box(0.04,0.22,0.22,PINK_DK); tail.position.z=-0.30; g.add(tail);
+    var fin=box(0.05,0.16,0.26,PINK_DK); fin.position.set(0,0.10,-0.08); g.add(fin);
+  } else {
+    var GREY=0x8d9aa8, GREY_DK=0x66727e, BELLY=0xe8eef2;
+    var body=box(0.44,0.40,1.10,GREY); g.add(body);
+    var belly=box(0.40,0.12,1.00,BELLY); belly.position.y=-0.17; g.add(belly);
+    var snout=box(0.30,0.26,0.30,GREY); snout.position.z=0.66; g.add(snout);
+    var dorsal=box(0.07,0.30,0.34,GREY_DK); dorsal.position.set(0,0.32,-0.02); g.add(dorsal);
+    [-1,1].forEach(function(s){
+      var pec=box(0.36,0.06,0.20,GREY_DK);
+      pec.position.set(s*0.34,-0.10,0.18);
+      pec.rotation.z=s*0.35;
+      g.add(pec);
+    });
+    /* Friendly face on purpose: round eyes, no mouth line, no teeth. */
+    var eyeL=box(0.07,0.07,0.05,0x14181e); eyeL.position.set(-0.15,0.10,0.80); g.add(eyeL);
+    var eyeR=box(0.07,0.07,0.05,0x14181e); eyeR.position.set( 0.15,0.10,0.80); g.add(eyeR);
+    tail=box(0.06,0.46,0.30,GREY_DK); tail.position.z=-0.72; g.add(tail);
+  }
+  g.userData.tail=tail;
+  return g;
+}
+
+function spawnFish(){
+  fish.forEach(function(f){ scene.remove(f.mesh); });
+  fish=[];
+  var rnd=mulberry32((seed^0x5eaf00d)>>>0);
+  var want=7, tries=0;
+
+  while(fish.length<want && tries<4000){
+    tries++;
+    var x=4+rnd()*(WX-8), z=4+rnd()*(WZ-8);
+    var col=waterColumn(Math.floor(x),Math.floor(z));
+    if(!col || col.depth<3) continue;                 /* 3 blocks of depth minimum */
+
+    var kind=(fish.length%3===2)?SHARK:AXOLOTL;       /* a couple of sharks, mostly axolotls */
+    /* Keep well inside the water so the body never pokes through the surface
+       or the bed. */
+    var yMin=col.bottom+0.5, yMax=col.top+0.5;
+    if(yMax-yMin<0.6) continue;
+    var y=yMin+rnd()*(yMax-yMin);
+
+    var f={
+      kind:kind, mesh:null, x:x, y:y, z:z,
+      yaw:rnd()*6.283, phase:rnd()*6.283,
+      speed:kind===SHARK?0.75:0.45,
+      timer:rnd()*2,
+      yMin:yMin, yMax:yMax,
+      bobBase:y
+    };
+
+    if(kind===SHARK){
+      /* A closed loop, fully checked before it is ever used: every point on it
+         must be water at least 3 deep. Because the circuit is fixed here at
+         spawn, the shark's path cannot depend on Henry.
+
+         Sampled finer than one block. At 24 samples a radius-5.5 circle leaves
+         1.4 blocks between checks, which steps clean over a one-block sandbar
+         and drops the shark onto it mid-lap.
+
+         The usable height is the intersection over the whole lap, not just the
+         spawn column: the far side of the circuit can be shallower, and a bob
+         sized for here would push the shark up through the surface there. */
+      var ok=false;
+      for(var rad=5.5;rad>=2.0;rad-=0.5){
+        var samples=Math.max(48,Math.ceil(6.283185*rad/0.35));
+        var lo=-1e9, hi=1e9, good=true;
+        for(var a=0;a<samples;a++){
+          var ang=a/samples*6.283185;
+          var pc=waterColumn(Math.floor(x+Math.cos(ang)*rad),
+                             Math.floor(z+Math.sin(ang)*rad));
+          if(!pc || pc.depth<3){ good=false; break; }
+          lo=Math.max(lo,pc.bottom+0.60);
+          hi=Math.min(hi,pc.top+0.40);
+        }
+        if(good && hi-lo>=0.30){ f.radius=rad; f.yMin=lo; f.yMax=hi; ok=true; break; }
+      }
+      if(!ok) continue;
+      f.cx=x; f.cz=z;
+      f.orbit=rnd()*6.283;
+      f.dir=rnd()<0.5?-1:1;
+      f.bobBase=(f.yMin+f.yMax)/2;
+      f.bobAmp=Math.min(0.22,(f.yMax-f.yMin)/2);
+      f.y=f.bobBase;
+      f.x=f.cx+Math.cos(f.orbit)*f.radius;
+      f.z=f.cz+Math.sin(f.orbit)*f.radius;
+      /* one lap, in seconds - the tests use it to measure over whole cycles */
+      f.period=6.283185*f.radius/f.speed;
+    }
+
+    f.mesh=buildFish(kind);
+    f.mesh.position.set(f.x,f.y,f.z);
+    scene.add(f.mesh);
+    fish.push(f);
+  }
+}
+
+function updateFish(dt,t){
+  for(var i=0;i<fish.length;i++){
+    var f=fish[i];
+
+    var step=f.speed*dt, nx, nz, ny, col;
+
+    if(f.kind===SHARK){
+      /* Pure clockwork: the angle advances, the position follows. Henry's
+         position is not read anywhere in this branch, at all. */
+      var nextOrbit=f.orbit+f.dir*(f.speed/f.radius)*dt;
+      nx=f.cx+Math.cos(nextOrbit)*f.radius;
+      nz=f.cz+Math.sin(nextOrbit)*f.radius;
+      ny=clamp(f.bobBase+Math.sin(t*0.5+f.phase)*f.bobAmp,f.yMin,f.yMax);
+      if(isWaterAt(nx,ny,nz)){
+        f.orbit=nextOrbit; f.x=nx; f.y=ny; f.z=nz;
+      } else {
+        /* Belt and braces for a circuit the spawn check somehow let through:
+           turn back along the same loop. Reversing depends only on the shape of
+           the lake, never on where Henry is. */
+        f.dir=-f.dir;
+      }
+      /* tangent of the circle, plus a quarter turn because +Z is forward */
+      f.yaw=Math.atan2(-Math.sin(f.orbit)*f.dir,-Math.cos(f.orbit)*f.dir)+Math.PI/2;
+    } else {
+      /* Axolotls potter about. They ignore Henry too - nothing in this game
+         follows him. */
+      f.timer-=dt;
+      if(f.timer<=0){ f.timer=1.5+Math.random()*3; f.yaw+=(Math.random()-0.5)*2.2; }
+
+      nx=f.x+Math.sin(f.yaw)*step;
+      nz=f.z+Math.cos(f.yaw)*step;
+      col=waterColumn(Math.floor(nx),Math.floor(nz));
+      if(col){
+        /* Height is taken from the column being moved into, not the one left
+           behind, so swimming towards a shallow shore lowers the fish instead
+           of beaching it. */
+        var lo=col.bottom+0.45, hi=col.top+0.55;
+        ny=clamp(f.bobBase+Math.sin(t*1.6+f.phase)*0.22,lo,hi);
+        if(isWaterAt(nx,ny,nz)){
+          f.x=nx; f.y=ny; f.z=nz;
+          f.yMin=lo; f.yMax=hi;
+          f.bobBase=clamp(f.bobBase,lo,hi);
+        } else { f.yaw+=2.4; f.timer=0.8; }
+      } else { f.yaw+=2.4; f.timer=0.8; }
+    }
+
+    /* Hard invariant, whatever happened above: the body stays inside the water
+       column it is standing in. Nothing here can put a fish on land or in air. */
+    col=waterColumn(Math.floor(f.x),Math.floor(f.z));
+    if(col) f.y=clamp(f.y,col.bottom+0.40,col.top+0.55);
+
+    f.mesh.position.set(f.x,f.y,f.z);
+    f.mesh.rotation.y=f.yaw;
+    f.mesh.rotation.z=Math.sin(t*1.3+f.phase)*0.07;
+    if(f.mesh.userData.tail){
+      f.mesh.userData.tail.rotation.y=Math.sin(t*(f.kind===SHARK?2.2:3.4)+f.phase)*0.45;
+    }
   }
 }
 
@@ -1611,7 +2018,19 @@ function buildPalette(){
     });
   });
   refreshBlockBtn();
+  layoutHint();
 }
+/* The desktop palette wraps, and how many rows it takes depends on the window
+   width, so the hint line above it cannot sit at a fixed offset - at 19 blocks
+   it ended up printed straight through the middle of the palette. Measure and
+   place it. Both are hidden on touch, so there is nothing to do there. */
+function layoutHint(){
+  var pal=el('palette'), hint=el('hint');
+  if(!pal||!hint||isTouch) return;
+  var h=pal.getBoundingClientRect().height;
+  if(h>0) hint.style.bottom='calc(env(safe-area-inset-bottom) + '+Math.round(h+26)+'px)';
+}
+
 function refreshBlockBtn(){
   var b=el('blockBtn');
   b.style.backgroundImage='url('+swatchURL(DEFS[selected].tiles[2])+')';
@@ -1863,7 +2282,7 @@ window.addEventListener('resize',function(){
   camera.aspect=window.innerWidth/window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth,window.innerHeight);
-  checkOrientation(); stickCenter();
+  checkOrientation(); stickCenter(); layoutHint();
 });
 window.addEventListener('orientationchange',function(){ setTimeout(checkOrientation,300); });
 
@@ -1950,6 +2369,8 @@ function newWorld(){
   rebuildAll();
   placeStars(null);
   spawnAnimals();
+  spawnFish();
+  recountFire();
   findSpawn();
   setFly(false);
   scheduleSave(); doSave();
@@ -2009,7 +2430,9 @@ function frame(){
       henry.visible=true;
     }
     updateAnimals(dt);
+    updateFish(dt,now);
     updateStars(dt,now);
+    animateFire(dt);
     flushDirty();
   }
   updateParticles(dt);
@@ -2045,6 +2468,10 @@ function boot(){
     rebuildAll();
     placeStars(save?save.stars:null);
     spawnAnimals();
+    spawnFish();
+    /* A restored save can contain fire Henry lit yesterday, so count after the
+       edits have gone in rather than assuming zero. */
+    recountFire();
     if(save && save.p){
       player.x=save.p[0]; player.y=save.p[1]; player.z=save.p[2]; yaw=save.p[3]||0;
       if(!boxFree(player.x,player.y,player.z)) findSpawn();
@@ -2057,6 +2484,127 @@ function boot(){
   frame();
 }
 boot();
+
+/* ---------------- test hook ----------------
+   Everything above lives inside this closure, so tools/test-game.js has no way
+   to look at the world, the ore, the fish or the fire without a door. This is
+   that door: read-only accessors plus the two helpers a test needs to set up a
+   scenario. Nothing in the game reads window.__henrycraft, so deleting this
+   block changes no behaviour - it only blinds the tests. */
+window.__henrycraft={
+  ids:{AIR:AIR,GRASS:GRASS,DIRT:DIRT,STONE:STONE,SAND:SAND,WOOD:WOOD,LEAVES:LEAVES,
+       PLANKS:PLANKS,BRICK:BRICK,GLASS:GLASS,GOLD:GOLD,DIAMOND:DIAMOND,RAINBOW:RAINBOW,
+       WATER:WATER,BEDROCK:BEDROCK,COAL:COAL,COPPER:COPPER,LAPIS:LAPIS,EMERALD:EMERALD,
+       OBSIDIAN:OBSIDIAN,ENCHANT:ENCHANT,FIRE:FIRE},
+  DEFS:DEFS,
+  PALETTE:PALETTE,
+  ORE_BANDS:ORE_BANDS,
+  atlas:function(){ return {cols:ACOLS,rows:AROWS,tile:TP}; },
+  dims:function(){ return {WX:WX,WY:WY,WZ:WZ,waterLevel:WATER_LEVEL}; },
+  ready:function(){ return ready; },
+  getBlock:getBlock,
+  setBlock:setBlock,
+  surfaceY:surfaceY,
+  waterColumn:waterColumn,
+  selected:function(){ return selected; },
+  selectBlock:selectBlock,
+  player:function(){ return {x:player.x,y:player.y,z:player.z}; },
+  movePlayer:function(x,y,z){ player.x=x; player.y=y; player.z=z; player.vx=player.vy=player.vz=0; },
+  fish:function(){
+    return fish.map(function(f){
+      return {kind:f.kind===SHARK?'shark':'axolotl',x:f.x,y:f.y,z:f.z,
+              radius:f.radius||null, period:f.period||null};
+    });
+  },
+  animals:function(){ return animals.length; },
+  fireCount:function(){ return fireCount; },
+  /* Rebuild the world on a chosen seed. Used to sweep many seeds in one page
+     load instead of reloading the browser 20 times. */
+  loadSeed:function(s){
+    seed=s>>>0; starSeed=seed; edits={};
+    generateWorld();
+    for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
+    rebuildAll();
+    placeStars(null); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
+    return seed;
+  },
+  /* Histogram of every block id in the world, plus the lowest and highest y
+     each id appears at, which is what the depth-band assertions need. */
+  census:function(){
+    var out={};
+    for(var y=0;y<WY;y++) for(var z=0;z<WZ;z++) for(var x=0;x<WX;x++){
+      var b=blocks[idx(x,y,z)];
+      if(b===AIR) continue;
+      var e=out[b]||(out[b]={count:0,minY:1e9,maxY:-1});
+      e.count++;
+      if(y<e.minY) e.minY=y;
+      if(y>e.maxY) e.maxY=y;
+    }
+    return out;
+  },
+  /* Advance the aquatic and fire systems by hand, through the very same
+     updateFish/animateFire the render loop calls. Sixty seconds of play across
+     twenty seeds is 36,000 steps, which runs in a moment here and would be
+     twenty minutes of wall clock at real frame rate.
+
+     Records every step where a fish is not inside a water block, and samples
+     each shark's distance to Henry so a test can check that it never trends
+     towards him. */
+  simulate:function(seconds,dt){
+    dt=dt||1/30;
+    var steps=Math.max(1,Math.round(seconds/dt));
+    /* 10 Hz. Denser than it looks like it needs to be: the shark test averages
+       distance over a lap, and the error in that average scales with the sample
+       spacing, so a coarse rate leaves enough noise to swamp the thing being
+       measured. */
+    var sampleEvery=Math.max(1,Math.round(0.1/dt));
+    var t=0, violations=[], samples=[], i, f;
+    for(var s=0;s<steps;s++){
+      t+=dt;
+      updateFish(dt,t);
+      animateFire(dt);
+      for(i=0;i<fish.length;i++){
+        f=fish[i];
+        var b=getBlock(Math.floor(f.x),Math.floor(f.y),Math.floor(f.z));
+        if(b!==WATER){
+          if(violations.length<40){
+            violations.push({
+              step:s, t:+t.toFixed(2), kind:f.kind===SHARK?'shark':'axolotl',
+              x:+f.x.toFixed(2), y:+f.y.toFixed(2), z:+f.z.toFixed(2),
+              block:(DEFS[b]?DEFS[b].name:'air')
+            });
+          } else { violations.push(1); }
+        }
+      }
+      if(s%sampleEvery===0){
+        for(i=0;i<fish.length;i++){
+          f=fish[i];
+          if(f.kind!==SHARK) continue;
+          samples.push({i:i,t:+t.toFixed(2),period:f.period,
+            d:+Math.hypot(player.x-f.x,player.y-f.y,player.z-f.z).toFixed(4),
+            /* the path itself, so a test can prove it is player-independent */
+            x:+f.x.toFixed(4),y:+f.y.toFixed(4),z:+f.z.toFixed(4)});
+        }
+      }
+    }
+    return {steps:steps, seconds:steps*dt, fish:fish.length,
+            violationCount:violations.length,
+            violations:violations.filter(function(v){return typeof v==='object';}),
+            sharkSamples:samples};
+  },
+  /* Straight down from a surface column: does the shaft pass anything worth
+     finding? Mirrors what Q (dig down) actually walks through. */
+  digDownFinds:function(x,z){
+    var ORES=[COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,GOLD,DIAMOND];
+    var top=surfaceY(x,z), hitOre=null, hitCave=false;
+    for(var y=top-1;y>=1;y--){
+      var b=getBlock(x,y,z);
+      if(b===AIR) hitCave=true;
+      if(ORES.indexOf(b)>=0 && hitOre===null) hitOre=b;
+    }
+    return {ore:hitOre,cave:hitCave};
+  }
+};
 
 })();
 </script>

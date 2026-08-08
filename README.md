@@ -21,6 +21,26 @@ and only the repo owner can do it:
 
 Wait a minute or two, then open the play link. After this it stays on for good.
 
+## What's in the world
+
+**19 blocks** to build with: grass, dirt, stone, sand, wood, leaves, planks,
+brick, glass, gold, diamond, rainbow, coal, copper, lapis, emerald, obsidian, an
+enchanting table, and Flint &amp; Steel.
+
+**Ore to dig for.** Coal and copper are common in the upper rock, lapis sits
+mid-depth, gold a bit deeper, and diamond, emerald and obsidian are down near the
+bedrock — obsidian only in the bottom two layers. Digging straight down from a
+random spot hits ore or a cave about 92% of the time.
+
+**Flint &amp; Steel** places a flickering fire block. It is purely decorative: it
+never spreads, never goes out, never hurts anything, and digs away like any other
+block.
+
+**Animals.** Pigs, sheep and cows wander the land. Axolotls and sharks swim in
+any water at least three blocks deep. Nothing in this game can hurt Henry, and
+nothing chases him — the shark in particular swims a fixed circuit worked out
+when it spawns and never reads his position at all.
+
 ## Controls
 
 **Computer** — `W A S D` walk, mouse looks, click digs, right-click builds,
@@ -99,5 +119,19 @@ There is no Android toolchain needed locally — GitHub builds it.
 build, so the app cannot drift from the web version. Nothing under
 `android/app/src/main/assets/` is committed.
 
-Run `bash tools/check.sh` to verify the whole setup. Two of its checks need a
+Run `bash tools/check.sh` to verify the packaging setup. Two of its checks need a
 real Android build, so they only pass in CI.
+
+## Testing the game itself
+
+`node tools/test-game.js` drives the real `index.html` in headless Chromium and
+asserts against the live world. It needs Playwright; set `PLAYWRIGHT_PATH` if it
+is installed somewhere unusual. It covers the atlas and UV bounds, the palette,
+ore generation and depth bands across 20 seeds, that no fish ever leaves the
+water over a minute of simulation per seed, that the shark's path does not depend
+on where Henry is, that fire never spreads, and the control layout at phone and
+desktop sizes.
+
+The game exposes `window.__henrycraft` purely for that harness — read-only
+accessors plus a couple of helpers for setting up a scenario. Nothing in the game
+reads it, so deleting it changes no behaviour; it only blinds the tests.
