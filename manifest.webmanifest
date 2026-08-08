@@ -1,0 +1,25 @@
+{
+  "name": "Henry's Block Adventure",
+  "short_name": "Henry Block",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#7AC1EE",
+  "theme_color": "#123a63",
+  "description": "A gentle blocky world to explore, dig and build in. No enemies, no losing.",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    }
+  ]
+}

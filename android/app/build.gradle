@@ -58,17 +58,30 @@ dependencies {
 // version. Nothing under src/main/assets/ is committed - see .gitignore.
 // ---------------------------------------------------------------------------
 def gameHtml = rootProject.file('../index.html')
+// index.html links these as siblings. Without them in assets the WebView would
+// fire four requests that 404 - harmless, since the app has a real launcher
+// icon and no use for a web manifest, but there is no reason to ship a page
+// that asks for files that are not there.
+def webExtras = ['manifest.webmanifest', 'apple-touch-icon.png',
+                 'icon-192.png', 'icon-512.png'].collect { rootProject.file("../$it") }
 
 def copyGameHtml = tasks.register('copyGameHtml', Copy) {
-    description = 'Copies the repo-root index.html into the app assets.'
+    description = 'Copies the repo-root index.html and its icons into the app assets.'
     group = 'build'
     from gameHtml
+    from webExtras
     into layout.projectDirectory.dir('src/main/assets')
     doFirst {
         if (!gameHtml.exists()) {
             throw new GradleException(
                 "index.html not found at ${gameHtml.canonicalPath} - " +
                 "the APK would ship with no game in it.")
+        }
+        webExtras.each { f ->
+            if (!f.exists()) {
+                throw new GradleException(
+                    "${f.name} not found at ${f.canonicalPath} - index.html links to it.")
+            }
         }
     }
 }

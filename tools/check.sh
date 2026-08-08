@@ -127,6 +127,79 @@ else
       "DOM storage on a file:// origin is unreliable and would break saving"
 fi
 
+# --- 7 -----------------------------------------------------------------------
+# The home-screen icon was broken because these were 64x64 data URIs: iOS
+# ignores a data-URI apple-touch-icon and draws a letter instead, and with no
+# manifest at all Amazon Kids had nothing to use either. Check the real files.
+echo "7. home-screen icons and web manifest"
+png_size() {
+  python3 - "$1" <<'PY'
+import struct, sys
+with open(sys.argv[1], 'rb') as f:
+    head = f.read(24)
+if head[:8] != b'\x89PNG\r\n\x1a\n':
+    print('notpng'); sys.exit()
+w, h = struct.unpack('>II', head[16:24])
+print(f'{w}x{h}')
+PY
+}
+icon_fail=0
+for spec in "apple-touch-icon.png:180x180" "icon-192.png:192x192" "icon-512.png:512x512"; do
+  f=${spec%%:*}; want=${spec##*:}
+  if [[ ! -f "$f" ]]; then bad "$f is missing"; icon_fail=1; continue; fi
+  got=$(png_size "$f")
+  if [[ "$got" == "$want" ]]; then ok "$f is a real PNG at $got"
+  else bad "$f is $got, expected $want"; icon_fail=1; fi
+done
+
+if grep -q 'rel="apple-touch-icon"[^>]*href="data:' index.html; then
+  bad "apple-touch-icon is still a data URI" "iOS ignores these and draws a letter instead"
+elif grep -q 'rel="apple-touch-icon"[^>]*href="apple-touch-icon.png"' index.html; then
+  ok "apple-touch-icon points at the real 180x180 file"
+else
+  bad "no apple-touch-icon link pointing at apple-touch-icon.png"
+fi
+
+if grep -q 'href="data:image' index.html; then
+  bad "index.html still contains a data: URI icon" "$(grep -o 'rel="[a-z-]*"[^>]*href="data:image' index.html | head -2)"
+else
+  ok "no data: URI icons remain in index.html"
+fi
+
+if [[ ! -f manifest.webmanifest ]]; then
+  bad "manifest.webmanifest is missing" "Amazon Kids and Android have nothing to read"
+else
+  man=$(python3 - <<'PY'
+import json, sys
+try:
+    m = json.load(open('manifest.webmanifest', encoding='utf-8'))
+except Exception as e:
+    print('INVALID ' + str(e)); sys.exit()
+missing = [k for k in ('name','short_name','start_url','display','orientation',
+                       'background_color','theme_color','icons') if k not in m]
+if missing:
+    print('MISSING ' + ','.join(missing)); sys.exit()
+srcs = sorted(i.get('src','') for i in m['icons'])
+if srcs != ['icon-192.png','icon-512.png']:
+    print('ICONS ' + ','.join(srcs)); sys.exit()
+print(f"OK {m['name']} / {m['short_name']} / {m['display']} / {m['orientation']}")
+PY
+)
+  case "$man" in
+    OK*) ok "manifest.webmanifest valid - ${man#OK }" ;;
+    *)   bad "manifest.webmanifest problem" "$man" ;;
+  esac
+fi
+
+# Every icon and the manifest must be a same-origin relative path, so the page
+# still works with no network and under the /Henrycraft/ sub-path.
+rooted=$(grep -oE '<link[^>]+href="(/|https?://)[^"]*"' index.html || true)
+if [[ -z "$rooted" ]]; then
+  ok "all icon and manifest links are relative (work under /Henrycraft/ and offline)"
+else
+  bad "an icon or manifest link is absolute" "$rooted"
+fi
+
 # --- 6 -----------------------------------------------------------------------
 echo "6. the debug APK builds"
 if [[ $STATIC_ONLY -eq 1 ]]; then
