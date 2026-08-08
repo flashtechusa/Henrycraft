@@ -1,0 +1,78 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.flashtech.henrycraft'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.flashtech.henrycraft'
+        // Fire OS 8 is Android 11 and Fire OS 7 is Android 9; 21 also covers
+        // older Fire tablets that are still in use.
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        debug {
+            // Debug-signed is deliberate: this is personal sideloading, not a
+            // store release, so there is no keystore in this repo.
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    // index.html is one big self-contained file; compressing it in the APK buys
+    // little and costs start-up time on a slow tablet.
+    androidResources {
+        noCompress 'html'
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+    implementation 'androidx.core:core-ktx:1.13.1'
+}
+
+// ---------------------------------------------------------------------------
+// Single source of truth for the game.
+//
+// The repo-root index.html is the only copy anyone edits. It is copied into the
+// app's assets at build time so the packaged game can never drift from the web
+// version. Nothing under src/main/assets/ is committed - see .gitignore.
+// ---------------------------------------------------------------------------
+def gameHtml = rootProject.file('../index.html')
+
+def copyGameHtml = tasks.register('copyGameHtml', Copy) {
+    description = 'Copies the repo-root index.html into the app assets.'
+    group = 'build'
+    from gameHtml
+    into layout.projectDirectory.dir('src/main/assets')
+    doFirst {
+        if (!gameHtml.exists()) {
+            throw new GradleException(
+                "index.html not found at ${gameHtml.canonicalPath} - " +
+                "the APK would ship with no game in it.")
+        }
+    }
+}
+
+tasks.named('preBuild') {
+    dependsOn copyGameHtml
+}

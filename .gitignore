@@ -1,0 +1,16 @@
+# Generated at build time by the :app:copyGameHtml Gradle task from the
+# repo-root index.html. Never edit or commit it - index.html is the only copy.
+android/app/src/main/assets/
+
+# Android / Gradle build output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+.idea/
+*.iml
+
+# Scratch files used when testing the page locally
+three.min.js
+test-local.html

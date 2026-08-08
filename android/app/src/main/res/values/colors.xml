@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sky blue behind the adaptive launcher icon's foreground art. -->
+    <color name="ic_launcher_background">#7AC1EE</color>
+    <!-- Same colour as the window background, so start-up does not flash white
+         before the page paints. -->
+    <color name="henry_sky">#7AC1EE</color>
+</resources>
