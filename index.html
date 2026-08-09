@@ -342,6 +342,22 @@ body.touch #hint{display:none}
 #rotate .rot{font-size:74px;animation:tip 1.6s ease-in-out infinite}
 @keyframes tip{0%,100%{transform:rotate(0)}50%{transform:rotate(90deg)}}
 
+/* The 1.5s wait made visible. Travel is not instant because he will walk
+   through a portal by accident, so the wait needs to look deliberate. */
+#portalRing{
+  position:absolute;left:50%;top:50%;width:92px;height:92px;
+  transform:translate(-50%,-50%);opacity:0;transition:opacity .12s;pointer-events:none
+}
+#portalRing.on{opacity:1}
+#portalRing svg{width:100%;height:100%;transform:rotate(-90deg)}
+#portalRing circle{fill:none;stroke-width:9;stroke-linecap:round}
+#portalRing .bg{stroke:rgba(11,20,32,.55)}
+#portalRing .fg{stroke:#c9b6ff;stroke-dasharray:264;stroke-dashoffset:264}
+#portalRing span{
+  position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
+  text-align:center;font-size:30px;line-height:1
+}
+/* Marks the one block that is wrong, so a hint points at something. */
 #toast{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   font-size:clamp(26px,7vw,46px);font-weight:900;color:var(--sun);letter-spacing:.06em;
@@ -393,6 +409,7 @@ body.touch #hint{display:none}
     </div>
   </div>
 
+  <div id="portalRing"><svg viewBox="0 0 100 100"><circle class="bg" cx="50" cy="50" r="42"></circle><circle class="fg" cx="50" cy="50" r="42"></circle></svg><span>🌀</span></div>
   <div id="toast"></div>
 </div>
 
@@ -421,6 +438,7 @@ body.touch #hint{display:none}
     <button class="blockbtn go" id="mResume">Keep playing</button>
     <button class="blockbtn" id="mFly">Flying: off</button>
     <button class="blockbtn go" id="mRescue">Take me back to the start</button>
+    <button class="blockbtn go" id="mGoHome">🏠 Go home</button>
     <button class="blockbtn" id="mDistricts">My districts</button>
     <button class="blockbtn" id="mHome">Title screen</button>
     <small id="saveNote">Saving automatically</small>
@@ -500,7 +518,11 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
     COAL=15,COPPER=16,LAPIS=17,EMERALD=18,OBSIDIAN=19,ENCHANT=20,FIRE=21,
     /* district themes. Appended again, so ids 0-21 keep their numbers and every
        existing save still loads. */
-    SNOW=22,ICE=23,SANDSTONE=24,CACTUS=25,PINE=26,MUSHCAP=27,MUSHCAP2=28,MUSHSTEM=29;
+    SNOW=22,ICE=23,SANDSTONE=24,CACTUS=25,PINE=26,MUSHCAP=27,MUSHCAP2=28,MUSHSTEM=29,
+    /* Portal interiors. Ordinary terrain blocks as far as the mesher is
+       concerned, which is what makes a 21x21 portal one merged chunk mesh rather
+       than 441 objects. */
+    PORTAL=30;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -540,6 +562,10 @@ DEFS[PINE]     ={name:'Pine',      tiles:[30,30,30]};
 DEFS[MUSHCAP]  ={name:'Red Cap',   tiles:[31,31,31]};
 DEFS[MUSHCAP2] ={name:'Purple Cap',tiles:[32,32,32]};
 DEFS[MUSHSTEM] ={name:'Mushroom Stem', tiles:[33,33,33]};
+/* glow so it is self-lit; tinted per portal via vertex colour in buildChunk, so
+   two portals to different districts do not look the same. Never placeable by
+   hand - it only appears when a frame is lit. */
+DEFS[PORTAL]   ={name:'Portal',    tiles:[34,34,34], glow:true, portal:true};
 
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
              COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
@@ -938,6 +964,8 @@ function buildAtlas(){
       x.fillStyle='#e8dcf7';
     });
   });
+  /* 34 portal - redrawn by animatePortals(); this is frame 0 */
+  tile(34,function(x,r){ drawPortal(x,0); });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
     fill(x,'#e6dcc2');
@@ -971,6 +999,23 @@ function drawFire(x,frame){
   /* a couple of drifting sparks */
   x.fillStyle='#fff3bd';
   for(var s=0;s<3;s++) x.fillRect((r()*16)|0,(r()*7)|0,1,1);
+}
+
+/* Portal shimmer. White-ish on purpose: the per-portal colour comes from the
+   vertex tint in buildChunk, so one texture serves every destination. */
+function drawPortal(x,frame){
+  var r=mulberry32(4242+frame*7919);
+  x.fillStyle='#e8e0ff'; x.fillRect(0,0,16,16);
+  /* drifting diagonal bands, so it reads as moving rather than flashing */
+  for(var i=0;i<16;i++){
+    for(var j=0;j<16;j++){
+      var v=Math.sin((i*0.7+j*0.5+frame*0.9))*0.5+0.5;
+      if(v>0.72){ x.fillStyle='#ffffff'; x.fillRect(i,j,1,1); }
+      else if(v<0.24){ x.fillStyle='#b9a8e8'; x.fillRect(i,j,1,1); }
+    }
+  }
+  x.fillStyle='#ffffff';
+  for(var s2=0;s2<5;s2++) x.fillRect((r()*16)|0,(r()*16)|0,1,1);
 }
 
 buildAtlas();
@@ -1478,10 +1523,18 @@ function buildChunk(ch){
         var co=isOpaque(nx+F.u[0]*su+F.v[0]*sv, ny+F.u[1]*su+F.v[1]*sv, nz+F.u[2]*su+F.v[2]*sv);
         var lvl=(s1&&s2)?0:(3-((s1?1:0)+(s2?1:0)+(co?1:0)));
         ao[k]=lvl;
-        /* Fire is lit by itself, so it keeps full brightness on every face
-           instead of picking up face shading and ambient occlusion. */
-        var sh=glow?1:(F.shade*AO_LEVEL[lvl]*tint);
-        C_.push(sh,sh,sh);
+        /* Fire and portals are lit by themselves, so they keep full brightness
+           on every face instead of picking up face shading and ambient
+           occlusion. A portal also carries its destination's sky colour in the
+           vertex tint, which is what lets one shared texture and one merged
+           chunk mesh show two portals in different colours. */
+        if(glow){
+          var pc=def.portal?portalTint[x+','+y+','+z]:null;
+          if(pc) C_.push(pc[0],pc[1],pc[2]); else C_.push(1,1,1);
+        } else {
+          var sh=F.shade*AO_LEVEL[lvl]*tint;
+          C_.push(sh,sh,sh);
+        }
       }
 
       if(ao[0]+ao[2]>ao[1]+ao[3]){
@@ -2322,6 +2375,7 @@ function breakAt(x,y,z){
   setBlock(x,y,z,AIR);
   burst(new THREE.Vector3(x+0.5,y+0.5,z+0.5),DEFS[b].avg,9);
   sfx('dig');
+  portalsOnBreak(x,y,z);
   return true;
 }
 function dig(){
@@ -2346,10 +2400,54 @@ function digUp(){
   breakAt(x,y,z);
 }
 function build(){
+  /* Flint & Steel first: if he tapped the inside of a finished frame, that is a
+     portal rather than a block placement. */
+  if(selected===FIRE){
+    var h=aim();
+    if(h && tryLightPortal(h.x,h.y,h.z)) return;
+  }
   var c=buildTarget();
   if(!c) return;
   setBlock(c.x,c.y,c.z,selected);
   sfx('place');
+}
+
+/* Is there obsidian touching this block? Used to decide whether a failed light
+   was an attempt at a portal - if so he gets a hint, and if not the flint just
+   makes fire as usual. Nagging every time he lights a campfire would be worse
+   than saying nothing. */
+function touchesObsidian(x,y,z){
+  var d=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+  for(var i=0;i<6;i++) if(getBlock(x+d[i][0],y+d[i][1],z+d[i][2])===OBSIDIAN) return true;
+  return false;
+}
+
+var lastHint=null;
+function tryLightPortal(x,y,z){
+  if(portalCells[keyOf(x,y,z)]) return true;          /* already lit */
+  var r=analysePortal(x,y,z);
+  if(r.ok){ lastHint=null; ignitePortal(r.portal); return true; }
+  if(r.why==='litFrame'||r.why==='empty') return false;
+  if(!touchesObsidian(x,y,z)) return false;           /* not an attempt */
+  lastHint=r;
+  portalHint(r);
+  return true;
+}
+
+/* Every near miss gets its own answer. Emoji rather than prose because he cannot
+   read; the illustrated panel is a separate job. */
+function portalHint(r){
+  var msg;
+  if(r.why==='gap')            msg='🧱❓ One block missing in the frame';
+  else if(r.why==='notRect')   msg='▭ Make the frame a rectangle';
+  else if(r.why==='flat')      msg='⬆️▭ Stand the frame up';
+  else if(r.why==='partial')   msg='🔲 Fill in every square inside';
+  else if(r.why==='tooBig')    msg='📏 A bit smaller (21 across at most)';
+  else if(r.why==='tooSmall')  msg='📏 A bit bigger - at least 1 by 2';
+  else if(r.why==='notObsidian') msg='⬛ The frame needs to be obsidian';
+  else                          msg='▭ Make the frame a rectangle';
+  toast(msg,2600);
+  if(r.at) markHint(r.at);
 }
 
 /* ---------------- sound ---------------- */
@@ -2378,6 +2476,8 @@ function sfx(kind){
   else if(kind==='place'){ tone(420,0.07,'square',0.07); tone(620,0.09,'square',0.05,0.05); }
   else if(kind==='jump'){ tone(520,0.07,'sine',0.05); }
   else if(kind==='star'){ tone(660,0.11,'square',0.08); tone(880,0.11,'square',0.08,0.1); tone(1320,0.2,'square',0.08,0.2); }
+  else if(kind==='portal'){ tone(320,0.14,'sine',0.07); tone(480,0.16,'sine',0.06,0.10); tone(640,0.22,'sine',0.05,0.22); }
+  else if(kind==='travel'){ tone(700,0.12,'sine',0.06); tone(520,0.14,'sine',0.06,0.09); tone(380,0.26,'sine',0.05,0.20); }
   else if(kind==='win'){
     [523,659,784,1047,1319].forEach(function(f,i){ tone(f,0.24,'square',0.09,i*0.14); });
   }
@@ -2846,6 +2946,10 @@ el('delYes').addEventListener('click',function(){
   });
 });
 
+el('mGoHome').addEventListener('click',function(){
+  toggleMenu(false);
+  goHome();
+});
 el('mDistricts').addEventListener('click',function(){
   toggleMenu(false);
   playing=false;
@@ -2900,6 +3004,521 @@ var store=(function(){
     set:function(k,v){ window.localStorage.setItem(k,v); return Promise.resolve(); }
   };
 })();
+
+/* ---------------- portals ----------------
+   The one thing in this game where arranging blocks in a shape makes something
+   happen. The ritual is Minecraft's, because the familiarity is the whole point:
+   an upright obsidian frame, fill the inside, light it with flint and steel. The
+   one addition is that what you fill it with decides where it goes.
+
+   Sizes are forgiving at both ends and for opposite reasons. The small end
+   because Minecraft's 4x5 minimum is a lot of building for a five-year-old who
+   will get the proportions wrong. The large end because he is inventive and will
+   build something enormous to find out what happens - and a giant frame that
+   silently does nothing teaches him the feature is broken. 21x21 is Minecraft's
+   own interior limit, so it is generous and familiar at once. */
+
+var PORTAL_MAX=21;                  /* interior, per side */
+var PORTAL_DWELL=1.5;               /* seconds standing still before travel */
+var RETURN_W=2, RETURN_H=3;         /* return portals are always this small */
+
+/* What the filling means. */
+function themeForFill(id){
+  if(id===GRASS) return 'meadow';
+  if(id===SNOW) return 'snowy';
+  if(id===SAND) return 'desert';
+  if(id===GLASS) return 'island';
+  if(id===MUSHCAP||id===MUSHCAP2||id===MUSHSTEM) return 'mushroom';
+  return null;                      /* unrecognised -> a random theme, never a refusal */
+}
+
+var portals=[];                     /* live portals in this district */
+var portalTint={};                  /* "x,y,z" -> [r,g,b], read by buildChunk */
+var portalCells={};                 /* "x,y,z" -> portal, for fast lookup */
+var portalFrame={};                 /* "x,y,z" -> [portal,...], frame blocks */
+var portalFrames=0;
+var dwell=0, dwellPortal=null, travelling=false;
+
+function keyOf(x,y,z){ return x+','+y+','+z; }
+
+/* One cell of a portal's plane. a runs along the horizontal axis, b along the
+   other; which world axes those are depends on the plane. 'y' is the flat case,
+   only ever used to recognise a frame lying on the ground so it can be told to
+   stand up - these helpers used to ignore it and produced nonsense coordinates,
+   which made a flat frame report as a gap. */
+function portalCell(p,a,b){
+  if(p.plane==='x') return {x:a,y:b,z:p.fixed};
+  if(p.plane==='z') return {x:p.fixed,y:b,z:a};
+  return {x:b,y:p.fixed,z:a};
+}
+/* Interior cells of a portal record, in world coordinates. */
+function portalInterior(p){
+  var out=[];
+  for(var b=p.y0;b<=p.y1;b++)
+    for(var a=p.a0;a<=p.a1;a++)
+      out.push(portalCell(p,a,b));
+  return out;
+}
+/* The ring around the interior, corners excluded - Minecraft leaves corners
+   optional and so do we. */
+function portalRing(p){
+  var out=[],a,b;
+  for(a=p.a0;a<=p.a1;a++){
+    out.push(portalCell(p,a,p.y0-1));
+    out.push(portalCell(p,a,p.y1+1));
+  }
+  for(b=p.y0;b<=p.y1;b++){
+    out.push(portalCell(p,p.a0-1,b));
+    out.push(portalCell(p,p.a1+1,b));
+  }
+  return out;
+}
+
+/* Flood fill the opening outward from the block that was lit, confined to one
+   plane. "Open" means air, water, an existing portal block, or more of the same
+   kind he filled with; anything else is wall. Flooding the opening rather than
+   the fill is what makes the hints distinguishable:
+
+     a gap in the frame lets the fill escape into open sky, so the region blows
+     past the cap - that is a gap, not a shape problem
+     a half-filled interior still floods to the full rectangle, because air is
+     open, so it can be reported as partly filled rather than as a gap
+     a wrong material in the frame is a wall, so the rectangle still closes and
+     the ring check can say "not obsidian" instead of "not a rectangle"
+
+   Corners fall out for free: a four-neighbour flood never reaches a diagonal, so
+   corner blocks are unconstrained, exactly as in Minecraft. */
+function openRegion(x,y,z,plane,kind){
+  var seen={}, out=[], stack=[[x,y,z]];
+  var cap=(PORTAL_MAX+6)*(PORTAL_MAX+6);
+  function open(b){
+    return b===AIR||b===WATER||b===PORTAL||b===kind;
+  }
+  while(stack.length){
+    var c=stack.pop();
+    if(!inside(c[0],c[1],c[2])) return {escaped:true};
+    var k=keyOf(c[0],c[1],c[2]);
+    if(seen[k]) continue;
+    if(!open(getBlock(c[0],c[1],c[2]))) continue;      /* wall */
+    seen[k]=1; out.push({x:c[0],y:c[1],z:c[2]});
+    if(out.length>cap) return {escaped:true};          /* leaked out */
+    if(plane==='x'){ stack.push([c[0]-1,c[1],c[2]],[c[0]+1,c[1],c[2]],[c[0],c[1]-1,c[2]],[c[0],c[1]+1,c[2]]); }
+    else if(plane==='z'){ stack.push([c[0],c[1],c[2]-1],[c[0],c[1],c[2]+1],[c[0],c[1]-1,c[2]],[c[0],c[1]+1,c[2]]); }
+    else { stack.push([c[0]-1,c[1],c[2]],[c[0]+1,c[1],c[2]],[c[0],c[1],c[2]-1],[c[0],c[1],c[2]+1]); }
+  }
+  return {cells:out};
+}
+
+/* One plane's verdict. */
+function tryPortalPlane(lx,ly,lz,plane,kind){
+  var r=openRegion(lx,ly,lz,plane,kind);
+  if(r.escaped) return {ok:false,why:'gap',area:0};
+  var cells=r.cells;
+  var lo=1e9,hi=-1e9,y0=1e9,y1=-1e9;
+  cells.forEach(function(c){
+    var a=plane==='x'?c.x:(plane==='z'?c.z:c.z);
+    var b=plane==='y'?c.x:c.y;
+    lo=Math.min(lo,a); hi=Math.max(hi,a);
+    y0=Math.min(y0,b); y1=Math.max(y1,b);
+  });
+  var w=hi-lo+1, h=y1-y0+1, area=w*h;
+  if(w>PORTAL_MAX||h>PORTAL_MAX) return {ok:false,why:'tooBig',w:w,h:h,area:area};
+  if(cells.length!==area) return {ok:false,why:'notRect',area:cells.length};
+  if(area<2) return {ok:false,why:'tooSmall',area:area};
+
+  var p = plane==='y'
+    ? {plane:'y',fixed:ly,a0:lo,a1:hi,y0:y0,y1:y1,fill:kind,w:w,h:h}
+    : {plane:plane,fixed:plane==='x'?lz:lx,a0:lo,a1:hi,y0:y0,y1:y1,fill:kind,w:w,h:h};
+
+  /* The ring is obsidian or it is not a frame. A solid non-obsidian block was a
+     wall, so it shows up here rather than distorting the rectangle. */
+  var ring=portalRing(p), wrong=null;
+  for(var i=0;i<ring.length;i++){
+    if(getBlock(ring[i].x,ring[i].y,ring[i].z)!==OBSIDIAN){ wrong=ring[i]; break; }
+  }
+  if(wrong) return {ok:false,why:'notObsidian',at:wrong,area:area};
+
+  /* Finally the filling itself: every square inside, all the same kind. */
+  if(kind===AIR||kind===WATER) return {ok:false,why:'empty',area:area};
+  var holes=[], inner=portalInterior(p);
+  for(var j=0;j<inner.length;j++){
+    var b2=getBlock(inner[j].x,inner[j].y,inner[j].z);
+    if(b2!==kind&&b2!==PORTAL) holes.push(inner[j]);
+  }
+  if(holes.length) return {ok:false,why:'partial',at:holes[0],holes:holes.length,area:area};
+  return {ok:true,portal:p,area:area};
+}
+
+/* Work out whether the block just lit is the inside of a valid frame.
+   Returns {ok:true, portal} or {ok:false, why, at} - never a bare false, because
+   every near miss owes him a specific hint rather than silence. */
+function analysePortal(lx,ly,lz){
+  var kind=getBlock(lx,ly,lz);
+  if(kind===AIR||kind===WATER) return {ok:false,why:'empty'};
+  if(kind===OBSIDIAN) return {ok:false,why:'litFrame'};
+
+  /* A frame lying on the ground gets its own hint rather than being reported as
+     a broken upright one. */
+  var flat=tryPortalPlane(lx,ly,lz,'y',kind);
+  if(flat.ok) return {ok:false,why:'flat'};
+
+  /* Both upright planes are tried and a success wins. Taking the first plane's
+     verdict was wrong: a z-plane portal looks like a 1-wide column when flooded
+     in the x plane, which failed as a gap and the z plane was never reached. */
+  var rx=tryPortalPlane(lx,ly,lz,'x',kind);
+  if(rx.ok) return rx;
+  var rz=tryPortalPlane(lx,ly,lz,'z',kind);
+  if(rz.ok) return rz;
+
+  /* Neither worked, so report from whichever plane he was more plausibly
+     building in - the one that enclosed more space. */
+  return (rz.area||0)>(rx.area||0)?rz:rx;
+}
+
+/* Pick or create the district a newly lit portal is bound to. Permanent: the
+   slug is stored on the portal, because a portal that led somewhere new each time
+   would scatter his builds. */
+function bindDestination(themeKey){
+  var here=current?current.slug:null;
+  var match=null;
+  for(var i=0;i<districtIndex.list.length;i++){
+    var d=districtIndex.list[i];
+    if(d.theme===themeKey && d.slug!==here){ match=d.slug; break; }
+  }
+  if(match) return Promise.resolve(match);
+  /* none yet, so make one and keep it */
+  return createDistrictRecord(randomDistrictName(),themeKey);
+}
+
+/* Write a district to storage without entering it - lighting a portal must not
+   teleport him. */
+function createDistrictRecord(name,themeKey){
+  var rec=freshDistrict(name,themeKey);
+  return writeJSON(districtKey(rec.slug),rec).then(function(){
+    districtIndex.list.push({slug:rec.slug,name:rec.name,theme:rec.theme,
+                             created:rec.created,lastPlayed:rec.lastPlayed});
+    return writeJSON(INDEX_KEY,districtIndex);
+  }).then(function(){ return rec.slug; });
+}
+
+function litPortalAt(x,y,z){ return portalCells[keyOf(x,y,z)]||null; }
+
+/* Turn a validated frame into a lit portal. */
+function ignitePortal(p){
+  var themeKey=themeForFill(p.fill);
+  var random=false;
+  if(!themeKey){
+    themeKey=THEMES[(Math.random()*THEMES.length)|0].key;
+    random=true;
+  }
+  return bindDestination(themeKey).then(function(slug){
+    p.dest=slug; p.destTheme=themeKey; p.lit=true;
+    p.id='pt'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    portals.push(p);
+    portalInterior(p).forEach(function(c){ setBlock(c.x,c.y,c.z,PORTAL); });
+    reindexPortals();
+    /* Particles scale with the opening, not with block count: a 21x21 portal
+       emitting per-block sparks would sink the frame rate on the tablet. */
+    var area=p.w*p.h;
+    var mid=portalCentre(p);
+    burst(new THREE.Vector3(mid.x,mid.y,mid.z),
+          themeByKey(themeKey).skyMid, clamp(8+Math.round(area/10),8,30));
+    sfx('portal');
+    var dn=districtName(slug);
+    toast((random?'🎲 ':'🌀 ')+'Portal to '+dn,2200);
+    scheduleSave(); doSave();
+    return p;
+  });
+}
+
+function districtName(slug){
+  for(var i=0;i<districtIndex.list.length;i++)
+    if(districtIndex.list[i].slug===slug) return districtIndex.list[i].name;
+  return 'somewhere new';
+}
+
+function portalCentre(p){
+  var a=(p.a0+p.a1)/2+0.5, y=(p.y0+p.y1)/2+0.5;
+  return p.plane==='x'?{x:a,y:y,z:p.fixed+0.5}:{x:p.fixed+0.5,y:y,z:a};
+}
+
+/* Rebuild the position lookups the mesher and the dwell check read. */
+function reindexPortals(){
+  portalTint={}; portalCells={}; portalFrame={}; portalFrames=0;
+  portals.forEach(function(p){
+    if(!p.lit) return;
+    var col=themeByKey(p.destTheme||'meadow').skyMid;
+    var c3=srgb(col);
+    portalInterior(p).forEach(function(c){
+      var k=keyOf(c.x,c.y,c.z);
+      portalCells[k]=p;
+      portalTint[k]=[c3.r,c3.g,c3.b];
+    });
+    portalRing(p).forEach(function(c){
+      var k=keyOf(c.x,c.y,c.z);
+      (portalFrame[k]=portalFrame[k]||[]).push(p);
+      portalFrames++;
+    });
+  });
+}
+
+/* Breaking any frame block puts the portal out and clears the opening back to
+   air. It can be lit again. */
+function extinguishPortal(p,quiet){
+  if(!p.lit) return;
+  p.lit=false;
+  portalInterior(p).forEach(function(c){
+    if(getBlock(c.x,c.y,c.z)===PORTAL) setBlock(c.x,c.y,c.z,AIR);
+  });
+  portals=portals.filter(function(q){ return q!==p; });
+  reindexPortals();
+  if(dwellPortal===p){ dwellPortal=null; dwell=0; }
+  if(!quiet) toast('🌀 The portal went out',1500);
+  scheduleSave();
+}
+
+/* Called from breakAt for every block removed. */
+function portalsOnBreak(x,y,z){
+  var k=keyOf(x,y,z);
+  var framed=portalFrame[k];
+  if(framed) framed.slice().forEach(function(p){ extinguishPortal(p); });
+  var inside=portalCells[k];
+  if(inside) extinguishPortal(inside);
+}
+
+/* ---- travel ---- */
+
+/* Is this column somewhere he can actually stand? Solid dry ground underfoot,
+   three blocks of clear air, and not inside a portal - arriving inside one would
+   send him straight back out again. */
+function standableColumn(x,z){
+  if(x<3||z<3||x>WX-4||z>WZ-4) return 0;
+  var gy=surfaceY(x,z);
+  if(gy<=WATER_LEVEL+1||gy>WY-8) return 0;
+  var below=getBlock(x,gy-1,z);
+  if(below===AIR||below===WATER||below===PORTAL) return 0;
+  for(var h=0;h<3;h++) if(getBlock(x,gy+h,z)!==AIR) return 0;
+  return gy;
+}
+
+/* Last resort, and it cannot fail on a world with any dry land at all: walk every
+   column. 64x64 is 4096 checks, which costs nothing next to travelling. Needed
+   because the old fallback was findSpawn(), which does not know about portals and
+   once dropped him inside a return portal from an earlier visit. */
+function safeGroundAnywhere(){
+  var best=null, bestD=1e9, cx=WX/2, cz=WZ/2;
+  for(var x=3;x<WX-3;x++) for(var z=3;z<WZ-3;z++){
+    var gy=standableColumn(x,z);
+    if(!gy) continue;
+    var d=(x-cx)*(x-cx)+(z-cz)*(z-cz);
+    if(d<bestD){ bestD=d; best={x:x,y:gy,z:z}; }
+  }
+  return best;
+}
+
+/* Somewhere he can stand: solid dry ground, two blocks of clear air above, not
+   in water, not in a portal. */
+function safeGroundNear(cx,cz,avoid){
+  var best=null;
+  for(var r=0;r<=26 && !best;r++){
+    for(var a=0;a<Math.max(1,r*8) && !best;a++){
+      var ang=a/Math.max(1,r*8)*6.283185;
+      var x=Math.round(cx+Math.cos(ang)*r), z=Math.round(cz+Math.sin(ang)*r);
+      var gy=standableColumn(x,z);
+      if(!gy) continue;
+      if(avoid&&avoid(x,gy,z)) continue;
+      best={x:x,y:gy,z:z};
+    }
+  }
+  return best;
+}
+
+/* Build a small return portal on open ground, already lit and bound back. Always
+   RETURN_W x RETURN_H whatever he walked through, because a 21x21 return portal
+   might not fit where he lands - and it must always fit. */
+function buildReturnPortal(destSlug,destTheme,nearX,nearZ){
+  /* Needs a clear box for the frame: RETURN_W+2 wide, RETURN_H+2 tall. */
+  var spot=null;
+  for(var r=2;r<=24 && !spot;r++){
+    for(var a=0;a<r*8 && !spot;a++){
+      var ang=a/(r*8)*6.283185;
+      var x=Math.round(nearX+Math.cos(ang)*r), z=Math.round(nearZ+Math.sin(ang)*r);
+      if(x<4||z<4||x>WX-6||z>WZ-6) continue;
+      var gy=surfaceY(x,z);
+      if(gy<=WATER_LEVEL+1||gy>WY-10) continue;
+      /* flat enough, and clear above, across the frame's footprint */
+      var ok=true;
+      for(var d=-1;d<=RETURN_W && ok;d++){
+        if(Math.abs(surfaceY(x+d,z)-gy)>0) ok=false;
+      }
+      for(var d2=-1;d2<=RETURN_W+1 && ok;d2++){
+        for(var h=0;h<=RETURN_H+1 && ok;h++){
+          if(getBlock(x+d2,gy+h,z)!==AIR) ok=false;
+        }
+      }
+      if(ok) spot={x:x,y:gy,z:z};
+    }
+  }
+  if(!spot) return null;
+
+  var p={plane:'x', fixed:spot.z, a0:spot.x, a1:spot.x+RETURN_W-1,
+         y0:spot.y, y1:spot.y+RETURN_H-1, fill:OBSIDIAN,
+         w:RETURN_W, h:RETURN_H, dest:destSlug, destTheme:destTheme, lit:true,
+         id:'pt'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+         isReturn:true};
+  /* frame first, then the opening */
+  portalRing(p).forEach(function(c){ setBlock(c.x,c.y,c.z,OBSIDIAN); });
+  portalInterior(p).forEach(function(c){ setBlock(c.x,c.y,c.z,PORTAL); });
+  portals.push(p);
+  reindexPortals();
+  return p;
+}
+
+function travelThrough(p){
+  if(travelling||!p.lit||!p.dest) return Promise.resolve(false);
+  travelling=true;
+  var from=current?current.slug:null;
+  var fromTheme=theme.key;
+  sfx('travel');
+  return saveCurrent().then(function(){
+    return readJSON(districtKey(p.dest));
+  }).then(function(rec){
+    if(!rec){
+      /* Destination deleted. The portal goes dark rather than crashing, and can
+         be lit again to bind somewhere new. */
+      travelling=false;
+      extinguishPortal(p,true);
+      toast('🌀 That place is gone - light it again',2400);
+      return false;
+    }
+    enterDistrict(rec);
+    /* Return portal first, then decide where he stands.
+
+       The other order looks more natural and is wrong: the portal's footprint is
+       four columns across, so building it "two blocks away" from where he was
+       just placed could still cover the very column he was standing in, and he
+       arrived inside his own way home. Placing him afterwards means
+       standableColumn can see the portal blocks and refuses to put him in
+       them. */
+    var centre=safeGroundNear(player.x,player.z,null)||
+               safeGroundNear(WX/2,WZ/2,null)||
+               safeGroundAnywhere();
+    var cx=centre?centre.x:Math.floor(WX/2), cz=centre?centre.z:Math.floor(WZ/2);
+    if(from) buildReturnPortal(from,fromTheme,cx,cz);
+    var spot=safeGroundNear(cx,cz,null)||safeGroundAnywhere();
+    if(spot){ player.x=spot.x+0.5; player.y=spot.y+0.05; player.z=spot.z+0.5;
+              player.vx=player.vy=player.vz=0; }
+    else findSpawn();          /* only if the district has no dry land at all */
+    dwell=0; dwellPortal=null; travelling=false;
+    buildDistrictList();
+    scheduleSave(); doSave();
+    toast('🌀 '+districtName(p.dest),2000);
+    return true;
+  }).catch(function(){ travelling=false; return false; });
+}
+
+/* Standing still in an opening for PORTAL_DWELL seconds. Not instant, because he
+   will walk through one by accident. */
+function updatePortals(dt){
+  animatePortals(dt);
+  if(!playing||travelling){ return; }
+  var k=keyOf(Math.floor(player.x),Math.floor(player.y+0.6),Math.floor(player.z));
+  var p=portalCells[k];
+  if(!p||!p.lit){ dwell=0; dwellPortal=null; hidePortalRing(); return; }
+  if(dwellPortal!==p){ dwellPortal=p; dwell=0; }
+  dwell+=dt;
+  showPortalRing(dwell/PORTAL_DWELL);
+  if(dwell>=PORTAL_DWELL){ travelThrough(p); }
+}
+
+var portalFrameNo=0, portalClock=0;
+function animatePortals(dt){
+  if(!portals.length) return;
+  portalClock+=dt;
+  if(portalClock<0.09) return;
+  portalClock=0;
+  portalFrameNo=(portalFrameNo+1)&7;
+  var c=atlasCanvas.getContext('2d');
+  var tx=(34%ACOLS)*TP, ty=Math.floor(34/ACOLS)*TP;
+  c.save();
+  c.beginPath(); c.rect(tx,ty,TP,TP); c.clip();
+  c.translate(tx,ty); c.scale(TP/16,TP/16);
+  c.imageSmoothingEnabled=false;
+  drawPortal(c,portalFrameNo);
+  c.restore();
+  atlasTex.needsUpdate=true;
+}
+
+/* ---- serialisation ---- */
+function portalsToSave(){
+  return portals.filter(function(p){ return p.lit; }).map(function(p){
+    return {id:p.id,plane:p.plane,fixed:p.fixed,a0:p.a0,a1:p.a1,y0:p.y0,y1:p.y1,
+            fill:p.fill,dest:p.dest,destTheme:p.destTheme,lit:true,
+            isReturn:!!p.isReturn};
+  });
+}
+function portalsFromSave(list){
+  portals=[];
+  (list||[]).forEach(function(r){
+    if(!r||typeof r.a0!=='number') return;
+    var p={id:r.id,plane:r.plane==='z'?'z':'x',fixed:r.fixed,a0:r.a0,a1:r.a1,
+           y0:r.y0,y1:r.y1,fill:r.fill,dest:r.dest,destTheme:r.destTheme,
+           lit:!!r.lit,isReturn:!!r.isReturn};
+    p.w=p.a1-p.a0+1; p.h=p.y1-p.y0+1;
+    portals.push(p);
+  });
+  reindexPortals();
+}
+
+/* The dwell ring, and the marker a hint points at. */
+var ringEl=null, ringFg=null;
+function showPortalRing(t){
+  if(!ringEl){ ringEl=el('portalRing'); ringFg=ringEl.querySelector('.fg'); }
+  ringEl.classList.add('on');
+  ringFg.style.strokeDashoffset=String(264*(1-clamp(t,0,1)));
+}
+function hidePortalRing(){
+  if(!ringEl) ringEl=el('portalRing');
+  if(ringEl) ringEl.classList.remove('on');
+}
+
+var hintBox=new THREE.Mesh(
+  new THREE.BoxGeometry(1.06,1.06,1.06),
+  new THREE.MeshBasicMaterial({color:srgb(0xffd94a),transparent:true,opacity:0.5,depthWrite:false})
+);
+hintBox.visible=false;
+scene.add(hintBox);
+var hintUntil=0;
+function markHint(c){
+  hintBox.position.set(c.x+0.5,c.y+0.5,c.z+0.5);
+  hintBox.visible=true;
+  hintUntil=performance.now()/1000+3.2;
+}
+function updateHintMark(now){
+  if(hintBox.visible && now>hintUntil) hintBox.visible=false;
+}
+
+/* Belt and braces. If he digs up his return portal - and he will - this is the
+   way back, and it does not depend on any portal existing. */
+function homeSlug(){
+  var byName=null, oldest=null;
+  districtIndex.list.forEach(function(d){
+    if(d.slug==='home') byName=byName||d.slug;
+    if(d.name==='Home') byName=byName||d.slug;
+    if(!oldest||String(d.created)<String(oldest.created)) oldest=d;
+  });
+  return byName||(oldest?oldest.slug:(districtIndex.list[0]||{}).slug);
+}
+function goHome(){
+  var slug=homeSlug();
+  if(!slug) return Promise.resolve(false);
+  if(current&&current.slug===slug){ toast('🏠 You are home',1500); return Promise.resolve(true); }
+  return switchDistrict(slug).then(function(){
+    buildDistrictList();
+    toast('🏠 Home',1600);
+    return true;
+  });
+}
 
 /* ---------------- district names ----------------
    He is five and cannot type. So a district always arrives with a name already
@@ -2996,6 +3615,8 @@ function snapshot(){
     p:[+player.x.toFixed(2),+player.y.toFixed(2),+player.z.toFixed(2),+yaw.toFixed(3)],
     stars:stars.map(function(s){ return s.done?1:0; }),
     sel:selected,
+    v:2,                       /* 2 adds portals; v1 records simply have none */
+    portals:portalsToSave(),
     created:current&&current.created?current.created:null,
     lastPlayed:null            /* stamped by saveCurrent, which has a clock */
   };
@@ -3059,6 +3680,9 @@ function enterDistrict(rec){
     findSpawn();
   }
   if(rec.sel && DEFS[rec.sel]) selectBlock(rec.sel);
+  /* v1 records have no portals field, which reads as an empty list - that is the
+     whole migration. */
+  portalsFromSave(rec.portals);
   setFly(false);
   districtIndex.current=rec.slug;
   refreshDistrictHud();
@@ -3241,6 +3865,8 @@ function frame(){
     updateFish(dt,now);
     updateStars(dt,now);
     animateFire(dt);
+    updatePortals(dt);
+    updateHintMark(now);
     flushDirty();
   }
   updateParticles(dt);
@@ -3287,7 +3913,9 @@ window.__henrycraft={
   ids:{AIR:AIR,GRASS:GRASS,DIRT:DIRT,STONE:STONE,SAND:SAND,WOOD:WOOD,LEAVES:LEAVES,
        PLANKS:PLANKS,BRICK:BRICK,GLASS:GLASS,GOLD:GOLD,DIAMOND:DIAMOND,RAINBOW:RAINBOW,
        WATER:WATER,BEDROCK:BEDROCK,COAL:COAL,COPPER:COPPER,LAPIS:LAPIS,EMERALD:EMERALD,
-       OBSIDIAN:OBSIDIAN,ENCHANT:ENCHANT,FIRE:FIRE},
+       OBSIDIAN:OBSIDIAN,ENCHANT:ENCHANT,FIRE:FIRE,
+       SNOW:SNOW,ICE:ICE,SANDSTONE:SANDSTONE,CACTUS:CACTUS,PINE:PINE,
+       MUSHCAP:MUSHCAP,MUSHCAP2:MUSHCAP2,MUSHSTEM:MUSHSTEM,PORTAL:PORTAL},
   DEFS:DEFS,
   PALETTE:PALETTE,
   ORE_BANDS:ORE_BANDS,
@@ -3321,6 +3949,106 @@ window.__henrycraft={
   },
   createDistrict:createDistrict,
   switchDistrict:switchDistrict,
+
+  /* ---- portals ---- */
+  portalMax:function(){ return PORTAL_MAX; },
+  portalDwell:function(){ return PORTAL_DWELL; },
+  themeForFill:themeForFill,
+  portals:function(){
+    return portals.map(function(p){
+      return {id:p.id,plane:p.plane,fixed:p.fixed,a0:p.a0,a1:p.a1,y0:p.y0,y1:p.y1,
+              w:p.w,h:p.h,fill:p.fill,dest:p.dest,destTheme:p.destTheme,
+              lit:!!p.lit,isReturn:!!p.isReturn};
+    });
+  },
+  /* Build a frame and fill it, then report what analysePortal makes of it.
+     plane 'x' varies x and y at fixed z; plane 'z' varies z and y at fixed x. */
+  buildFrame:function(opts){
+    var plane=opts.plane==='z'?'z':'x';
+    var w=opts.w, h=opts.h;
+    var ax=opts.ax, ay=opts.ay, fixed=opts.fixed;
+    var fill=opts.fill===undefined?GRASS:opts.fill;
+    var p={plane:plane,fixed:fixed,a0:ax,a1:ax+w-1,y0:ay,y1:ay+h-1};
+    var i,c;
+    /* clear a generous box first so nothing pre-existing is mistaken for frame */
+    for(var dy=-2;dy<=h+1;dy++) for(var da=-2;da<=w+1;da++) for(var dp=-1;dp<=1;dp++){
+      var cx=plane==='x'?ax+da:fixed+dp, cy=ay+dy, cz=plane==='x'?fixed+dp:ax+da;
+      if(inside(cx,cy,cz)) setBlock(cx,cy,cz,AIR);
+    }
+    var ring=portalRing(p);
+    for(i=0;i<ring.length;i++){ c=ring[i]; setBlock(c.x,c.y,c.z,OBSIDIAN); }
+    if(opts.corners!==false){
+      [[p.a0-1,p.y0-1],[p.a1+1,p.y0-1],[p.a0-1,p.y1+1],[p.a1+1,p.y1+1]].forEach(function(q){
+        var cx=plane==='x'?q[0]:fixed, cz=plane==='x'?fixed:q[0];
+        setBlock(cx,q[1],cz,OBSIDIAN);
+      });
+    }
+    if(opts.gapAt){ setBlock(opts.gapAt.x,opts.gapAt.y,opts.gapAt.z,AIR); }
+    if(opts.wrongAt){ setBlock(opts.wrongAt.x,opts.wrongAt.y,opts.wrongAt.z,STONE); }
+    var inner=portalInterior(p);
+    for(i=0;i<inner.length;i++){ c=inner[i]; setBlock(c.x,c.y,c.z,fill); }
+    if(opts.unfilled){
+      for(i=0;i<Math.min(opts.unfilled,inner.length);i++){
+        setBlock(inner[i].x,inner[i].y,inner[i].z,AIR);
+      }
+    }
+    var probe=inner[(inner.length/2)|0];
+    if(opts.unfilled) probe=inner[inner.length-1];
+    return {interior:inner.length,probe:probe,ring:ring.length};
+  },
+  analyse:function(x,y,z){
+    var r=analysePortal(x,y,z);
+    return r.ok ? {ok:true,w:r.portal.w,h:r.portal.h,plane:r.portal.plane}
+                : {ok:false,why:r.why,at:r.at||null};
+  },
+  /* Light it the way the game does, through the flint & steel path. */
+  light:function(x,y,z){
+    var r=analysePortal(x,y,z);
+    if(!r.ok) return Promise.resolve({ok:false,why:r.why});
+    return ignitePortal(r.portal).then(function(p){
+      return {ok:true,dest:p.dest,destTheme:p.destTheme,id:p.id,w:p.w,h:p.h};
+    });
+  },
+  lastHint:function(){ return lastHint?{why:lastHint.why,at:lastHint.at||null}:null; },
+  travel:function(id){
+    var p=null;
+    portals.forEach(function(q){ if(q.id===id) p=q; });
+    if(!p) return Promise.resolve(false);
+    return travelThrough(p);
+  },
+  /* Walk the dwell timer forward without a render loop. */
+  standIn:function(id,seconds){
+    var p=null;
+    portals.forEach(function(q){ if(q.id===id) p=q; });
+    if(!p) return Promise.resolve({travelled:false,why:'no such portal'});
+    var mid=portalCentre(p);
+    player.x=mid.x; player.y=p.y0; player.z=mid.z;
+    player.vx=player.vy=player.vz=0;
+    var wasPlaying=playing; playing=true;
+    var dt=1/30, steps=Math.max(1,Math.round(seconds/dt));
+    var before=current?current.slug:null;
+    for(var i=0;i<steps;i++) updatePortals(dt);
+    return new Promise(function(res){
+      setTimeout(function(){
+        playing=wasPlaying;
+        res({travelled:(current?current.slug:null)!==before,
+             now:current?current.slug:null, from:before});
+      },260);
+    });
+  },
+  goHome:goHome,
+  homeSlug:homeSlug,
+  breakBlock:function(x,y,z){ return breakAt(x,y,z); },
+  /* How many meshes carry portal geometry. A 21x21 portal must be part of the
+     chunk mesh, not 441 objects. */
+  particleCount:function(){ return particles.length; },
+  portalMeshStats:function(){
+    var meshes=0, glowMeshes=0;
+    scene.traverse(function(o){ if(o.isMesh) meshes++; });
+    for(var i=0;i<chunks.length;i++) if(chunks[i].glow) glowMeshes++;
+    return {sceneMeshes:meshes, glowMeshes:glowMeshes,
+            portalBlocks:Object.keys(portalCells).length};
+  },
   deleteDistrict:deleteDistrict,
   saveNow:function(){ saveDirty=false; return saveCurrent(); },
   editsNow:function(){ return JSON.parse(JSON.stringify(edits)); },
@@ -3331,6 +4059,9 @@ window.__henrycraft={
   loadThemeSeed:function(themeKey,s){
     applyTheme(themeByKey(themeKey));
     seed=s>>>0; starSeed=seed; edits={};
+    /* A regenerated world has no portals in it. Leaving the list behind kept
+       stale lit portals alive across regenerations. */
+    portals=[]; reindexPortals();
     generateWorld();
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();

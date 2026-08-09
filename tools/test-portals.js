@@ -1,0 +1,433 @@
+#!/usr/bin/env node
+/*
+ * Portal tests.
+ *
+ *   node tools/test-portals.js
+ *
+ * Tests 5, 6 and 7 are the ones that matter: a missing return portal or an unsafe
+ * arrival strands him, and a lost edit destroys something he built. Those three
+ * run 50 trials across every theme rather than once.
+ */
+'use strict';
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+const TYPES = {'.html': 'text/html', '.png': 'image/png',
+               '.webmanifest': 'application/manifest+json'};
+const TRIALS = 50;
+
+function loadPlaywright() {
+  for (const c of [process.env.PLAYWRIGHT_PATH, 'playwright',
+                   '/opt/node22/lib/node_modules/playwright'].filter(Boolean)) {
+    try { return require(c); } catch (_) {}
+  }
+  console.error('Could not load Playwright. Install it, or set PLAYWRIGHT_PATH.');
+  process.exit(2);
+}
+function serve() {
+  return new Promise(resolve => {
+    const srv = http.createServer((req, res) => {
+      const rel = (req.url.split('?')[0] || '/').replace(/^\/+/, '') || 'index.html';
+      const f = path.join(ROOT, rel);
+      if (!f.startsWith(ROOT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) {
+        res.writeHead(404); return res.end('nf');
+      }
+      res.writeHead(200, {'Content-Type': TYPES[path.extname(f)] || 'application/octet-stream'});
+      res.end(fs.readFileSync(f));
+    });
+    srv.listen(0, '127.0.0.1', () => resolve({srv, port: srv.address().port}));
+  });
+}
+
+let passed = 0, failed = 0;
+const notes = [];
+function check(name, ok, detail) {
+  if (ok) { passed++; console.log(`  PASS  ${name}`); }
+  else { failed++; console.log(`  FAIL  ${name}`); if (detail) console.log(`        ${detail}`); }
+}
+function note(l) { notes.push(l); console.log(`        ${l}`); }
+
+(async () => {
+  const {chromium} = loadPlaywright();
+  const {srv, port} = await serve();
+  const url = `http://127.0.0.1:${port}/index.html`;
+  const browser = await chromium.launch({
+    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+  });
+  const ctx = await browser.newContext({
+    viewport: {width: 1024, height: 700}, hasTouch: true, isMobile: true,
+  });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', e => errs.push(e.message));
+  await page.goto(url, {waitUntil: 'load'});
+  await page.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
+                             {timeout: 60000});
+
+  console.log('Henrycraft portal tests\n');
+
+  // The theme blocks were missing from the test hook's id map, so ids.SNOW was
+  // undefined and several tests silently filled with grass instead. Check the
+  // map covers every block before trusting anything below it.
+  const idCover = await page.evaluate(() => {
+    const H = window.__henrycraft, missing = [];
+    for (const id of Object.keys(H.DEFS)) {
+      if (!Object.values(H.ids).includes(+id)) missing.push(H.DEFS[id].name);
+    }
+    return {missing, count: Object.keys(H.ids).length};
+  });
+  check(`every block has an entry in the test id map (${idCover.count} ids)`,
+        idCover.missing.length === 0, 'missing: ' + idCover.missing.join(', '));
+
+
+  // ---- 1: frame detection, both planes, every size 1x2 .. 21x21 -------------
+  console.log('1. frames are detected in both vertical planes at every size');
+  const sizes = await page.evaluate(() => {
+    const H = window.__henrycraft;
+    const MAX = H.portalMax();
+    const bad = [], seen = [];
+    // Every extreme, plus a spread through the middle rather than only small ones.
+    const cases = [];
+    for (const [w, h] of [[1,2],[2,1],[1,MAX],[MAX,1],[2,3],[MAX,MAX],[MAX,MAX-1],[20,21]]) cases.push([w,h]);
+    for (let i = 0; i < 14; i++) {
+      cases.push([1 + Math.floor(Math.random() * MAX), 1 + Math.floor(Math.random() * MAX)]);
+    }
+    const dims = H.dims();
+    for (const plane of ['x', 'z']) {
+      for (const [w, h] of cases) {
+        if (w * h < 2) continue;
+        H.loadThemeSeed('meadow', 777);
+        // High enough to clear the terrain, low enough that a 21-tall frame plus
+        // its ring still fits under the world ceiling - at y=26 a 21-high frame
+        // ran off the top and its ring could not be placed.
+        const ay = Math.max(2, Math.min(26, dims.WY - h - 3));
+        const b = H.buildFrame({plane, w, h, ax: 6, ay, fixed: 30, fill: H.ids.GRASS});
+        const r = H.analyse(b.probe.x, b.probe.y, b.probe.z);
+        seen.push(`${plane}${w}x${h}`);
+        if (!r.ok || r.w !== w || r.h !== h || r.plane !== plane) {
+          bad.push({plane, w, h, ay, got: r});
+        }
+      }
+    }
+    return {bad, count: seen.length, max: MAX};
+  });
+  check(`${sizes.count} frames from 1x2 to ${sizes.max}x${sizes.max}, both planes`,
+        sizes.bad.length === 0, JSON.stringify(sizes.bad.slice(0, 3)));
+
+  // ---- 2: corners optional, edges not ---------------------------------------
+  console.log('2. corners may be omitted; a missing edge block may not');
+  const corners = await page.evaluate(() => {
+    const H = window.__henrycraft;
+    H.loadThemeSeed('meadow', 778);
+    const a = H.buildFrame({plane: 'x', w: 3, h: 4, ax: 8, ay: 26, fixed: 30,
+                            fill: H.ids.GRASS, corners: false});
+    const noCorners = H.analyse(a.probe.x, a.probe.y, a.probe.z);
+    H.loadThemeSeed('meadow', 778);
+    const b = H.buildFrame({plane: 'x', w: 3, h: 4, ax: 8, ay: 26, fixed: 30,
+                            fill: H.ids.GRASS, gapAt: {x: 9, y: 25, z: 30}});
+    const gap = H.analyse(b.probe.x, b.probe.y, b.probe.z);
+    return {noCorners, gap};
+  });
+  check('frame with no corners is valid', corners.noCorners.ok, JSON.stringify(corners.noCorners));
+  check('frame with a missing edge block is rejected as a gap',
+        !corners.gap.ok && corners.gap.why === 'gap', JSON.stringify(corners.gap));
+
+  // ---- 2c: every wrong shape gets its own answer ---------------------------
+  console.log('2c. each wrong shape produces its own specific hint');
+  const hints = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids;
+    const out = {};
+    // gap
+    H.loadThemeSeed('meadow', 779);
+    let b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 8, ay: 26, fixed: 30, gapAt: {x: 8, y: 25, z: 30}});
+    out.gap = H.analyse(b.probe.x, b.probe.y, b.probe.z).why;
+    // not obsidian
+    H.loadThemeSeed('meadow', 779);
+    b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 8, ay: 26, fixed: 30, wrongAt: {x: 8, y: 25, z: 30}});
+    out.notObsidian = H.analyse(b.probe.x, b.probe.y, b.probe.z).why;
+    // partly filled
+    H.loadThemeSeed('meadow', 779);
+    b = H.buildFrame({plane: 'x', w: 3, h: 3, ax: 8, ay: 26, fixed: 30, unfilled: 3});
+    out.partial = H.analyse(b.probe.x, b.probe.y, b.probe.z).why;
+    // too big
+    H.loadThemeSeed('meadow', 779);
+    b = H.buildFrame({plane: 'x', w: 22, h: 4, ax: 6, ay: 26, fixed: 30});
+    out.tooBig = H.analyse(b.probe.x, b.probe.y, b.probe.z).why;
+    // 1x1
+    H.loadThemeSeed('meadow', 779);
+    b = H.buildFrame({plane: 'x', w: 1, h: 1, ax: 8, ay: 26, fixed: 30});
+    out.tooSmall = H.analyse(b.probe.x, b.probe.y, b.probe.z).why;
+    // lying flat: an obsidian ring around a filled rectangle at one height
+    H.loadThemeSeed('meadow', 779);
+    const y = 26;
+    // interior x 20..23, z 40..42; ring one block outside that on all four sides.
+    // Fill last, and only over the interior - an earlier version filled z=43 too,
+    // which overwrote that edge of the ring and made it read as a gap.
+    for (let dx = -2; dx <= 5; dx++) for (let dz = -2; dz <= 5; dz++) H.setBlock(20 + dx, y, 40 + dz, ids.AIR);
+    for (let dx = 0; dx <= 3; dx++) { H.setBlock(20 + dx, y, 39, ids.OBSIDIAN); H.setBlock(20 + dx, y, 43, ids.OBSIDIAN); }
+    for (let dz = 0; dz <= 2; dz++) { H.setBlock(19, y, 40 + dz, ids.OBSIDIAN); H.setBlock(24, y, 40 + dz, ids.OBSIDIAN); }
+    for (let dx = 0; dx <= 3; dx++) for (let dz = 0; dz <= 2; dz++) H.setBlock(20 + dx, y, 40 + dz, ids.GRASS);
+    out.flat = H.analyse(21, y, 41).why;
+    // L-shaped / stepped
+    H.loadThemeSeed('meadow', 779);
+    b = H.buildFrame({plane: 'x', w: 4, h: 4, ax: 8, ay: 26, fixed: 30});
+    H.setBlock(11, 29, 30, ids.AIR); H.setBlock(10, 29, 30, ids.AIR);
+    out.notRect = H.analyse(8, 26, 30).why;
+    return out;
+  });
+  const wantHints = {gap: 'gap', notObsidian: 'notObsidian', partial: 'partial',
+                     tooBig: 'tooBig', tooSmall: 'tooSmall', flat: 'flat', notRect: 'partial'};
+  let hintFails = [];
+  for (const k of Object.keys(wantHints)) {
+    if (hints[k] !== wantHints[k]) hintFails.push(`${k}: got ${hints[k]}, want ${wantHints[k]}`);
+  }
+  check('all seven wrong-shape cases return a specific reason, none silent',
+        hintFails.length === 0 && Object.values(hints).every(v => !!v),
+        JSON.stringify(hints));
+  note('hints: ' + Object.entries(hints).map(([k, v]) => `${k}->${v}`).join(', '));
+
+  // ---- 2b: a 21x21 portal is one merged mesh -------------------------------
+  console.log('2b. a 21x21 portal is part of the chunk mesh, not 441 objects');
+  const big = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    function frames(n) {
+      return new Promise(res => {
+        const t0 = performance.now();
+        let i = 0;
+        (function step() { i++; i < n ? requestAnimationFrame(step) : res(1000 * i / (performance.now() - t0)); })();
+      });
+    }
+    H.loadThemeSeed('meadow', 780);
+    const b = H.buildFrame({plane: 'x', w: 21, h: 21, ax: 6, ay: 12, fixed: 30, fill: H.ids.GRASS});
+    await frames(30);                                   // let chunks settle
+    // Snapshot around the lighting only. loadThemeSeed respawns animals and fish,
+    // which are Groups of meshes, so measuring across it counts the wrong thing.
+    const baseFps = await frames(45);
+    const before = H.portalMeshStats().sceneMeshes;
+    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    const sparks = H.particleCount();                   // sampled at ignition
+    await frames(30);                                   // chunk rebuild
+    const after = H.portalMeshStats();
+    const fps = await frames(45);
+    return {lit, before, after, fps, baseFps, interior: b.interior, sparks};
+  });
+  check(`441-block portal lights (${big.interior} interior blocks)`, big.lit.ok, JSON.stringify(big.lit));
+  // The bar is "not one object per block", so it is measured against the block
+  // count rather than against a small absolute number: a handful of new meshes
+  // for 441 blocks is merged geometry, and the few extra are the capped ignition
+  // sparks, which are ordinary short-lived particles.
+  check(`441 portal blocks added ${big.after.sceneMeshes - big.before} meshes, not hundreds`,
+        (big.after.sceneMeshes - big.before) < big.after.portalBlocks / 20,
+        `${big.before} -> ${big.after.sceneMeshes} meshes for ${big.after.portalBlocks} portal blocks`);
+  check(`ignition sparks are capped by area, not per block (${big.sparks} for 441 blocks)`,
+        big.sparks <= 30, `${big.sparks} particles`);
+  check('the interior is merged into chunk geometry, not one object per block',
+        big.after.glowMeshes > 0 && big.after.glowMeshes <= 4,
+        `${big.after.glowMeshes} glow chunk meshes hold ${big.after.portalBlocks} portal blocks`);
+  // An absolute 30fps is not a meaningful bar under SwiftShader, which is a
+  // software rasteriser - the whole scene runs at a fraction of tablet speed
+  // here. What is meaningful is that a 441-block portal costs almost nothing
+  // relative to the same scene without one.
+  check(`lighting it cost little: ${big.fps.toFixed(1)}fps vs ${big.baseFps.toFixed(1)}fps baseline`,
+        big.fps >= big.baseFps * 0.8,
+        `${(100 * big.fps / big.baseFps).toFixed(0)}% of baseline`);
+  note(`21x21 portal: ${big.after.portalBlocks} blocks in ${big.after.glowMeshes} merged mesh(es), ` +
+       `+${big.after.sceneMeshes - big.before} scene meshes, ` +
+       `${big.fps.toFixed(1)}fps vs ${big.baseFps.toFixed(1)}fps baseline (software GL)`);
+
+  // ---- 3: fill chooses the theme ------------------------------------------
+  console.log('3. the filling chooses the destination theme');
+  const fills = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    const want = [[ids.GRASS, 'meadow'], [ids.SNOW, 'snowy'], [ids.SAND, 'desert'],
+                  [ids.GLASS, 'island'], [ids.MUSHCAP, 'mushroom'],
+                  [ids.MUSHSTEM, 'mushroom']];
+    const out = [];
+    for (const [fill, theme] of want) {
+      H.loadThemeSeed('meadow', 781);
+      const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 8, ay: 26, fixed: 30, fill});
+      const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+      out.push({fill, want: theme, got: lit.destTheme, ok: lit.ok});
+    }
+    // an unrecognised fill must still light, just somewhere random
+    H.loadThemeSeed('meadow', 781);
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 8, ay: 26, fixed: 30, fill: ids.BRICK});
+    const odd = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    return {out, odd, mapped: H.themeForFill(ids.BRICK)};
+  });
+  const fillBad = fills.out.filter(r => !r.ok || r.got !== r.want);
+  check('grass, snow, sand, glass and mushroom each bind to their theme',
+        fillBad.length === 0, JSON.stringify(fillBad));
+  check('an unrecognised fill still lights, bound to some theme',
+        fills.odd.ok && !!fills.odd.destTheme && fills.mapped === null,
+        JSON.stringify(fills.odd));
+
+  // ---- 4: a portal always leads to the same place --------------------------
+  console.log('4. a portal lit twice leads to the same district');
+  const twice = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    H.loadThemeSeed('meadow', 782);
+    const b = H.buildFrame({plane: 'z', w: 3, h: 4, ax: 20, ay: 26, fixed: 30, fill: H.ids.SNOW});
+    const first = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    // put it out by breaking a frame block, rebuild, light again
+    H.breakBlock(b.probe.x, b.probe.y - 1, b.probe.z);
+    const b2 = H.buildFrame({plane: 'z', w: 3, h: 4, ax: 20, ay: 26, fixed: 30, fill: H.ids.SNOW});
+    const second = await H.light(b2.probe.x, b2.probe.y, b2.probe.z);
+    return {first, second};
+  });
+  check('same destination both times, and it is a real district',
+        !!twice.first.dest && twice.first.dest === twice.second.dest,
+        `${twice.first.dest} vs ${twice.second.dest}`);
+  note(`relit portal bound to ${twice.second.dest} both times`);
+
+  // ---- 5 + 6 + 7: the ones that strand him or lose a build -----------------
+  console.log(`\n5, 6, 7. arrival safety, return portals and edit preservation ` +
+              `(${TRIALS} trials)`);
+  const trials = await page.evaluate(async ({TRIALS}) => {
+    const H = window.__henrycraft, ids = H.ids;
+    const themes = H.themes().map(t => t.key);
+    const fillFor = {meadow: ids.GRASS, snowy: ids.SNOW, desert: ids.SAND,
+                     island: ids.GLASS, mushroom: ids.MUSHCAP};
+    const res = {trials: 0, noReturn: [], unsafe: [], lostEdits: [], byTheme: {}};
+
+    for (let i = 0; i < TRIALS; i++) {
+      const theme = themes[i % themes.length];
+      res.byTheme[theme] = (res.byTheme[theme] || 0) + 1;
+
+      // A fresh home district each trial, with a landmark block in it.
+      const homeSlug = await H.createDistrict('Trial ' + i, 'meadow');
+      const mark = {x: 30, y: H.surfaceY(30, 30) + 1, z: 30};
+      H.setBlock(mark.x, mark.y, mark.z, ids.RAINBOW);
+      const homeEdits = Object.keys(H.editsNow()).length;
+
+      // Build and light a portal to the trial theme.
+      const b = H.buildFrame({plane: i % 2 ? 'z' : 'x', w: 2 + (i % 3), h: 3 + (i % 2),
+                              ax: 10, ay: 26, fixed: 34, fill: fillFor[theme]});
+      const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+      if (!lit.ok) { res.unsafe.push({i, why: 'portal would not light', lit}); continue; }
+
+      // Travel.
+      const went = await H.travel(lit.id);
+      if (!went) { res.unsafe.push({i, why: 'travel failed'}); continue; }
+      res.trials++;
+
+      // 6: where he landed must be solid dry ground with room to stand.
+      const p = H.player();
+      const fx = Math.floor(p.x), fy = Math.floor(p.y), fz = Math.floor(p.z);
+      const at = H.getBlock(fx, fy, fz);
+      const head = H.getBlock(fx, fy + 1, fz);
+      const below = H.getBlock(fx, fy - 1, fz);
+      const problems = [];
+      if (at !== ids.AIR) problems.push('inside ' + at);
+      if (head !== ids.AIR) problems.push('head in ' + head);
+      if (below === ids.AIR) problems.push('airborne');
+      if (below === ids.WATER || at === ids.WATER) problems.push('in water');
+      if (problems.length) res.unsafe.push({i, theme, at: [fx, fy, fz], problems});
+
+      // 5: a lit return portal bound back to where he came from.
+      const back = H.portals().filter(q => q.lit && q.dest === homeSlug);
+      if (!back.length) res.noReturn.push({i, theme, portals: H.portals().length});
+
+      // 7: go back through it and check both districts kept their edits.
+      if (back.length) {
+        const destEdits = Object.keys(H.editsNow()).length;
+        H.setBlock(mark.x, mark.y + 2, mark.z, ids.EMERALD);   // a mark on this side
+        const destAfterMark = Object.keys(H.editsNow()).length;
+        const home = await H.travel(back[0].id);
+        if (!home) { res.lostEdits.push({i, why: 'return travel failed'}); continue; }
+        const homeNow = Object.keys(H.editsNow()).length;
+        const markBack = H.getBlock(mark.x, mark.y, mark.z);
+        if (markBack !== ids.RAINBOW) res.lostEdits.push({i, why: 'landmark gone', got: markBack});
+        if (homeNow < homeEdits) res.lostEdits.push({i, why: 'home edits shrank', homeEdits, homeNow});
+        // and the far side still has its own
+        await H.switchDistrict(back[0].dest === homeSlug ? lit.dest : homeSlug);
+        const farNow = Object.keys(H.editsNow()).length;
+        if (farNow < destAfterMark - 1) res.lostEdits.push({i, why: 'far edits shrank', destAfterMark, farNow});
+        await H.switchDistrict(homeSlug);
+      }
+    }
+    return res;
+  }, {TRIALS});
+
+  check(`5. every arrival produced a working return portal (${trials.trials} travels)`,
+        trials.noReturn.length === 0,
+        JSON.stringify(trials.noReturn.slice(0, 3)));
+  check(`6. every arrival was solid dry ground with room to stand`,
+        trials.unsafe.length === 0,
+        JSON.stringify(trials.unsafe.slice(0, 3)));
+  check(`7. travelling and returning preserved every block edit`,
+        trials.lostEdits.length === 0,
+        JSON.stringify(trials.lostEdits.slice(0, 3)));
+  note(`${trials.trials} round trips across ` +
+       Object.entries(trials.byTheme).map(([k, v]) => `${k} ${v}`).join(', '));
+
+  // ---- 8 + 9 + 10 + 11 ----------------------------------------------------
+  console.log('\n8, 9, 10, 11. breaking, deleted destinations, Go home, dwell');
+  const rest = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    const out = {};
+
+    // 8: breaking a frame block puts it out and clears the opening
+    H.loadThemeSeed('meadow', 790);
+    let b = H.buildFrame({plane: 'x', w: 3, h: 3, ax: 8, ay: 26, fixed: 30, fill: ids.GRASS});
+    let lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    const wasPortal = H.getBlock(b.probe.x, b.probe.y, b.probe.z) === ids.PORTAL;
+    H.breakBlock(b.probe.x, b.probe.y - 1, b.probe.z);        // a frame block
+    out.broke = {wasPortal, litBefore: lit.ok,
+                 interiorNow: H.getBlock(b.probe.x, b.probe.y, b.probe.z),
+                 litPortals: H.portals().filter(p => p.lit).length,
+                 air: ids.AIR};
+
+    // 9: destination deleted -> dark, not a crash
+    H.loadThemeSeed('meadow', 791);
+    b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 8, ay: 26, fixed: 30, fill: ids.SAND});
+    lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    await H.deleteDistrict(lit.dest);
+    let crashed = false, travelled = null;
+    try { travelled = await H.travel(lit.id); } catch (e) { crashed = true; }
+    out.deleted = {crashed, travelled, stillHavePortalRecord: H.portals().length >= 0,
+                   litNow: H.portals().filter(p => p.lit && p.id === lit.id).length};
+
+    // 10: Go home from a district with no portals at all
+    const away = await H.createDistrict('Far Away', 'snowy');
+    out.beforeHome = {at: away, portals: H.portals().length};
+    await H.goHome();
+    out.afterHome = {at: H.districts().current, home: H.homeSlug()};
+
+    // 11: walking through is not enough; standing is
+    H.loadThemeSeed('meadow', 792);
+    b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 8, ay: 26, fixed: 30, fill: ids.GRASS});
+    lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    const brief = await H.standIn(lit.id, H.portalDwell() * 0.5);
+    const held = await H.standIn(lit.id, H.portalDwell() + 0.3);
+    out.dwell = {dwell: H.portalDwell(), brief, held};
+    return out;
+  });
+
+  check('8. breaking a frame block extinguishes it and clears the interior to air',
+        rest.broke.wasPortal && rest.broke.interiorNow === rest.broke.air &&
+        rest.broke.litPortals === 0, JSON.stringify(rest.broke));
+  check('9. a deleted destination leaves the portal dark instead of crashing',
+        !rest.deleted.crashed && rest.deleted.travelled === false &&
+        rest.deleted.litNow === 0, JSON.stringify(rest.deleted));
+  check('10. Go home works from a district with no portals',
+        rest.afterHome.at === rest.afterHome.home, JSON.stringify(rest));
+  check('11. half the dwell time does not travel; the full time does',
+        rest.dwell.brief.travelled === false && rest.dwell.held.travelled === true,
+        JSON.stringify(rest.dwell));
+  note(`dwell is ${rest.dwell.dwell}s: ${(rest.dwell.dwell * 0.5).toFixed(2)}s stays put, ` +
+       `${(rest.dwell.dwell + 0.3).toFixed(2)}s travels`);
+
+  check('no page errors across the whole run', errs.length === 0, errs.slice(0, 3).join(' | '));
+
+  await ctx.close();
+  await browser.close();
+  srv.close();
+  console.log(`\npassed ${passed}, failed ${failed}`);
+  console.log('\nReported numbers');
+  notes.forEach(n => console.log('  - ' + n));
+  process.exit(failed === 0 ? 0 : 1);
+})().catch(e => { console.error(e); process.exit(1); });

@@ -12,6 +12,8 @@ on:
       - 'tools/check.sh'
       - 'tools/test-game.js'
       - 'tools/test-districts.js'
+      - 'tools/test-portals.js'
+      - 'tools/test-offline.js'
       - '.github/workflows/android.yml'
   # Publishing a Release triggers a build too. GitHub applies the paths filter
   # above to tag pushes as well, so a v* tag on a commit that touched nothing in
@@ -52,6 +54,22 @@ jobs:
             cat /tmp/game.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Run the portal tests
+        run: |
+          set +e
+          node tools/test-portals.js | tee /tmp/portals.txt
+          rc=${PIPESTATUS[0]}
+          { echo '## Portal tests'; echo ''; echo '```'; cat /tmp/portals.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Run the offline-safety tests
+        run: |
+          set +e
+          node tools/test-offline.js | tee /tmp/offline.txt
+          rc=${PIPESTATUS[0]}
+          { echo '## Offline safety'; echo ''; echo '```'; cat /tmp/offline.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
 
       - name: Run the district tests
