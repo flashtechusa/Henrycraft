@@ -62,15 +62,33 @@ echo "Henrycraft checks  ($ROOT)"
 echo
 
 # --- 1 -----------------------------------------------------------------------
-# No external URLs in the page. three.js legitimately contains
+# Exactly one external host is allowed in the page: the multiplayer endpoint.
+# Everything else - three.js, the icons, every asset - must still be local, so the
+# game starts with no network at all. three.js legitimately contains
 # http://www.w3.org/1999/xhtml as the createElementNS namespace, which is not a
 # network request, so it is excluded rather than removed.
-echo "1. index.html has no external URLs"
+SYNC_HOST=sync.henrysgame.com
+echo "1. index.html reaches no host except $SYNC_HOST"
 urls=$(grep -oE 'https?://[^"'"'"' <>)]+' index.html | grep -v 'www\.w3\.org' | sort -u)
 if [[ -z "$urls" ]]; then
-  ok "no external URLs (only the w3.org XML namespace remains)"
+  ok "no external URLs at all"
 else
   bad "external URLs found" "$(echo "$urls" | tr '\n' ' ')"
+fi
+
+# The endpoint is a wss:// literal, so it is checked separately - and checked to
+# be the only one, because "one allowed host" is worth nothing if a second can be
+# added without the check noticing.
+echo "1b. the only socket endpoint is $SYNC_HOST"
+hosts=$(grep -oE "(wss?://|MP_HOST=')[A-Za-z0-9._-]+" index.html \
+        | sed -E "s#(wss?://|MP_HOST=')##" | sort -u \
+        | grep -vE '^(127\.0\.0\.1|localhost)$')
+if [[ "$hosts" == "$SYNC_HOST" ]]; then
+  ok "one host, and it is $SYNC_HOST (loopback for the test harness aside)"
+elif [[ -z "$hosts" ]]; then
+  bad "no sync host found in index.html" "expected $SYNC_HOST"
+else
+  bad "unexpected socket host(s)" "$(echo "$hosts" | tr '\n' ' ')"
 fi
 
 # --- 2 -----------------------------------------------------------------------
@@ -86,12 +104,29 @@ else
 fi
 
 # --- 3 -----------------------------------------------------------------------
-echo "3. no INTERNET permission"
+# This check was the reverse of itself until multiplayer arrived: INTERNET used to
+# be forbidden. It is now required - and the offline guarantee it used to provide
+# is enforced by tools/test-offline.js instead, which fails if solo play touches
+# the network. Both halves are asserted here so neither can quietly disappear.
+echo "3. INTERNET permission is declared, and nothing else is"
 manifest_code=$(strip_xml_comments "$MANIFEST")
-if grep -qE '<uses-permission[^>]*android\.permission\.INTERNET' <<<"$manifest_code"; then
-  bad "INTERNET permission is declared" "$(grep -nE 'android\.permission\.INTERNET' <<<"$manifest_code")"
+perms=$(grep -oE '<uses-permission[^>]*android:name="[^"]+"' <<<"$manifest_code" \
+        | grep -oE 'android\.permission\.[A-Z_]+' | sort -u)
+if [[ "$perms" == "android.permission.INTERNET" ]]; then
+  ok "android.permission.INTERNET, and no other permission"
+elif [[ -z "$perms" ]]; then
+  bad "no INTERNET permission" "playing together needs it; solo play is guarded by test-offline.js"
 else
-  ok "android.permission.INTERNET absent (not counting the comment that explains why)"
+  bad "unexpected permissions" "$(echo "$perms" | tr '\n' ' ')"
+fi
+
+echo "3b. solo play is still proven offline by a test, not by the manifest"
+if grep -q 'no request left the page origin' tools/test-offline.js \
+   && grep -q 'sendBeacon' tools/test-offline.js; then
+  ok "tools/test-offline.js stubs the network and asserts nothing is called"
+else
+  bad "the offline proof is missing from tools/test-offline.js" \
+      "removing the INTERNET restriction is only safe while that test exists"
 fi
 
 # --- 4 -----------------------------------------------------------------------

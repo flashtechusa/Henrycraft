@@ -366,6 +366,21 @@ body.touch #hint{display:none}
   border-radius:8px;padding:4px 10px;font-size:12px;font-weight:800;
   letter-spacing:.02em;white-space:nowrap;pointer-events:none
 }
+/* The join code is read aloud down a phone line, so it is big, spaced out and
+   selectable, and it wraps rather than running off a narrow screen. */
+#joinCode{
+  font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace;
+  font-size:clamp(20px,5vw,34px);font-weight:900;letter-spacing:.10em;
+  background:rgba(11,20,32,.55);border:3px solid rgba(255,255,255,.30);
+  border-radius:12px;padding:10px 14px;margin:6px 0 12px;
+  word-break:break-all;user-select:all;-webkit-user-select:all
+}
+#roster{display:flex;flex-direction:column;gap:6px;margin:4px 0 10px}
+.rosterRow{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
+.rosterRow .dot{
+  width:16px;height:16px;border-radius:50%;
+  border:2px solid rgba(0,0,0,.35);flex:0 0 auto
+}
 #toast{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   font-size:clamp(26px,7vw,46px);font-weight:900;color:var(--sun);letter-spacing:.06em;
@@ -435,6 +450,7 @@ body.touch #hint{display:none}
   <div id="districtWrap">
     <div class="pickhead">Where shall we go?</div>
     <div id="districtList"></div>
+    <button class="blockbtn" id="joinBtn">🔗 Join with a code</button>
   </div>
   <button class="blockbtn go" id="playBtn">▶ Play</button>
   <p id="parent">Nothing here can hurt Henry — no monsters, no falling damage, no night. Each district saves by itself, so his buildings will still be here tomorrow.</p>
@@ -447,6 +463,7 @@ body.touch #hint{display:none}
     <button class="blockbtn" id="mFly">Flying: off</button>
     <button class="blockbtn go" id="mRescue">Take me back to the start</button>
     <button class="blockbtn go" id="mGoHome">🏠 Go home</button>
+    <button class="blockbtn" id="mTogether">👤 Playing alone</button>
     <button class="blockbtn" id="mDistricts">My districts</button>
     <button class="blockbtn" id="mHome">Title screen</button>
     <small id="saveNote">Saving automatically</small>
@@ -474,6 +491,40 @@ body.touch #hint{display:none}
     <small>Everything built there is lost. This cannot be undone.</small>
     <button class="blockbtn" id="delNo">Keep it</button>
     <button class="blockbtn danger" id="delYes">Delete it</button>
+  </div>
+</div>
+
+<div class="overlay hide" id="together">
+  <div class="card wide">
+    <h2>Playing together</h2>
+    <div class="pickhead">Read this out to whoever wants to join</div>
+    <div id="joinCode"></div>
+    <button class="blockbtn" id="tCopy">🔗 Copy the link</button>
+    <div class="pickhead">Who is here</div>
+    <div id="roster"></div>
+    <small id="tStatus"></small>
+    <button class="blockbtn go" id="tDone">Keep playing</button>
+    <button class="blockbtn" id="tAlone">👤 Play alone again</button>
+  </div>
+</div>
+
+<div class="overlay hide" id="joinPanel">
+  <div class="card">
+    <h2>Join with a code</h2>
+    <input id="jCode" type="text" maxlength="64" autocomplete="off"
+           spellcheck="false" autocapitalize="off">
+    <button class="blockbtn go" id="jGo">Go there</button>
+    <button class="blockbtn" id="jCancel">Not now</button>
+    <small>Ask whoever is already playing to read you their code.</small>
+  </div>
+</div>
+
+<div class="overlay hide" id="serverCopy">
+  <div class="card wide">
+    <h2>Somebody already shared this one</h2>
+    <p id="scWhat"></p>
+    <button class="blockbtn go" id="scUse">Use the shared one</button>
+    <button class="blockbtn" id="scNo">Keep playing alone</button>
   </div>
 </div>
 
@@ -1597,6 +1648,10 @@ function setBlock(x,y,z,id){
   edits[x+','+y+','+z]=id;
   markDirty(x,y,z);
   scheduleSave();
+  /* Share it, unless this very change arrived from somebody else - which would
+     bounce it straight back and round the room forever. Costs nothing while
+     playing alone: mp.wanted is false and there is no socket to write to. */
+  if(mp.wanted && !mp.applying) mpQueueEdit(x,y,z,id);
   return true;
 }
 
@@ -1705,30 +1760,35 @@ function limb(w,h,d,mat,pivotTop){
   return new THREE.Mesh(g,mat);
 }
 
-var henry=new THREE.Group();
-var hParts={};
-(function(){
-  var SKIN=0xefc49c, SHIRT=0xe4d7bb, HAIR=0xc9682f, HAIR_HI=0xdd8038, SHOE=0x7fc03c;
+/* One builder, two callers: Henry himself, and every remote player in a shared
+   district. Remote players are the same body in a different shirt colour with
+   their own name over it - nothing about them is a new kind of thing that could
+   behave differently. The shorts and face textures are built once and shared,
+   since eight players would otherwise mean eight canvases. */
+var shortsTex=null, faceTex=null;
+function buildAvatar(shirtHex,tagText){
+  var g=new THREE.Group(), parts={};
+  var SKIN=0xefc49c, SHIRT=shirtHex, HAIR=0xc9682f, HAIR_HI=0xdd8038, SHOE=0x7fc03c;
   var skinMat  = new THREE.MeshLambertMaterial({color:srgb(SKIN)});
   var shirtMat = new THREE.MeshLambertMaterial({color:srgb(SHIRT)});
   var hairMat  = new THREE.MeshLambertMaterial({color:srgb(HAIR)});
   var hairHi   = new THREE.MeshLambertMaterial({color:srgb(HAIR_HI)});
-  var shortsMat= new THREE.MeshLambertMaterial({map:shortsTexture()});
+  var shortsMat= new THREE.MeshLambertMaterial({map:(shortsTex||(shortsTex=shortsTexture()))});
   var shoeMat  = new THREE.MeshLambertMaterial({color:srgb(SHOE)});
   var redMat   = new THREE.MeshLambertMaterial({color:srgb(0xc4413a)});
   var blueMat  = new THREE.MeshLambertMaterial({color:srgb(0x2f5b99)});
   function box(w,h,d,mat){ return new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); }
 
   /* cream long-sleeve top with a red-and-blue band */
-  var body=box(0.42,0.52,0.26,shirtMat); body.position.y=0.81; henry.add(body);
-  var stripe=box(0.432,0.045,0.272,redMat); stripe.position.y=0.865; henry.add(stripe);
-  var collar=box(0.30,0.04,0.268,blueMat);  collar.position.y=1.045; henry.add(collar);
+  var body=box(0.42,0.52,0.26,shirtMat); body.position.y=0.81; g.add(body);
+  var stripe=box(0.432,0.045,0.272,redMat); stripe.position.y=0.865; g.add(stripe);
+  var collar=box(0.30,0.04,0.268,blueMat);  collar.position.y=1.045; g.add(collar);
 
   /* head - hair is parented to the head so it tips with him */
-  var faceMat=new THREE.MeshLambertMaterial({map:faceTexture()});
+  var faceMat=new THREE.MeshLambertMaterial({map:(faceTex||(faceTex=faceTexture()))});
   var head=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.42,0.42),
     [skinMat,skinMat,skinMat,skinMat,faceMat,skinMat]);
-  head.position.y=1.28; henry.add(head); hParts.head=head;
+  head.position.y=1.28; g.add(head); parts.head=head;
 
   var cap=box(0.455,0.13,0.455,hairMat);  cap.position.set(0,0.205,0);       head.add(cap);
   var back=box(0.455,0.26,0.07,hairMat);  back.position.set(0,0.06,-0.215);  head.add(back);
@@ -1738,12 +1798,12 @@ var hParts={};
   var swoop=box(0.15,0.11,0.13,hairHi);   swoop.position.set(-0.075,0.28,0.10); head.add(swoop);
 
   /* cream sleeves, bare hands */
-  hParts.armL=limb(0.13,0.38,0.18,shirtMat,true); hParts.armL.position.set(-0.275,1.04,0);
-  hParts.armR=limb(0.13,0.38,0.18,shirtMat,true); hParts.armR.position.set( 0.275,1.04,0);
+  parts.armL=limb(0.13,0.38,0.18,shirtMat,true); parts.armL.position.set(-0.275,1.04,0);
+  parts.armR=limb(0.13,0.38,0.18,shirtMat,true); parts.armR.position.set( 0.275,1.04,0);
   var handL=box(0.14,0.12,0.19,skinMat); handL.position.y=-0.435;
   var handR=box(0.14,0.12,0.19,skinMat); handR.position.y=-0.435;
-  hParts.armL.add(handL); hParts.armR.add(handR);
-  henry.add(hParts.armL,hParts.armR);
+  parts.armL.add(handL); parts.armR.add(handR);
+  g.add(parts.armL,parts.armR);
 
   /* blue print swim shorts, bare shins, green slides */
   function buildLeg(){
@@ -1754,16 +1814,22 @@ var hParts={};
     var strap=box(0.185,0.06,0.09,shoeMat);    strap.position.set(0,-0.50,0.06);  g.add(strap);
     return g;
   }
-  hParts.legL=buildLeg(); hParts.legL.position.set(-0.105,0.55,0);
-  hParts.legR=buildLeg(); hParts.legR.position.set( 0.105,0.55,0);
-  henry.add(hParts.legL,hParts.legR);
+  parts.legL=buildLeg(); parts.legL.position.set(-0.105,0.55,0);
+  parts.legR=buildLeg(); parts.legR.position.set( 0.105,0.55,0);
+  g.add(parts.legL,parts.legR);
 
-  var tag=new THREE.Sprite(new THREE.SpriteMaterial({map:nameTag('HENRY'),depthTest:false,transparent:true}));
+  var tag=new THREE.Sprite(new THREE.SpriteMaterial({map:nameTag(tagText),depthTest:false,transparent:true}));
   tag.scale.set(1.05,0.3,1); tag.position.y=1.98;
-  henry.add(tag);
+  g.add(tag);
 
-  scene.add(henry);
-})();
+  parts.tag=tag;
+  return {group:g, parts:parts};
+}
+
+/* Henry, with the shirt colour and name he has always had. */
+var built=buildAvatar(0xe4d7bb,'HENRY');
+var henry=built.group, hParts=built.parts;
+scene.add(henry);
 
 /* ---------------- friendly animals ---------------- */
 var animals=[];
@@ -3674,6 +3740,7 @@ function snapshot(){
     p:[+player.x.toFixed(2),+player.y.toFixed(2),+player.z.toFixed(2),+yaw.toFixed(3)],
     stars:stars.map(function(s){ return s.done?1:0; }),
     sel:selected,
+    code:current&&current.code?current.code:null,
     v:2,                       /* 2 adds portals; v1 records simply have none */
     portals:portalsToSave(),
     created:current&&current.created?current.created:null,
@@ -3694,7 +3761,7 @@ function saveCurrent(){
     return true;
   });
   entry=entry||{slug:rec.slug};
-  entry.name=rec.name; entry.theme=rec.theme;
+  entry.name=rec.name; entry.theme=rec.theme; entry.code=rec.code||null;
   entry.created=rec.created; entry.lastPlayed=rec.lastPlayed;
   districtIndex.list.unshift(entry);
   districtIndex.current=rec.slug;
@@ -3718,7 +3785,11 @@ document.addEventListener('visibilitychange',function(){ if(document.hidden){ sa
 
 /* Build the live world from a district record. */
 function enterDistrict(rec){
-  current={slug:rec.slug,name:rec.name,theme:rec.theme,created:rec.created};
+  /* A join code belongs to one district, so arriving anywhere new leaves any
+     shared session behind rather than carrying it into the wrong world. */
+  mpStopForSwitch();
+  current={slug:rec.slug,name:rec.name,theme:rec.theme,created:rec.created,
+           code:rec.code||null};
   seed=rec.seed>>>0;
   starSeed=(typeof rec.starSeed==='number')?rec.starSeed>>>0:seed;
   edits=rec.edits||{};
@@ -3868,6 +3939,591 @@ function loadDistricts(){
   });
 }
 
+/* ---------------- multiplayer ----------------
+
+   Several people in one district: him, his dad, grandparents. Four rules run
+   through every line of this section, and all four are safety rather than taste.
+
+   Solo play makes no network calls at all. The WebSocket is constructed in
+   exactly one place, mpConnect, reached only from a deliberate "play together"
+   press or a ?district= link. Nothing here runs while playing alone, which is
+   what keeps the tablet working with no signal - and test-offline.js proves it
+   by stubbing WebSocket, fetch, XHR, EventSource and sendBeacon and failing if
+   any of them is touched.
+
+   No text from another player is ever displayed. Names are generated locally
+   from a fixed word list, validated against that same list before they are
+   drawn, and written with textContent - never innerHTML. There is no chat and no
+   field anybody can type into that another player would read. That is a
+   deliberate decision, not a simplification.
+
+   Nobody can affect anybody else's body. A remote player is a mesh in the scene
+   and nothing more: collision reads the block array only, so a remote avatar
+   cannot push, trap, damage or move Henry, and there is no message that could.
+
+   Nothing merges silently. When multiplayer is turned on for a district the
+   server has never seen, ours becomes the shared copy. If the server already has
+   one, we say so on screen and wait to be told what to do, keeping our own copy
+   either way. A silent merge is how somebody loses a build without ever knowing.
+*/
+var MP_HOST='sync.henrysgame.com';
+var MP_MAX=8;
+var MP_SEND=0.1;                 /* 10 moves a second, as the brief specifies */
+var ME_KEY='henrycraft-me';
+
+/* The client builds names from these and the server validates against the same
+   two lists, so a name is never free text at either end. */
+var MP_FIRST=['Red','Blue','Green','Gold','Silver','Purple','Orange','Pink',
+              'Teal','Lime','Coral','Sunny','Frosty','Brave','Jolly','Swift'];
+var MP_SECOND=['Fox','Otter','Badger','Robin','Hare','Owl','Bear','Wolf',
+               'Newt','Finch','Moth','Crab','Deer','Mole','Wren','Seal'];
+var MP_COLOURS=['#e4d7bb','#c0392b','#2f7fd6','#4fc04f','#f2c231','#9b59b6',
+                '#e67e22','#1abc9c'];
+
+/* Codes read aloud over the phone, so I, O, 0 and 1 are left out: ten characters
+   from 32 is a little over 2^50, which is not guessable, and none of them can be
+   misheard as another. */
+var MP_CODE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+var MP_CODE_RE=/^[a-z0-9]+(?:-[a-z0-9]+){0,4}-[A-Z0-9]{10}$/;
+
+/* The one place a name becomes visible text. Anything not from the lists above
+   is replaced rather than shown, and deliberately without an error: an error
+   message is itself a way to get a stranger's text in front of a child. */
+function mpSafeName(raw){
+  if(typeof raw!=='string') return 'Blue Fox';
+  var parts=raw.split(' ');
+  if(parts.length===2 && MP_FIRST.indexOf(parts[0])>=0 && MP_SECOND.indexOf(parts[1])>=0){
+    return raw;
+  }
+  return 'Blue Fox';
+}
+function mpSafeColour(raw){
+  return MP_COLOURS.indexOf(raw)>=0 ? raw : MP_COLOURS[0];
+}
+function mpColourHex(raw){ return parseInt(mpSafeColour(raw).slice(1),16); }
+
+function mpRandom(n){
+  var r=new Uint8Array(n);
+  if(window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(r);
+  else for(var i=0;i<n;i++) r[i]=Math.floor(Math.random()*256);
+  return r;
+}
+function makeJoinCode(slug){
+  var r=mpRandom(10), s='';
+  for(var i=0;i<10;i++) s+=MP_CODE_CHARS.charAt(r[i]%MP_CODE_CHARS.length);
+  return slug+'-'+s;
+}
+/* "green-meadow-K7Q4XM2P9T" -> "Green Meadow", so a district joined by code gets
+   a name a child recognises instead of the code itself. */
+function mpCodeWords(code){
+  var parts=String(code).split('-');
+  parts.pop();
+  var words=parts.filter(function(p){ return /[a-z]/.test(p); }).map(function(p){
+    return p.charAt(0).toUpperCase()+p.slice(1);
+  });
+  return words.length?words.join(' '):'Shared District';
+}
+/* Forgiving about how a code is typed - spaces for dashes, any case - because an
+   adult is reading it off a phone screen. Strict about what it accepts. */
+function mpTidyCode(raw){
+  var s=String(raw||'').trim().replace(/\s+/g,'-').replace(/-+/g,'-')
+         .replace(/^-|-$/g,'');
+  var i=s.lastIndexOf('-');
+  if(i<1) return '';
+  return s.slice(0,i).toLowerCase()+'-'+s.slice(i+1).toUpperCase();
+}
+function mpEndpoint(code){
+  var host=MP_HOST, scheme='wss';
+  var m=/[?&]sync=([^&]+)/.exec(location.search);
+  if(m){
+    var h=decodeURIComponent(m[1]);
+    /* Loopback only, and only so the test harness can point the game at a local
+       copy of the worker. A link that could aim a child's game at a stranger's
+       server would undo the whole point of unguessable join codes, so anything
+       that is not localhost is ignored rather than honoured. */
+    if(/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h)){ host=h; scheme='ws'; }
+  }
+  return scheme+'://'+host+'/district/'+encodeURIComponent(code);
+}
+
+var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
+        retry:0, timer:null, clock:0, last:null, queue:[], applying:false,
+        accepted:false, pending:null, calls:0, ever:false};
+
+function mpOn(){ return mp.wanted; }
+function mpSetStatus(s){ mp.status=s; mpPaintPanel(); }
+
+/* A name and shirt colour that stick, so he is the same player tomorrow. */
+var mpMe=null;
+function mpIdentity(){
+  if(mpMe) return Promise.resolve(mpMe);
+  return readJSON(ME_KEY).then(function(rec){
+    if(rec && mpSafeName(rec.name)===rec.name){
+      mpMe={name:rec.name, colour:mpSafeColour(rec.colour)};
+      return mpMe;
+    }
+    var r=mpRandom(3);
+    mpMe={name:MP_FIRST[r[0]%MP_FIRST.length]+' '+MP_SECOND[r[1]%MP_SECOND.length],
+          colour:MP_COLOURS[r[2]%MP_COLOURS.length]};
+    return writeJSON(ME_KEY,mpMe).then(function(){ return mpMe; });
+  }).catch(function(){
+    mpMe={name:'Blue Fox', colour:MP_COLOURS[0]};
+    return mpMe;
+  });
+}
+
+/* Portals stay a solo feature: the protocol carries blocks, not portal records,
+   so a PORTAL block arriving at somebody else would draw a portal that leads
+   nowhere. Filtering it out both ways means the far side sees the obsidian frame
+   with air inside - honest, and nothing anybody built is lost. */
+function mpShareableEdits(){
+  var out={}, k;
+  for(k in edits) if(edits[k]!==PORTAL) out[k]=edits[k];
+  return out;
+}
+
+function mpQueueEdit(x,y,z,b){
+  if(b===PORTAL) return;
+  mp.queue.push({x:x,y:y,z:z,block:b});
+}
+function mpSend(o){
+  if(!mp.ws || mp.ws.readyState!==1) return false;
+  try{ mp.ws.send(JSON.stringify(o)); mp.calls++; return true; }catch(e){ return false; }
+}
+
+function mpStart(code){
+  if(!current) return;
+  mp.wanted=true;
+  mp.code=code||current.code||makeJoinCode(current.slug);
+  mp.retry=0;
+  if(!current.code || current.code!==mp.code){
+    current.code=mp.code;
+    scheduleSave();
+  }
+  mpIdentity().then(function(){ mpConnect(); });
+  mpPaintToggle();
+}
+/* Stop, and mean it: no reconnect timer left running, no avatars left standing
+   in an empty world. */
+function mpStop(quiet){
+  mp.wanted=false;
+  if(mp.timer){ clearTimeout(mp.timer); mp.timer=null; }
+  if(mp.ws){
+    mpSend({type:'leave'});
+    try{ mp.ws.close(1000,'left'); }catch(e){}
+    mp.ws=null;
+  }
+  mpClearPlayers();
+  mp.queue.length=0;
+  mp.accepted=false;
+  mp.pending=null;
+  mp.ever=false;
+  mpSetStatus('off');
+  mpPaintToggle();
+  if(!quiet) toast('👤 Playing alone',1800);
+}
+/* A join code belongs to one district, so going anywhere else - switching,
+   travelling through a portal, going home - leaves the shared session. */
+function mpStopForSwitch(){
+  if(mp.wanted) mpStop(true);
+}
+
+function mpConnect(){
+  if(!mp.wanted || !mp.code || mp.ws) return;
+  var ws;
+  try{ ws=new WebSocket(mpEndpoint(mp.code)); }
+  catch(e){ mpRetry(); return; }
+  mp.ws=ws;
+  mpSetStatus(mp.retry?'reconnecting':'connecting');
+  ws.onopen=function(){
+    mp.retry=0;
+    mpSend({type:'join', playerName:mpMe.name, colour:mpMe.colour,
+            offer:{seed:seed, starSeed:starSeed, theme:theme.key,
+                   edits:mpShareableEdits()}});
+  };
+  ws.onmessage=function(e){ mpMessage(e.data); };
+  ws.onerror=function(){ /* onclose always follows; a child is shown nothing */ };
+  ws.onclose=function(ev){
+    mp.ws=null;
+    mpClearPlayers();
+    if(ev && ev.code===4001){ mpFull(); return; }
+    if(mp.wanted){ mpSetStatus('reconnecting'); mpRetry(); }
+    else mpSetStatus('off');
+  };
+}
+/* Quiet, patient reconnection. Never a dialog: from his side the world simply
+   carries on, alone, until the others reappear. */
+function mpRetry(){
+  if(mp.timer || !mp.wanted) return;
+  var wait=Math.min(15000, 1000*Math.pow(2,Math.min(mp.retry++,4)));
+  mp.timer=setTimeout(function(){ mp.timer=null; mpConnect(); },wait);
+}
+function mpFull(){
+  mp.wanted=false;
+  if(mp.timer){ clearTimeout(mp.timer); mp.timer=null; }
+  mpClearPlayers();
+  mpSetStatus('full');
+  mpPaintToggle();
+  toast('That district is full - still playing here',3000);
+}
+
+function mpMessage(raw){
+  var m;
+  try{ m=JSON.parse(raw); }catch(e){ return; }
+  if(!m || typeof m.type!=='string') return;
+  if(m.type==='full'){ mpFull(); return; }
+  if(m.type==='welcome'){ mpWelcome(m); return; }
+  if(m.type==='joined'){ mpAddPlayer(m.player); mpPaintPanel(); return; }
+  if(m.type==='left'){ mpRemovePlayer(m.id); mpPaintPanel(); return; }
+  if(m.type==='moved'){ mpMoved(m); return; }
+  if(m.type==='edited'){ mpRemoteEdit(m); return; }
+  /* Everything else is dropped. Nothing unrecognised is echoed, stored or shown,
+     so an unknown message cannot become a way to put text on screen. */
+}
+
+function mpWelcome(w){
+  mp.me=w.you||null;
+  mpClearPlayers();
+  (w.players||[]).forEach(mpAddPlayer);
+  mp.ever=true;
+  if(w.adopted){
+    /* The server had never seen this district, so ours is now the shared one. */
+    mp.accepted=true;
+    mpSetStatus('sharing');
+    mpPaintPanel();
+    toast('🌍 Sharing this district',2400);
+    return;
+  }
+  if(mp.accepted){
+    /* A reconnect. Both sides may have moved on, so take the server's blocks and
+       push up anything of ours it has not got. Neither side loses work. */
+    mpResync(w);
+    mpSetStatus('sharing');
+    mpPaintPanel();
+    return;
+  }
+  /* First time in, and the server already has a copy of this district. Nothing
+     is touched until somebody says which one to keep. */
+  mp.pending=w;
+  mpSetStatus('choose');
+  mpShowServerCopy(w);
+}
+
+function mpResync(w){
+  var se=w.edits||{}, k, p;
+  for(k in se){
+    p=k.split(',');
+    mpApply(+p[0],+p[1],+p[2],se[k]);
+  }
+  for(k in edits){
+    if(!(k in se) && edits[k]!==PORTAL){
+      p=k.split(',');
+      mpQueueEdit(+p[0],+p[1],+p[2],edits[k]);
+    }
+  }
+}
+
+/* Take the server's district wholesale, having been told so on screen. The local
+   copy is duplicated first rather than overwritten - the brief says do not lose
+   a build, and "you were warned" is not good enough when a five-year-old built
+   it. */
+function mpAdoptServerCopy(){
+  var w=mp.pending;
+  if(!w) return Promise.resolve(false);
+  mp.pending=null;
+  var mine=Object.keys(edits).length;
+  var keep=mine?mpDuplicateLocal():Promise.resolve(null);
+  return keep.then(function(){
+    seed=(w.seed>>>0);
+    starSeed=(typeof w.starSeed==='number'?w.starSeed:w.seed)>>>0;
+    applyTheme(themeByKey(w.theme));
+    edits={};
+    var k, p, se=w.edits||{};
+    for(k in se) if(se[k]!==PORTAL) edits[k]=se[k];
+    generateWorld();
+    applyEdits();
+    for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
+    rebuildAll();
+    placeStars(null); spawnAnimals(); spawnFish(); recountFire();
+    portals=[]; reindexPortals();
+    findSpawn();
+    mp.accepted=true;
+    mpSetStatus('sharing');
+    mpPaintPanel();
+    scheduleSave(); doSave();
+    return true;
+  });
+}
+/* A side-by-side copy of what was here before the shared version replaced it. */
+function mpDuplicateLocal(){
+  var copy=snapshot();
+  var mineName=uniqueName(copy.name+' (mine)');
+  copy.name=mineName;
+  copy.slug=uniqueSlug(slugify(mineName));
+  copy.code=null;
+  copy.created=nowStamp(); copy.lastPlayed=nowStamp();
+  return writeJSON(districtKey(copy.slug),copy).then(function(){
+    districtIndex.list.push({slug:copy.slug,name:copy.name,theme:copy.theme,
+                             created:copy.created,lastPlayed:copy.lastPlayed});
+    return writeJSON(INDEX_KEY,districtIndex);
+  }).then(function(){
+    toast('Your own copy is saved as "'+mineName+'"',3600);
+    return true;
+  });
+}
+
+/* ---- remote edits ---- */
+function mpApply(x,y,z,b){
+  if(b===PORTAL) return;                 /* never arrives from a sane client */
+  if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)) return;
+  if(!DEFS[b] && b!==AIR) return;
+  mp.applying=true;
+  setBlock(x,y,z,b);
+  mp.applying=false;
+}
+function mpRemoteEdit(m){
+  mpApply(m.x,m.y,m.z,m.block);
+}
+
+/* ---- remote players ---- */
+function mpAddPlayer(p){
+  if(!p || typeof p.id!=='string' || mp.players[p.id]) return;
+  if(p.id===mp.me) return;
+  var label=mpSafeName(p.name);
+  var built=buildAvatar(mpColourHex(p.colour), label.toUpperCase());
+  built.group.visible=false;             /* until we know where they are */
+  scene.add(built.group);
+  mp.players[p.id]={id:p.id, label:label, colour:mpSafeColour(p.colour),
+                    group:built.group, parts:built.parts,
+                    from:null, to:null, t:1, walk:0, speed:0};
+}
+function mpRemovePlayer(id){
+  var p=mp.players[id];
+  if(!p) return;
+  scene.remove(p.group);
+  delete mp.players[id];
+}
+function mpClearPlayers(){
+  for(var id in mp.players) mpRemovePlayer(id);
+  mp.players={};
+}
+function mpMoved(m){
+  var p=mp.players[m.id];
+  if(!p) return;
+  if(!Number.isFinite(m.x)||!Number.isFinite(m.y)||!Number.isFinite(m.z)) return;
+  var to={x:m.x, y:m.y, z:m.z, yaw:Number.isFinite(m.yaw)?m.yaw:0};
+  p.from=p.to?{x:p.group.position.x, y:p.group.position.y, z:p.group.position.z,
+               yaw:p.yawNow||0}:to;
+  var dx=to.x-p.from.x, dz=to.z-p.from.z;
+  p.speed=Math.hypot(dx,dz)/MP_SEND;
+  p.to=to; p.t=0;
+  p.group.visible=true;
+}
+
+/* Advisory only, and drawn only. This runs after physics and writes nothing but
+   mesh transforms, which is what makes a remote player unable to shove Henry. */
+function mpUpdate(dt){
+  if(!mp.wanted) return;
+  var id, p;
+
+  mp.clock+=dt;
+  if(mp.clock>=MP_SEND){
+    mp.clock=0;
+    var now=player.x.toFixed(2)+','+player.y.toFixed(2)+','+player.z.toFixed(2)+','+yaw.toFixed(2);
+    if(now!==mp.last){
+      if(mpSend({type:'move', x:+player.x.toFixed(2), y:+player.y.toFixed(2),
+                 z:+player.z.toFixed(2), yaw:+yaw.toFixed(3)})) mp.last=now;
+    }
+    /* Block edits go out in bounded batches: lighting a 21x21 portal touches 441
+       cells at once, and a burst that size should not stall a frame. */
+    var sent=0;
+    while(mp.queue.length && sent<64){
+      var e=mp.queue[0];
+      if(!mpSend({type:'edit', x:e.x, y:e.y, z:e.z, block:e.block})) break;
+      mp.queue.shift(); sent++;
+    }
+  }
+
+  for(id in mp.players){
+    p=mp.players[id];
+    if(!p.to) continue;
+    p.t=Math.min(1,p.t+dt/MP_SEND);
+    var a=p.from||p.to, b=p.to, k=p.t;
+    p.group.position.set(a.x+(b.x-a.x)*k, a.y+(b.y-a.y)*k, a.z+(b.z-a.z)*k);
+    /* shortest way round, so nobody spins the long way at the seam */
+    var d=b.yaw-a.yaw;
+    while(d>Math.PI) d-=Math.PI*2;
+    while(d<-Math.PI) d+=Math.PI*2;
+    p.yawNow=a.yaw+d*k;
+    p.group.rotation.y=p.yawNow+Math.PI;
+    /* the same walk swing Henry has, driven by how fast they are actually moving */
+    var amp=Math.min(1,p.speed/4.6);
+    p.walk+=p.speed*dt*2.3;
+    var sw=Math.sin(p.walk*3.4)*0.85*amp;
+    p.parts.legL.rotation.x=sw;  p.parts.legR.rotation.x=-sw;
+    p.parts.armL.rotation.x=-sw*0.8; p.parts.armR.rotation.x=sw*0.8;
+  }
+}
+
+/* ---- the one button, and the panels around it ---- */
+function mpToggleLabel(){
+  if(mp.status==='sharing') return '🌍 Playing together';
+  if(mp.status==='connecting') return '🌍 Connecting…';
+  if(mp.status==='reconnecting') return mp.ever?'🌍 Finding them again…':'🌍 Still trying…';
+  if(mp.status==='choose') return '🌍 Playing together';
+  if(mp.status==='full') return '👤 Playing alone (it was full)';
+  return '👤 Playing alone';
+}
+function mpPaintToggle(){
+  var b=document.getElementById('mTogether');
+  if(b) b.textContent=mpToggleLabel();
+}
+function mpStatusLine(){
+  if(mp.status==='sharing'){
+    var n=Object.keys(mp.players).length;
+    return n?('Playing with '+n+(n===1?' other person':' other people')):'Waiting for someone to join';
+  }
+  if(mp.status==='connecting') return 'Connecting…';
+  /* Two different situations, and telling a grown-up which one it is saves a lot
+     of guessing: never got through at all, versus got through and dropped. */
+  if(mp.status==='reconnecting'){
+    return mp.ever ? 'Lost them for a moment - still trying. Keep playing.'
+                   : 'Still trying to reach the others. Keep playing meanwhile.';
+  }
+  if(mp.status==='choose') return 'Waiting for you to choose';
+  if(mp.status==='full') return 'That district was full, so this one is just yours';
+  return 'Playing alone';
+}
+function mpPaintPanel(){
+  mpPaintToggle();
+  var code=document.getElementById('joinCode');
+  if(code) code.textContent=mp.code||'';
+  var st=document.getElementById('tStatus');
+  if(st) st.textContent=mpStatusLine();
+  var host=document.getElementById('roster');
+  if(!host) return;
+  /* Built with createElement and textContent, never innerHTML, and every name
+     goes through mpSafeName first. This is the only place another player's
+     identity becomes pixels, and it is why there is no path from what somebody
+     else sends to what he reads. */
+  while(host.firstChild) host.removeChild(host.firstChild);
+  var rows=[{label:(mpMe&&mpMe.name)||'You', colour:(mpMe&&mpMe.colour)||MP_COLOURS[0], me:true}];
+  for(var id in mp.players){
+    rows.push({label:mp.players[id].label, colour:mp.players[id].colour, me:false});
+  }
+  rows.forEach(function(r){
+    var row=document.createElement('div');
+    row.className='rosterRow';
+    var dot=document.createElement('span');
+    dot.className='dot';
+    dot.style.background=mpSafeColour(r.colour);
+    var nm=document.createElement('span');
+    nm.textContent=mpSafeName(r.label)+(r.me?' (you)':'');
+    row.appendChild(dot); row.appendChild(nm);
+    host.appendChild(row);
+  });
+}
+function mpShareLink(){
+  return location.origin+location.pathname+'?district='+encodeURIComponent(mp.code||'');
+}
+function mpShowTogether(){
+  mpPaintPanel();
+  el('together').classList.remove('hide');
+}
+function mpShowServerCopy(w){
+  var n=Object.keys(w.edits||{}).length;
+  var mine=Object.keys(edits).length;
+  el('scWhat').textContent=
+    'Somebody has already shared a district with this code, and it has '+n+
+    ' blocks in it. Playing together means using their version. '+
+    (mine?'Yours will be kept here as a separate district - nothing you built is lost.'
+        :'Nothing of yours is affected.');
+  el('serverCopy').classList.remove('hide');
+}
+
+/* Joining: a code and nothing else. No account, no sign-in, no email. */
+function mpJoinByCode(raw){
+  var code=mpTidyCode(raw);
+  if(!MP_CODE_RE.test(code)){
+    toast('That code does not look right',2600);
+    return Promise.resolve(false);
+  }
+  /* Already have this district? Go back to it rather than making a second one. */
+  var known=null;
+  districtIndex.list.forEach(function(d){ if(d.code===code) known=d.slug; });
+  var step=known?switchDistrict(known)
+                :createDistrict(mpCodeWords(code),'meadow');
+  return step.then(function(){
+    if(current) current.code=code;
+    mpStart(code);
+    return saveCurrent();
+  }).then(function(){ return true; });
+}
+
+
+/* ---- the buttons ----
+   Turning sharing on is one press. Turning it off is a press inside the panel
+   rather than the same button toggling straight back, so a mis-tap cannot end a
+   session everybody else is still in. */
+el('mTogether').addEventListener('click',function(){
+  toggleMenu(false);
+  if(!mp.wanted) mpStart(null);
+  mpShowTogether();
+});
+el('tDone').addEventListener('click',function(){
+  el('together').classList.add('hide');
+});
+el('tAlone').addEventListener('click',function(){
+  el('together').classList.add('hide');
+  mpStop(false);
+});
+el('tCopy').addEventListener('click',function(){
+  var link=mpShareLink();
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(link).then(function(){ toast('Link copied',1800); },
+                                            function(){ toast(link,4000); });
+  } else toast(link,4000);
+});
+el('joinBtn').addEventListener('click',function(){
+  el('jCode').value='';
+  el('joinPanel').classList.remove('hide');
+});
+el('jCancel').addEventListener('click',function(){
+  el('joinPanel').classList.add('hide');
+});
+el('jGo').addEventListener('click',function(){
+  var v=el('jCode').value;
+  mpJoinByCode(v).then(function(ok){
+    if(!ok) return;
+    el('joinPanel').classList.add('hide');
+    buildDistrictList();
+    startPlaying();
+    mpShowTogether();
+  });
+});
+el('scUse').addEventListener('click',function(){
+  el('serverCopy').classList.add('hide');
+  mpAdoptServerCopy();
+});
+el('scNo').addEventListener('click',function(){
+  el('serverCopy').classList.add('hide');
+  mpStop(false);
+});
+
+/* A ?district=<code> link opens straight into a shared district, which is the
+   whole point of it - a grandparent should not have to be talked through a menu.
+   An unusable code is ignored and the game starts normally. */
+function mpDeepLink(){
+  var m=/[?&]district=([^&]+)/.exec(location.search);
+  if(!m) return false;
+  var code=mpTidyCode(decodeURIComponent(m[1]));
+  if(!MP_CODE_RE.test(code)) return false;
+  mpJoinByCode(code).then(function(ok){
+    if(ok){ startPlaying(); mpShowTogether(); }
+  });
+  return true;
+}
+
 /* ---------------- main loop ---------------- */
 var ready=false, last=performance.now()/1000, introAngle=0;
 
@@ -3925,6 +4581,7 @@ function frame(){
     updateStars(dt,now);
     animateFire(dt);
     updatePortals(dt);
+    mpUpdate(dt);
     updateHintMark(now);
     flushDirty();
   }
@@ -3958,6 +4615,7 @@ function boot(){
     enterDistrict(rec);
     buildDistrictList();
     ready=true;
+    mpDeepLink();
   });
   frame();
 }
@@ -4104,6 +4762,21 @@ window.__henrycraft={
   particleCount:function(){ return particles.length; },
   /* Read straight after a frame: three.js resets info.render each render(), so
      these are the last frame's numbers. */
+  /* Structural fingerprint of the local avatar. Captured before the avatar
+     builder was parameterised for remote players, so the refactor can be proved
+     not to have changed Henry himself. */
+  avatarProbe:function(){
+    var n=0, sum=0, mats=[];
+    henry.traverse(function(o){
+      /* Skip the root: its position is wherever Henry happens to be standing,
+         which is world state rather than anything about how he is built. */
+      if(o===henry) return;
+      n++;
+      sum+=o.position.x*1e4+o.position.y*1e3+o.position.z*1e2;
+      if(o.material&&o.material.color) mats.push(o.material.color.getHexString());
+    });
+    return {nodes:n, posHash:+sum.toFixed(3), colours:mats.join(',')};
+  },
   renderStats:function(){
     return {calls:renderer.info.render.calls,
             triangles:renderer.info.render.triangles,
@@ -4140,6 +4813,53 @@ window.__henrycraft={
     }
     return {sceneMeshes:meshes, glowMeshes:glowMeshes, glowTris:glowTris,
             portalBlocks:Object.keys(portalCells).length};
+  },
+  /* ---- multiplayer, for tools/test-multiplayer.js ----
+     Everything here either reads state or does exactly what a button does. feed()
+     is the one that matters for safety: it pushes a raw frame through the same
+     handler the socket uses, so a test can hand the client a hostile name and
+     check that nothing hostile ever reaches the screen. */
+  mp:{
+    host:function(){ return MP_HOST; },
+    max:function(){ return MP_MAX; },
+    on:function(){ return mp.wanted; },
+    status:function(){ return mp.status; },
+    code:function(){ return mp.code; },
+    me:function(){ return mpMe?{name:mpMe.name,colour:mpMe.colour}:null; },
+    calls:function(){ return mp.calls; },
+    queued:function(){ return mp.queue.length; },
+    endpoint:mpEndpoint,
+    tidy:mpTidyCode,
+    words:mpCodeWords,
+    safeName:mpSafeName,
+    makeCode:makeJoinCode,
+    codeRe:function(){ return MP_CODE_RE.source; },
+    start:function(code){ mpStart(code||null); return mp.code; },
+    stop:function(){ mpStop(true); },
+    join:mpJoinByCode,
+    drop:function(){
+      /* Pull the rug out the way a tunnel does, without asking to stop: the
+         reconnect path is what test 4 is about. */
+      if(mp.ws){ try{ mp.ws.close(4999,'test drop'); }catch(e){} }
+    },
+    players:function(){
+      return Object.keys(mp.players).map(function(id){
+        var p=mp.players[id];
+        return {id:id, label:p.label, colour:p.colour, visible:p.group.visible,
+                x:+p.group.position.x.toFixed(2), y:+p.group.position.y.toFixed(2),
+                z:+p.group.position.z.toFixed(2), yaw:p.yawNow||0};
+      });
+    },
+    rosterText:function(){
+      var host=document.getElementById('roster');
+      return host?host.textContent:'';
+    },
+    feed:function(obj){ mpMessage(typeof obj==='string'?obj:JSON.stringify(obj)); },
+    pending:function(){ return !!mp.pending; },
+    adopt:mpAdoptServerCopy,
+    statusLine:mpStatusLine,
+    toggleLabel:mpToggleLabel,
+    shareLink:mpShareLink
   },
   deleteDistrict:deleteDistrict,
   saveNow:function(){ saveDirty=false; return saveCurrent(); },

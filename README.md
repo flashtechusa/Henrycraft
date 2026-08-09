@@ -59,6 +59,77 @@ with a dice button to re-roll. The name can be typed over, but typing is never
 required. Deleting one is a small button in the corner of its card followed by a
 confirm, so a mis-tap cannot wipe a build.
 
+## Playing together
+
+Everything below is off until somebody turns it on. Alone is the default, and
+alone makes no network calls at all &mdash; that is what keeps the tablet working
+in the car.
+
+**To share a district:** pause, press **Playing alone**, and it flips to *Playing
+together*. A panel shows the district's join code, big enough to read down a
+phone, plus a **Copy the link** button. Turning it back off is a separate button
+inside that panel rather than the same one, so a mis-tap cannot end a session
+everybody else is still in.
+
+**To join one:** *Join with a code* on the title screen, or open the shared link.
+That is the whole of it &mdash; no account, no sign-in, no email, nothing to
+remember. A code looks like `green-meadow-K7Q4XM2P9T`: the district's name plus
+ten random characters, which is what stops a stranger finding a child's world by
+guessing likely names. I, O, 0 and 1 are left out so nothing is misheard when it
+is read aloud.
+
+Up to **eight** people at once. A ninth is turned away politely and simply keeps
+playing in their own copy.
+
+**There is no chat, and no field anyone can type into that another player would
+read.** That is deliberate and not a shortcut. Player names are generated from a
+fixed word list &mdash; *Jolly Otter*, *Frosty Badger* &mdash; validated against
+that same list before they are drawn, and written with `textContent`. No text from
+another player can reach the screen, and a test asserts it by feeding the client
+a hostile name directly.
+
+Nobody can affect anybody else. Positions are advisory: they move a mesh and are
+never fed into physics, so a remote player cannot push, trap or startle Henry.
+There is no message that damages anybody, because there is no damage.
+
+**Whose copy wins.** The first person to share a district uploads theirs, and it
+becomes the shared one. If the server already has that district, the game says so
+on screen and waits &mdash; and if you accept, your own version is kept
+side-by-side as *&lt;name&gt; (mine)* rather than overwritten. Nothing is ever
+merged silently.
+
+**If the connection drops** the world carries on alone and reconnects in the
+background. A child is never shown an error dialog. When it comes back, the
+server's blocks arrive and anything built in the meantime is pushed up, so neither
+side loses work.
+
+**Portals stay a solo feature.** The protocol carries blocks, not portal records,
+so a lit portal is filtered out of what is shared in both directions: your portals
+work for you, and everyone else sees the obsidian frame with air inside. Better
+than a portal that leads nowhere. Going through one leaves the shared session,
+since a join code belongs to one district.
+
+### Deploying the server
+
+The sync server is a Cloudflare Worker with one Durable Object per district, in
+`server/`. It is not deployed automatically and no account id or token is stored
+in this repository.
+
+```
+cd server
+npm install
+npx wrangler login     # opens a browser once
+npx wrangler deploy
+```
+
+That publishes to `sync.henrysgame.com` and creates the DNS record for it. The
+free plan covers a family many times over: 100,000 requests a day, incoming
+WebSocket messages billed at 20:1, outgoing free.
+
+Until it is deployed, pressing *Playing together* does no harm &mdash; the game
+keeps trying quietly in the background and stays playable. There is a test for
+exactly that.
+
 ## What's in a district
 
 **19 blocks** to build with: grass, dirt, stone, sand, wood, leaves, planks,
@@ -204,6 +275,15 @@ portal tests assert draw calls and mesh rebuilds instead. The readout counts
 frames against `performance.now()` rather than the loop's `dt`, because `dt` is
 clamped to 0.05s to stop a hitch throwing Henry through the floor, and counting
 against a clamped clock would report 20 fps on a device actually managing 5.
+
+`node tools/test-multiplayer.js` covers Phase B. It starts the real Worker with
+`wrangler dev` on a throwaway state directory &mdash; the Durable Object under test
+is the one that gets deployed &mdash; and drives real browser pages against it: two
+clients exchanging edits, a third and fourth arriving to find everything already
+built, eight filling a district and a ninth being turned away, a client dropping
+mid-session and reconnecting without losing a block, and a hostile name fed
+straight into the client to prove it never reaches the screen. It needs
+`npm ci` in `server/` first.
 
 The game exposes `window.__henrycraft` purely for that harness — read-only
 accessors plus a couple of helpers for setting up a scenario. Nothing in the game

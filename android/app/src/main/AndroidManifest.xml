@@ -3,11 +3,15 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-      There is deliberately no <uses-permission android:name="android.permission.INTERNET" />.
-      The game, three.js included, is bundled in assets, so the app cannot reach
-      the network even by accident. Leaving the permission out is the hard
-      guarantee that it works with no wifi.
+      INTERNET is declared for one reason only: "playing together", which needs a
+      WebSocket to sync.henrysgame.com. Earlier versions deliberately left it out
+      as a hard guarantee of offline play, so the guarantee has moved from the
+      manifest into a test - tools/test-offline.js stubs WebSocket, fetch,
+      XMLHttpRequest, EventSource and sendBeacon and fails if solo play touches
+      any of them. The game itself is still entirely bundled in assets: nothing is
+      fetched to start, and with no wifi it simply plays alone.
     -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"

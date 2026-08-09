@@ -14,3 +14,8 @@ android/captures/
 # Scratch files used when testing the page locally
 three.min.js
 test-local.html
+
+# Worker dev dependencies and local Durable Object state. package-lock.json is
+# committed on purpose - CI installs from it with `npm ci`.
+server/node_modules/
+server/.wrangler/

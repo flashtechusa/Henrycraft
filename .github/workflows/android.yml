@@ -14,6 +14,8 @@ on:
       - 'tools/test-districts.js'
       - 'tools/test-portals.js'
       - 'tools/test-offline.js'
+      - 'tools/test-multiplayer.js'
+      - 'server/**'
       - '.github/workflows/android.yml'
   # Publishing a Release triggers a build too. GitHub applies the paths filter
   # above to tag pushes as well, so a v* tag on a commit that touched nothing in
@@ -41,6 +43,13 @@ jobs:
 
       - name: Install Playwright with Chromium
         run: npm install --no-save playwright@1.56.1 && npx playwright install --with-deps chromium
+
+      # The multiplayer tests run the real Worker under `wrangler dev`, so the
+      # Durable Object under test is the one that gets deployed. No Cloudflare
+      # account or token is needed for local mode, and none is stored here.
+      - name: Install the Worker's dev dependencies
+        working-directory: server
+        run: npm ci
 
       - name: Run the game tests
         run: |
@@ -70,6 +79,14 @@ jobs:
           node tools/test-offline.js | tee /tmp/offline.txt
           rc=${PIPESTATUS[0]}
           { echo '## Offline safety'; echo ''; echo '```'; cat /tmp/offline.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Run the multiplayer tests
+        run: |
+          set +e
+          node tools/test-multiplayer.js | tee /tmp/mp.txt
+          rc=${PIPESTATUS[0]}
+          { echo '## Multiplayer (Phase B)'; echo ''; echo '```'; cat /tmp/mp.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
 
       - name: Run the district tests
