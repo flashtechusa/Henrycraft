@@ -10,6 +10,8 @@ on:
       - 'android/**'
       - 'index.html'
       - 'tools/check.sh'
+      - 'tools/test-game.js'
+      - 'tools/test-districts.js'
       - '.github/workflows/android.yml'
   # Publishing a Release triggers a build too. GitHub applies the paths filter
   # above to tag pushes as well, so a v* tag on a commit that touched nothing in
@@ -48,6 +50,20 @@ jobs:
             echo ''
             echo '```'
             cat /tmp/game.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Run the district tests
+        run: |
+          set +e
+          node tools/test-districts.js | tee /tmp/districts.txt
+          rc=${PIPESTATUS[0]}
+          {
+            echo '## District tests'
+            echo ''
+            echo '```'
+            cat /tmp/districts.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"

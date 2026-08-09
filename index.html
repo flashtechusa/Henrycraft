@@ -39,7 +39,10 @@ html,body{
   user-select:none;-webkit-user-select:none;
   touch-action:none;overscroll-behavior:none;
 }
-canvas{display:block;position:fixed;inset:0}
+/* Scoped to the renderer's own canvas, which three.js appends straight to body.
+   Unscoped, this rule also caught the district and theme thumbnails and pinned
+   every one of them to the top-left corner of the window. */
+body>canvas{display:block;position:fixed;inset:0}
 
 /* ---------- shared block-material rules: hard edges, hard shadows, no blur ---------- */
 .blockbtn{
@@ -167,6 +170,68 @@ body.flying #pads #btnDigDown,#pads #btnDigUp{
 #pads #btnDigUp{background:#8a6a47;box-shadow:0 5px 0 #5c452c,0 0 0 3px var(--ink)}
 #pads #btnDown{display:flex}
 
+/* ---------- districts ----------
+   Cards, not a list of words. He cannot read, so each one carries a painted
+   thumbnail of what that district looks like and he picks by sight. */
+#districtWrap{
+  background:var(--panel);border:4px solid var(--ink);border-radius:16px;
+  box-shadow:0 6px 0 rgba(0,0,0,.45);padding:12px 14px;max-width:min(96vw,660px);
+  pointer-events:auto;
+}
+#districtList{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.dcard{
+  position:relative;width:112px;border:3px solid var(--ink);border-radius:12px;
+  background:rgba(0,0,0,.25);box-shadow:0 4px 0 rgba(0,0,0,.45);
+  padding:0 0 6px;cursor:pointer;overflow:hidden;
+  transition:transform .07s linear;
+}
+.dcard:active{transform:translateY(3px)}
+.dcard.on{box-shadow:0 4px 0 rgba(0,0,0,.45),0 0 0 4px var(--sun)}
+.dcard canvas{display:block;width:112px;height:64px;image-rendering:pixelated}
+.dcard b{
+  display:block;font-size:12px;font-weight:800;letter-spacing:.02em;
+  padding:5px 6px 0;line-height:1.15;word-break:break-word;
+}
+.dcard i{display:block;font-style:normal;font-size:10px;opacity:.72;padding:1px 6px 0}
+/* Deliberately small and in a corner: a five-year-old must not be able to wipe
+   his own build by mis-tapping a card. It also goes through a confirm. */
+.dcard .x{
+  position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:6px;
+  border:2px solid var(--ink);background:rgba(192,57,43,.92);color:#fff;
+  font-size:11px;font-weight:800;line-height:16px;text-align:center;padding:0;
+}
+.dcard.newcard{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  height:96px;background:rgba(95,191,63,.22)}
+.dcard.newcard span{font-size:26px;line-height:1}
+.card.wide{min-width:min(94vw,520px);max-width:min(94vw,560px)}
+#newDistrict h2{margin-bottom:0}
+#nameRow{display:flex;gap:8px;align-items:center}
+#dName{
+  flex:1;font:inherit;font-size:16px;font-weight:800;color:var(--cream);
+  background:rgba(0,0,0,.3);border:3px solid var(--ink);border-radius:10px;
+  padding:10px 12px;min-width:0;
+}
+#dShuffle{padding:10px 12px;font-size:18px}
+#themeGrid{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.tcard{
+  width:96px;border:3px solid var(--ink);border-radius:10px;overflow:hidden;
+  background:rgba(0,0,0,.25);box-shadow:0 4px 0 rgba(0,0,0,.4);cursor:pointer;padding-bottom:5px;
+}
+.tcard.on{box-shadow:0 4px 0 rgba(0,0,0,.4),0 0 0 4px var(--sun)}
+.tcard canvas{display:block;width:96px;height:54px;image-rendering:pixelated}
+.tcard b{display:block;font-size:11px;font-weight:800;padding:4px 5px 0;line-height:1.15}
+#delWhat{margin:0;font-size:19px;font-weight:800;color:var(--sun)}
+#districtChip{font-size:13px;max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+@media (max-height:520px){
+  #districtWrap{padding:8px 10px}
+  .dcard{width:92px}
+  .dcard canvas{width:92px;height:52px}
+  .dcard b{font-size:11px}
+  .tcard{width:84px}
+  .tcard canvas{width:84px;height:47px}
+}
+
 #hint{
   position:absolute;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 84px);
   font-size:13px;font-weight:700;letter-spacing:.08em;opacity:.85;text-shadow:0 2px 0 rgba(0,0,0,.6);white-space:nowrap
@@ -218,8 +283,16 @@ body.touch #hint{display:none}
   position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;
   flex-direction:column;gap:22px;padding:24px;text-align:center;
   background:rgba(10,28,50,.55);
+  /* Short screens have more content than height. Scroll the overlay rather than
+     letting it overflow, which squashed the theme thumbnails to nothing and
+     pushed cards up over the HUD. */
+  overflow-y:auto;overscroll-behavior:contain;
 }
 .overlay.hide{display:none}
+/* The two district dialogs sit above the title screen and hide it properly,
+   instead of both being z-index 30 and showing through each other. */
+#newDistrict,#confirmDel{z-index:34;background:rgba(8,20,36,.94)}
+#newDistrict .card,#confirmDel .card{max-height:none}
 
 /* the signature: a title built like a stack of blocks */
 #title{
@@ -287,6 +360,7 @@ body.touch #hint{display:none}
   <div id="topLeft">
     <div class="chip" id="logo">HENRYCRAFT</div>
     <div class="chip" id="starChip">⭐ <b><span id="starNum">0</span>/<span id="starTot">10</span></b></div>
+    <div class="chip" id="districtChip">Home</div>
   </div>
 
   <div id="topRight">
@@ -331,10 +405,14 @@ body.touch #hint{display:none}
     <div><i>💎</i><span>Dig down to find caves, gold and diamonds</span></div>
     <div><i>🧱</i><span id="h3">Build anything you want</span></div>
     <div><i>🪽</i><span id="h4">Tap FLY, then hold UP to go higher</span></div>
-    <div><i>⭐</i><span>Find all 10 stars hidden in the world</span></div>
+    <div><i>⭐</i><span>Find all 10 stars hidden in the district</span></div>
+  </div>
+  <div id="districtWrap">
+    <div class="pickhead">Where shall we go?</div>
+    <div id="districtList"></div>
   </div>
   <button class="blockbtn go" id="playBtn">▶ Play</button>
-  <p id="parent">Nothing here can hurt Henry — no monsters, no falling damage, no night. The world saves by itself, so his buildings will still be here tomorrow.</p>
+  <p id="parent">Nothing here can hurt Henry — no monsters, no falling damage, no night. Each district saves by itself, so his buildings will still be here tomorrow.</p>
 </div>
 
 <div class="overlay hide" id="menu">
@@ -343,9 +421,33 @@ body.touch #hint{display:none}
     <button class="blockbtn go" id="mResume">Keep playing</button>
     <button class="blockbtn" id="mFly">Flying: off</button>
     <button class="blockbtn go" id="mRescue">Take me back to the start</button>
+    <button class="blockbtn" id="mDistricts">My districts</button>
     <button class="blockbtn" id="mHome">Title screen</button>
-    <button class="blockbtn danger" id="mNew">Make a brand new world</button>
     <small id="saveNote">Saving automatically</small>
+  </div>
+</div>
+
+<div class="overlay hide" id="newDistrict">
+  <div class="card wide">
+    <h2>A new district</h2>
+    <div id="nameRow">
+      <input id="dName" type="text" maxlength="24" autocomplete="off" spellcheck="false">
+      <button class="blockbtn" id="dShuffle" title="Another name">🎲</button>
+    </div>
+    <div class="pickhead">What is it like there?</div>
+    <div id="themeGrid"></div>
+    <button class="blockbtn go" id="dCreate">Make it</button>
+    <button class="blockbtn" id="dCancel">Not now</button>
+  </div>
+</div>
+
+<div class="overlay hide" id="confirmDel">
+  <div class="card">
+    <h2>Delete this district?</h2>
+    <p id="delWhat">Green Meadow</p>
+    <small>Everything built there is lost. This cannot be undone.</small>
+    <button class="blockbtn" id="delNo">Keep it</button>
+    <button class="blockbtn danger" id="delYes">Delete it</button>
   </div>
 </div>
 
@@ -395,7 +497,10 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
     BRICK=8,GLASS=9,GOLD=10,DIAMOND=11,RAINBOW=12,WATER=13,BEDROCK=14,
     /* Henry's wishlist. Appended, so every id above keeps its number and old
        saves still load - the save file stores these ids directly. */
-    COAL=15,COPPER=16,LAPIS=17,EMERALD=18,OBSIDIAN=19,ENCHANT=20,FIRE=21;
+    COAL=15,COPPER=16,LAPIS=17,EMERALD=18,OBSIDIAN=19,ENCHANT=20,FIRE=21,
+    /* district themes. Appended again, so ids 0-21 keep their numbers and every
+       existing save still loads. */
+    SNOW=22,ICE=23,SANDSTONE=24,CACTUS=25,PINE=26,MUSHCAP=27,MUSHCAP2=28,MUSHSTEM=29;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -424,6 +529,17 @@ DEFS[ENCHANT] ={name:'Enchanting', tiles:[22,21,21]};
    decorative - nothing anywhere spreads it, puts it out, or takes damage from
    it, and it digs away like any other block. */
 DEFS[FIRE]    ={name:'Flint & Steel', tiles:[23,23,23], glow:true};
+/* Theme terrain. Not in PALETTE - these are what districts are made of rather
+   than things Henry places, and adding eight more swatches would push the picker
+   to a fourth row that does not fit a phone. */
+DEFS[SNOW]     ={name:'Snow',      tiles:[24,3,25]};
+DEFS[ICE]      ={name:'Ice',       tiles:[26,26,26]};
+DEFS[SANDSTONE]={name:'Sandstone', tiles:[27,27,27]};
+DEFS[CACTUS]   ={name:'Cactus',    tiles:[28,28,29]};
+DEFS[PINE]     ={name:'Pine',      tiles:[30,30,30]};
+DEFS[MUSHCAP]  ={name:'Red Cap',   tiles:[31,31,31]};
+DEFS[MUSHCAP2] ={name:'Purple Cap',tiles:[32,32,32]};
+DEFS[MUSHSTEM] ={name:'Mushroom Stem', tiles:[33,33,33]};
 
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
              COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
@@ -446,6 +562,74 @@ var ORE_BANDS=[
   {id:COPPER,   minY:2,  maxY:16, veins:78, lo:5, hi:9},   /* common, upper stone */
   {id:COAL,     minY:2,  maxY:18, veins:92, lo:5, hi:10}
 ];
+
+/* ---------------- district themes ----------------
+   Parameters over the one generator, not five copies of it. generateWorld reads
+   these; nothing else about world building changed.
+
+   elevBase/elevAmp  height field floor and range, in blocks
+   noiseA/noiseB     the two noise wavelengths - smaller is lumpier
+   ridge             weight of the fine noise; higher reads as rockier
+   bump              height of the rise under spawn that keeps it dry
+   waterPct          percentile of the height histogram the sea settles at
+   waterMin/Max      hard clamp on the resulting water level
+   surface/sub/deep  the top block, the few below it, and the rock beneath
+   shore             what replaces the surface where it meets the water
+   plant/plantDens   vegetation kind and how often a column gets one
+   Colours are plain sRGB hex; every one of them goes through srgb() at the point
+   of use, which is the step that got missed once before and washed everything
+   out. */
+var THEMES=[
+  {key:'meadow', name:'Meadow', emoji:'🌾',
+   elevBase:3, elevAmp:19, noiseA:21, noiseB:58, ridge:0.35, bump:3.4,
+   waterPct:0.20, waterMin:4, waterMax:20,
+   surface:GRASS, sub:DIRT, deep:STONE, shore:SAND,
+   plant:'oak', plantDens:0.024,
+   skyTop:0x2f7fd6, skyMid:0x7cc4f0, skyLow:0xbfe6fb, skyHaze:0xf2fbff,
+   fog:0xa9dcf5, fogUnder:0x1f5fa8, waterTint:0x3874d6,
+   hemiSky:0xdff2ff, hemiGround:0x6f8a5a, sunCol:0xfff4d6, sunInt:0.55},
+
+  {key:'snowy', name:'Snowy Peaks', emoji:'❄️',
+   elevBase:5, elevAmp:30, noiseA:15, noiseB:44, ridge:0.55, bump:2.2,
+   waterPct:0.14, waterMin:4, waterMax:14,
+   surface:SNOW, sub:STONE, deep:STONE, shore:ICE,
+   plant:'pine', plantDens:0.019,
+   skyTop:0x8fb6d8, skyMid:0xc4d8e8, skyLow:0xdfe9f2, skyHaze:0xf4f8fb,
+   fog:0xe4edf4, fogUnder:0x2a5f80, waterTint:0x8fd0e4,
+   hemiSky:0xeaf4ff, hemiGround:0x9aa8b4, sunCol:0xf2f8ff, sunInt:0.50},
+
+  {key:'desert', name:'Desert Dunes', emoji:'🏝️',
+   elevBase:4, elevAmp:11, noiseA:26, noiseB:70, ridge:0.22, bump:2.0,
+   waterPct:0.07, waterMin:3, waterMax:7,
+   surface:SAND, sub:SANDSTONE, deep:STONE, shore:SAND,
+   plant:'cactus', plantDens:0.010,
+   skyTop:0xe08a3c, skyMid:0xf2b366, skyLow:0xf7d7a4, skyHaze:0xfdf0da,
+   fog:0xf0c58c, fogUnder:0x8a6a2a, waterTint:0x2f9a5e,
+   hemiSky:0xffe9c4, hemiGround:0xc9a86a, sunCol:0xfff0c8, sunInt:0.68},
+
+  {key:'island', name:'Island Bay', emoji:'🌴',
+   elevBase:2, elevAmp:13, noiseA:18, noiseB:50, ridge:0.40, bump:5.0,
+   waterPct:0.52, waterMin:6, waterMax:20,
+   surface:GRASS, sub:SAND, deep:STONE, shore:SAND,
+   plant:'palm', plantDens:0.030,
+   skyTop:0x1fa8c4, skyMid:0x6fd8e8, skyLow:0xb4f0f4, skyHaze:0xeafcfd,
+   fog:0x7fe0cf, fogUnder:0x0f7f96, waterTint:0x14c8c4,
+   hemiSky:0xdffcff, hemiGround:0x7fbf8f, sunCol:0xfffbe0, sunInt:0.62},
+
+  {key:'mushroom', name:'Mushroom Hollow', emoji:'🍄',
+   elevBase:4, elevAmp:16, noiseA:12, noiseB:34, ridge:0.50, bump:3.0,
+   waterPct:0.24, waterMin:4, waterMax:18,
+   surface:DIRT, sub:DIRT, deep:STONE, shore:MUSHSTEM,
+   plant:'mushroom', plantDens:0.020,
+   skyTop:0x7a56b8, skyMid:0xb18fd8, skyLow:0xd8c4ec, skyHaze:0xf4ecfb,
+   fog:0xc9aee2, fogUnder:0x4a2f70, waterTint:0x8f5cc2,
+   hemiSky:0xf0e4ff, hemiGround:0x6a5a7a, sunCol:0xf6e8ff, sunInt:0.52}
+];
+function themeByKey(k){
+  for(var i=0;i<THEMES.length;i++) if(THEMES[i].key===k) return THEMES[i];
+  return THEMES[0];
+}
+var theme=THEMES[0];
 
 /* ---------------- tiny utilities ---------------- */
 function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
@@ -681,6 +865,89 @@ function buildAtlas(){
   });
   /* 23 fire - redrawn on a timer by animateFire(); this is frame 0 */
   tile(23,function(x,r){ drawFire(x,0); });
+
+  /* ---- district theme terrain ---- */
+  /* 24 snow top */
+  tile(24,function(x,r){
+    fill(x,'#f2f7fb'); speck(x,r,['#e6eef6','#ffffff','#dbe6f0'],90);
+  });
+  /* 25 snow side - a snow cap sitting on stone */
+  tile(25,function(x,r){
+    fill(x,'#8e8e96'); speck(x,r,['#82828a','#9b9ba3','#76767e'],70);
+    for(var i=0;i<16;i++){
+      var h=4+(r()<.4?1:0);
+      x.fillStyle='#f2f7fb'; x.fillRect(i,0,1,h);
+      x.fillStyle='#d8e4ee'; x.fillRect(i,h-1,1,1);
+    }
+  });
+  /* 26 ice - pale blue with cracks */
+  tile(26,function(x,r){
+    fill(x,'#a8dcf0'); speck(x,r,['#bfe8f7','#8fcbe4','#d6f2fb'],80);
+    x.fillStyle='#7cb8d4';
+    x.fillRect(3,2,1,6); x.fillRect(4,8,4,1); x.fillRect(11,5,1,7); x.fillRect(7,12,4,1);
+    x.fillStyle='#e8f8ff'; x.fillRect(1,1,3,1); x.fillRect(12,13,3,1);
+  });
+  /* 27 sandstone - banded, paler than sand */
+  tile(27,function(x,r){
+    fill(x,'#dcc891');
+    x.fillStyle='#cbb47a';
+    for(var y=0;y<16;y+=5) x.fillRect(0,y,16,1);
+    x.fillStyle='#e9d9a8';
+    for(var y2=1;y2<16;y2+=5) x.fillRect(0,y2,16,1);
+    speck(x,r,['#d3bd84','#e6d5a0'],50);
+  });
+  /* 28 cactus top */
+  tile(28,function(x,r){
+    fill(x,'#3f8f43'); speck(x,r,['#357c39','#4aa04f'],60);
+    x.fillStyle='#2c6630'; x.strokeStyle='#2c6630'; x.lineWidth=1;
+    x.strokeRect(3.5,3.5,9,9);
+    x.fillStyle='#57b45c'; x.fillRect(7,7,2,2);
+  });
+  /* 29 cactus side - ribbed, with spines */
+  tile(29,function(x,r){
+    fill(x,'#3f8f43');
+    x.fillStyle='#357c39';
+    for(var i=0;i<16;i+=4) x.fillRect(i,0,1,16);
+    x.fillStyle='#4aa04f';
+    for(var j=2;j<16;j+=4) x.fillRect(j,0,1,16);
+    x.fillStyle='#e8e6c8';
+    for(var s=0;s<8;s++){ var sy=(r()*15)|0; x.fillRect(((r()*4)|0)*4+1,sy,1,1); }
+  });
+  /* 30 pine leaves - darker and bluer than oak */
+  tile(30,function(x,r){
+    fill(x,'#1f5c39'); speck(x,r,['#18492d','#2a7148','#123821','#358559'],150);
+    blob(x,r,['#123821','#358559'],14);
+  });
+  /* 31 mushroom cap, red with pale spots */
+  tile(31,function(x,r){
+    fill(x,'#c0392b'); speck(x,r,['#a83225','#d14435'],50);
+    x.fillStyle='#f6ecd8';
+    [[2,3],[8,2],[12,6],[5,9],[10,11],[3,13]].forEach(function(p){
+      x.fillRect(p[0],p[1],3,3);
+      x.fillStyle='#fffaf0'; x.fillRect(p[0],p[1],2,1);
+      x.fillStyle='#f6ecd8';
+    });
+  });
+  /* 32 mushroom cap, purple */
+  tile(32,function(x,r){
+    fill(x,'#7d4bab'); speck(x,r,['#6b3f95','#8f5cc2'],50);
+    x.fillStyle='#e8dcf7';
+    [[3,2],[9,4],[13,9],[6,11],[2,12]].forEach(function(p){
+      x.fillRect(p[0],p[1],3,3);
+      x.fillStyle='#f6f0ff'; x.fillRect(p[0],p[1],2,1);
+      x.fillStyle='#e8dcf7';
+    });
+  });
+  /* 33 mushroom stem - pale and fibrous */
+  tile(33,function(x,r){
+    fill(x,'#e6dcc2');
+    for(var i=0;i<16;i++){
+      var v=r();
+      x.fillStyle = v<.3?'#d4c9ab' : (v<.55?'#f0e8d4':'#e6dcc2');
+      x.fillRect(i,0,1,16);
+    }
+    x.fillStyle='#c8bb99'; x.fillRect(5,4,1,3); x.fillRect(10,9,1,4);
+  });
 }
 
 /* Flint & Steel's flame. Kept as its own function so the animation can redraw
@@ -780,25 +1047,29 @@ function generateWorld(){
   var heights=new Int16Array(WX*WZ);
   var x,y,z,i;
 
-  /* pass 1 - height field: broad basins + local hills */
+  var T=theme;
+
+  /* pass 1 - height field: broad basins + local hills, shaped by the theme */
   for(x=0;x<WX;x++) for(z=0;z<WZ;z++){
-    var n1=fbm(x/21+0.5,z/21+0.5);
-    var n2=vnoise(x/58+11.3,z/58+7.7);
-    var e=clamp((n1*0.65+n2*0.35-0.5)*1.8+0.5,0,1);
-    var h=Math.floor(3+e*19);
-    /* a soft rise in the middle so Henry always starts on dry land */
+    var n1=fbm(x/T.noiseA+0.5,z/T.noiseA+0.5);
+    var n2=vnoise(x/T.noiseB+11.3,z/T.noiseB+7.7);
+    var e=clamp((n1*(1-T.ridge)+n2*T.ridge-0.5)*1.8+0.5,0,1);
+    var h=Math.floor(T.elevBase+e*T.elevAmp);
+    /* a soft rise in the middle so Henry always starts on dry land. Island Bay
+       needs a taller one than the rest, because its sea comes up much higher. */
     var dx=x-WX/2, dz=z-WZ/2;
-    h+=Math.round(3.4*Math.exp(-(dx*dx+dz*dz)/200));
+    h+=Math.round(T.bump*Math.exp(-(dx*dx+dz*dz)/200));
     heights[z*WX+x]=clamp(h,2,WY-14);
   }
 
-  /* the sea finds its own level: pick the 20th percentile so every world
-     gets lakes, and no world ever drowns */
+  /* the sea finds its own level: take a percentile of the height histogram, so
+     every district gets water and none of them drowns. The percentile is what
+     turns Island Bay into islands and leaves the desert with a couple of oases. */
   var hist=new Int32Array(WY+2);
   for(i=0;i<heights.length;i++) hist[heights[i]]++;
-  var target=Math.floor(heights.length*0.20), acc=0, wl=7;
+  var target=Math.floor(heights.length*T.waterPct), acc=0, wl=7;
   for(i=0;i<hist.length;i++){ acc+=hist[i]; if(acc>=target){ wl=i+1; break; } }
-  WATER_LEVEL=clamp(wl,4,20);
+  WATER_LEVEL=clamp(wl,T.waterMin,T.waterMax);
 
   /* pass 2 - fill the columns */
   for(x=0;x<WX;x++) for(z=0;z<WZ;z++){
@@ -807,9 +1078,9 @@ function generateWorld(){
     for(y=0;y<=th;y++){
       var b;
       if(y===0) b=BEDROCK;
-      else if(y===th) b=beach?SAND:GRASS;
-      else if(y>th-4) b=beach?SAND:DIRT;
-      else b=STONE;
+      else if(y===th) b=beach?T.shore:T.surface;
+      else if(y>th-4) b=beach?T.sub:T.sub;
+      else b=T.deep;
       blocks[idx(x,y,z)]=b;
     }
     for(y=th+1;y<=WATER_LEVEL;y++) blocks[idx(x,y,z)]=WATER;
@@ -876,24 +1147,89 @@ function generateWorld(){
     }
   }
 
-  /* trees */
+  /* vegetation - one kind per theme, all growing from the same sampling as the
+     original oak pass so density stays comparable */
   for(x=3;x<WX-3;x++) for(z=3;z<WZ-3;z++){
     var tt=heights[z*WX+x];
     if(tt<=WATER_LEVEL+1) continue;
-    if(getBlock(x,tt,z)!==GRASS) continue;
-    if(hash2(x*13+7,z*29+3)>0.024) continue;
-    var trunk=4+((hash2(x*3,z*5)*2.99)|0);
-    var top=tt+trunk;
-    if(top+2>=WY) continue;
-    var lx,ly,lz;
+    if(getBlock(x,tt,z)!==T.surface) continue;
+    if(hash2(x*13+7,z*29+3)>T.plantDens) continue;
+    if(tt+9>=WY) continue;
+    plant(x,tt,z,T.plant);
+  }
+}
+
+/* One plant. Kept out of generateWorld so the shapes are readable. */
+function plant(x,gy,z,kind){
+  var lx,ly,lz,rad,trunk,top;
+  function leaf(px,py,pz,id){
+    if(inside(px,py,pz) && getBlock(px,py,pz)===AIR) blocks[idx(px,py,pz)]=id;
+  }
+
+  if(kind==='oak'){
+    trunk=4+((hash2(x*3,z*5)*2.99)|0);
+    top=gy+trunk;
     for(ly=top-2;ly<=top+1;ly++){
-      var rad=(ly>=top)?1:2;
+      rad=(ly>=top)?1:2;
       for(lx=-rad;lx<=rad;lx++) for(lz=-rad;lz<=rad;lz++){
         if(Math.abs(lx)===rad&&Math.abs(lz)===rad&&hash2(x+lx,z+lz)<.5) continue;
-        if(inside(x+lx,ly,z+lz) && getBlock(x+lx,ly,z+lz)===AIR) blocks[idx(x+lx,ly,z+lz)]=LEAVES;
+        leaf(x+lx,ly,z+lz,LEAVES);
       }
     }
-    for(ly=tt+1;ly<=top;ly++) blocks[idx(x,ly,z)]=WOOD;
+    for(ly=gy+1;ly<=top;ly++) blocks[idx(x,ly,z)]=WOOD;
+
+  } else if(kind==='pine'){
+    /* a cone: wide at the bottom, a spike on top */
+    trunk=5+((hash2(x*7,z*11)*3.99)|0);
+    top=gy+trunk;
+    var tier=0;
+    for(ly=top-1;ly>=gy+2;ly--){
+      rad=(tier<2)?1:((tier<4)?2:1);
+      if(tier>=5) rad=2;
+      for(lx=-rad;lx<=rad;lx++) for(lz=-rad;lz<=rad;lz++){
+        if(Math.abs(lx)===rad&&Math.abs(lz)===rad) continue;   /* clipped corners */
+        leaf(x+lx,ly,z+lz,PINE);
+      }
+      tier++;
+    }
+    leaf(x,top,z,PINE);
+    leaf(x,top+1,z,PINE);
+    for(ly=gy+1;ly<=top-1;ly++) blocks[idx(x,ly,z)]=WOOD;
+
+  } else if(kind==='cactus'){
+    /* a bare column, sometimes with one arm. No leaves at all. */
+    trunk=2+((hash2(x*5,z*17)*2.99)|0);
+    for(ly=gy+1;ly<=gy+trunk;ly++) blocks[idx(x,ly,z)]=CACTUS;
+    if(hash2(x*29,z*31)<0.35 && trunk>=3){
+      var ax=hash2(x*3,z*7)<0.5?-1:1;
+      leaf(x+ax,gy+trunk-1,z,CACTUS);
+      leaf(x+ax,gy+trunk,z,CACTUS);
+    }
+
+  } else if(kind==='palm'){
+    /* tall bare trunk with a splayed crown, so beaches read as beaches */
+    trunk=5+((hash2(x*9,z*13)*3.99)|0);
+    top=gy+trunk;
+    for(ly=gy+1;ly<=top;ly++) blocks[idx(x,ly,z)]=WOOD;
+    leaf(x,top+1,z,LEAVES);
+    for(var d=0;d<4;d++){
+      var ddx=[1,-1,0,0][d], ddz=[0,0,1,-1][d];
+      leaf(x+ddx,top,z+ddz,LEAVES);
+      leaf(x+ddx*2,top,z+ddz*2,LEAVES);
+      leaf(x+ddx*2,top-1,z+ddz*2,LEAVES);
+    }
+
+  } else if(kind==='mushroom'){
+    /* pale stem under a wide cap; red or purple decided per position */
+    var capId=hash2(x*19,z*23)<0.55?MUSHCAP:MUSHCAP2;
+    trunk=3+((hash2(x*11,z*7)*2.99)|0);
+    top=gy+trunk;
+    for(ly=gy+1;ly<=top;ly++) blocks[idx(x,ly,z)]=MUSHSTEM;
+    for(lx=-2;lx<=2;lx++) for(lz=-2;lz<=2;lz++){
+      if(Math.abs(lx)===2&&Math.abs(lz)===2) continue;        /* rounded rim */
+      leaf(x+lx,top+1,z+lz,capId);
+    }
+    for(lx=-1;lx<=1;lx++) for(lz=-1;lz<=1;lz++) leaf(x+lx,top+2,z+lz,capId);
   }
 }
 
@@ -961,33 +1297,89 @@ function recountFire(){
   for(var i=0;i<blocks.length;i++) if(blocks[i]===FIRE) fireCount++;
 }
 
-scene.add(new THREE.HemisphereLight(0xdff2ff,0x6f8a5a,0.80));
+var hemi=new THREE.HemisphereLight(0xdff2ff,0x6f8a5a,0.80);
+scene.add(hemi);
 var sun=new THREE.DirectionalLight(0xfff4d6,0.55);
 sun.position.set(48,90,34);
 scene.add(sun);
 
-/* sky dome */
+/* sky dome. The gradient lives on its own little canvas so a theme change only
+   has to repaint four stops and flag the texture, rather than rebuild the mesh. */
+var skyCanvas=document.createElement('canvas');
+skyCanvas.width=8; skyCanvas.height=256;
+var skyTex=new THREE.CanvasTexture(skyCanvas);
+if(THREE.sRGBEncoding!==undefined) skyTex.encoding=THREE.sRGBEncoding;
+var sunDisc;
 (function(){
-  var cv=document.createElement('canvas'); cv.width=8; cv.height=256;
-  var c=cv.getContext('2d');
-  var g=c.createLinearGradient(0,0,0,256);
-  g.addColorStop(0,'#2f7fd6'); g.addColorStop(.42,'#7cc4f0');
-  g.addColorStop(.76,'#bfe6fb'); g.addColorStop(1,'#f2fbff');
-  c.fillStyle=g; c.fillRect(0,0,8,256);
-  var t=new THREE.CanvasTexture(cv);
-  if(THREE.sRGBEncoding!==undefined) t.encoding=THREE.sRGBEncoding;
   var sky=new THREE.Mesh(
     new THREE.SphereGeometry(460,20,14),
-    new THREE.MeshBasicMaterial({map:t,side:THREE.BackSide,fog:false,depthWrite:false})
+    new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide,fog:false,depthWrite:false})
   );
   scene.add(sky);
-  var sunDisc=new THREE.Mesh(
+  sunDisc=new THREE.Mesh(
     new THREE.BoxGeometry(26,26,26),
     new THREE.MeshBasicMaterial({color:srgb(0xfff0a8),fog:false})
   );
   sunDisc.position.set(200,300,150);
   scene.add(sunDisc);
 })();
+
+function hex(n){ return '#'+('000000'+(n>>>0).toString(16)).slice(-6); }
+
+/* Everything visual that a theme controls, in one place.
+
+   Every colour goes through srgb(). r128 feeds material colours straight into a
+   linear-space shader, so a hex value assigned directly comes out washed out -
+   this is the conversion that was missed once already. The sky gradient is the
+   exception and must NOT be converted: it is painted into a canvas and uploaded
+   as an sRGB-encoded texture, so three.js does the conversion on the GPU. */
+function applyTheme(T){
+  theme=T;
+
+  var c=skyCanvas.getContext('2d');
+  var g=c.createLinearGradient(0,0,0,256);
+  g.addColorStop(0,hex(T.skyTop));
+  g.addColorStop(.42,hex(T.skyMid));
+  g.addColorStop(.76,hex(T.skyLow));
+  g.addColorStop(1,hex(T.skyHaze));
+  c.fillStyle=g; c.fillRect(0,0,8,256);
+  skyTex.needsUpdate=true;
+
+  scene.fog.color.copy(srgb(T.fog));
+  hemi.color.copy(srgb(T.hemiSky));
+  hemi.groundColor.copy(srgb(T.hemiGround));
+  sun.color.copy(srgb(T.sunCol));
+  sun.intensity=T.sunInt;
+  if(sunDisc) sunDisc.material.color.copy(srgb(T.sunCol));
+  renderer.setClearColor(srgb(T.skyMid));
+  document.body.style.background=hex(T.skyMid);
+  var meta=document.querySelector('meta[name=theme-color]');
+  if(meta) meta.setAttribute('content',hex(T.fog));
+
+  retintWater(T.waterTint);
+}
+
+/* The water tile is repainted for the theme rather than given its own block id,
+   so lakes read as belonging to the district. Same trick as the flame. */
+function retintWater(tint){
+  var c=atlasCanvas.getContext('2d');
+  var tx=(14%ACOLS)*TP, ty=Math.floor(14/ACOLS)*TP;
+  var r=mulberry32(9176+14*7919);
+  var R=(tint>>16)&255, G=(tint>>8)&255, B=tint&255;
+  c.save();
+  c.beginPath(); c.rect(tx,ty,TP,TP); c.clip();
+  c.translate(tx,ty); c.scale(TP/16,TP/16);
+  c.imageSmoothingEnabled=false;
+  c.clearRect(0,0,16,16);
+  c.fillStyle='rgba('+R+','+G+','+B+',0.74)'; c.fillRect(0,0,16,16);
+  c.fillStyle='rgba('+Math.min(255,R+74)+','+Math.min(255,G+74)+','+Math.min(255,B+41)+',0.35)';
+  for(var i=0;i<9;i++) c.fillRect((r()*12)|0,(r()*16)|0,4,1);
+  c.fillStyle='rgba('+Math.max(0,R-36)+','+Math.max(0,G-46)+','+Math.max(0,B-54)+',0.28)';
+  for(var j=0;j<6;j++) c.fillRect((r()*12)|0,(r()*16)|0,3,1);
+  c.restore();
+  atlasTex.needsUpdate=true;
+  DEFS[WATER].avg=tileAverage(14);
+}
 
 /* drifting clouds */
 var clouds=[];
@@ -1878,7 +2270,7 @@ function updatePlayer(dt){
   }
 
   var uw=eyeInWater();
-  scene.fog.color.copy(srgb(uw?0x1f5fa8:0xa9dcf5));
+  scene.fog.color.copy(srgb(uw?theme.fogUnder:theme.fog));
   scene.fog.near=uw?0.2:46; scene.fog.far=uw?16:118;
 }
 
@@ -2041,6 +2433,142 @@ function refreshBlockBtn(){
   b.style.backgroundImage='url('+swatchURL(DEFS[selected].tiles[2])+')';
   b.innerHTML='<span>'+DEFS[selected].name+'</span>';
 }
+/* ---------------- district picker ----------------
+   A painted thumbnail per theme: sky gradient, a hill silhouette in the surface
+   colour, the water band in the theme's tint, and one plant glyph. Enough for a
+   child who cannot read to tell Snowy Peaks from Desert Dunes at a glance. */
+function themeThumb(T,w,h){
+  var cv=document.createElement('canvas');
+  cv.width=w; cv.height=h;
+  var c=cv.getContext('2d');
+  c.imageSmoothingEnabled=false;
+
+  var g=c.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,hex(T.skyTop)); g.addColorStop(.5,hex(T.skyMid));
+  g.addColorStop(1,hex(T.skyHaze));
+  c.fillStyle=g; c.fillRect(0,0,w,h);
+
+  /* sun */
+  c.fillStyle=hex(T.sunCol); c.fillRect(w-11,4,5,5);
+
+  /* terrain profile, driven by the theme's own amplitude so mountains look like
+     mountains and dunes look like dunes */
+  var waterY=Math.round(h*(1-0.30));
+  var amp=Math.min(h*0.42,h*0.10+T.elevAmp*0.9);
+  var cols=[];
+  for(var x=0;x<w;x++){
+    var t=x/w*Math.PI*2;
+    var e=(Math.sin(t*(T.noiseA<16?2.6:1.5))*0.5+Math.sin(t*3.7+1.2)*0.5*T.ridge);
+    cols[x]=Math.round(waterY-4-amp*0.5-e*amp*0.5);
+  }
+  var surf=DEFS[T.surface].avg, sub=DEFS[T.sub].avg;
+  for(var x2=0;x2<w;x2++){
+    var top=clamp(cols[x2],2,h-2);
+    c.fillStyle=hex(sub); c.fillRect(x2,top+3,1,h-top-3);
+    c.fillStyle=hex(surf); c.fillRect(x2,top,1,3);
+  }
+  /* water sits on top, so islands read as islands */
+  c.fillStyle=hex(T.waterTint); c.globalAlpha=0.82;
+  c.fillRect(0,waterY,w,h-waterY);
+  c.globalAlpha=1;
+
+  /* one plant, centred on the tallest bit of ground */
+  var px=Math.round(w*0.32), gy=clamp(cols[px],3,h-6);
+  function box(bx,by,bw,bh,col){ c.fillStyle=hex(col); c.fillRect(bx,by,bw,bh); }
+  if(T.plant==='oak'||T.plant==='palm'){
+    box(px,gy-8,2,9,DEFS[WOOD].avg);
+    box(px-3,gy-12,8,5,DEFS[LEAVES].avg);
+  } else if(T.plant==='pine'){
+    box(px,gy-7,2,8,DEFS[WOOD].avg);
+    box(px-4,gy-9,10,3,DEFS[PINE].avg);
+    box(px-3,gy-12,8,3,DEFS[PINE].avg);
+    box(px-1,gy-14,4,3,DEFS[PINE].avg);
+  } else if(T.plant==='cactus'){
+    box(px,gy-9,3,10,DEFS[CACTUS].avg);
+    box(px+3,gy-6,3,2,DEFS[CACTUS].avg);
+  } else if(T.plant==='mushroom'){
+    box(px+1,gy-7,2,8,DEFS[MUSHSTEM].avg);
+    box(px-3,gy-11,10,4,DEFS[MUSHCAP].avg);
+  }
+  return cv;
+}
+
+function districtCard(d,isCurrent){
+  var T=themeByKey(d.theme);
+  var card=document.createElement('div');
+  card.className='dcard'+(isCurrent?' on':'');
+  card.appendChild(themeThumb(T,112,64));
+  var b=document.createElement('b'); b.textContent=d.name; card.appendChild(b);
+  var i=document.createElement('i'); i.textContent=T.emoji+' '+T.name; card.appendChild(i);
+
+  card.addEventListener('click',function(ev){
+    if(ev.target.classList.contains('x')) return;
+    if(isCurrent){ startPlaying(); return; }
+    switchDistrict(d.slug).then(function(){
+      buildDistrictList();
+      startPlaying();
+    });
+  });
+
+  /* Only offer deletion when there is more than one, and never for the district
+     currently loaded - both of those are ways a mis-tap turns into a lost build. */
+  if(districtIndex.list.length>1 && !isCurrent){
+    var x=document.createElement('button');
+    x.className='x'; x.textContent='✕'; x.title='Delete '+d.name;
+    x.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      askDelete(d);
+    });
+    card.appendChild(x);
+  }
+  return card;
+}
+
+function buildDistrictList(){
+  var host=el('districtList');
+  if(!host) return;
+  host.innerHTML='';
+  districtIndex.list.forEach(function(d){
+    host.appendChild(districtCard(d,current&&d.slug===current.slug));
+  });
+  var add=document.createElement('div');
+  add.className='dcard newcard';
+  add.innerHTML='<span>➕</span><b>Make a new district</b>';
+  add.addEventListener('click',openNewDistrict);
+  host.appendChild(add);
+  refreshDistrictHud();
+}
+
+function refreshDistrictHud(){
+  var chip=el('districtChip');
+  if(chip && current) chip.textContent=themeByKey(current.theme).emoji+' '+current.name;
+}
+
+/* ---- create ---- */
+var pendingTheme='meadow';
+function openNewDistrict(){
+  pendingTheme='meadow';
+  el('dName').value=randomDistrictName();
+  var grid=el('themeGrid');
+  grid.innerHTML='';
+  THEMES.forEach(function(T){
+    var c=document.createElement('div');
+    c.className='tcard'+(T.key===pendingTheme?' on':'');
+    c.appendChild(themeThumb(T,96,54));
+    var b=document.createElement('b'); b.textContent=T.emoji+' '+T.name; c.appendChild(b);
+    c.addEventListener('click',function(){
+      pendingTheme=T.key;
+      var all=grid.querySelectorAll('.tcard');
+      for(var i=0;i<all.length;i++) all[i].classList.remove('on');
+      c.classList.add('on');
+      tone(700,0.05,'sine',0.04);
+    });
+    grid.appendChild(c);
+  });
+  el('newDistrict').classList.remove('hide');
+}
+function closeNewDistrict(){ el('newDistrict').classList.add('hide'); }
+
 function openPicker(){ el('picker').classList.remove('hide'); }
 function closePicker(){ el('picker').classList.add('hide'); }
 function selectBlock(id){
@@ -2251,7 +2779,6 @@ el('mRescue').addEventListener('click',function(){
   toggleMenu(false); findSpawn(); setFly(false); scheduleSave();
   toast('Back at the start!');
 });
-el('mNew').addEventListener('click',function(){ newWorld(); });
 
 function showWin(){
   el('win').classList.remove('hide');
@@ -2271,12 +2798,60 @@ el('winAgain').addEventListener('click',function(){
 });
 el('winBuild').addEventListener('click',function(){ el('win').classList.add('hide'); });
 
-el('playBtn').addEventListener('click',function(){
+function startPlaying(){
   audio();
+  closeNewDistrict();
   el('start').classList.add('hide');
   playing=true;
   if(!isTouch && canvas.requestPointerLock) canvas.requestPointerLock();
   if(isTouch) setTimeout(function(){ toast('Push the stick left or right to turn',2600); },800);
+}
+el('playBtn').addEventListener('click',startPlaying);
+
+/* ---- district buttons ---- */
+el('dShuffle').addEventListener('click',function(){
+  el('dName').value=randomDistrictName();
+  tone(620,0.06,'square',0.05);
+});
+el('dCancel').addEventListener('click',closeNewDistrict);
+el('dCreate').addEventListener('click',function(){
+  var nm=(el('dName').value||'').trim()||randomDistrictName();
+  closeNewDistrict();
+  createDistrict(nm,pendingTheme).then(function(){
+    buildDistrictList();
+    scheduleSave(); doSave();
+    toast('Welcome to '+current.name+'!',1800);
+    startPlaying();
+  });
+});
+
+/* Deleting is two taps and a different-coloured button, on purpose. */
+var deleteTarget=null;
+function askDelete(d){
+  deleteTarget=d;
+  el('delWhat').textContent=d.name;
+  el('confirmDel').classList.remove('hide');
+}
+el('delNo').addEventListener('click',function(){
+  deleteTarget=null;
+  el('confirmDel').classList.add('hide');
+});
+el('delYes').addEventListener('click',function(){
+  var d=deleteTarget; deleteTarget=null;
+  el('confirmDel').classList.add('hide');
+  if(!d) return;
+  deleteDistrict(d.slug).then(function(){
+    buildDistrictList();
+    toast(d.name+' is gone',1600);
+  });
+});
+
+el('mDistricts').addEventListener('click',function(){
+  toggleMenu(false);
+  playing=false;
+  buildDistrictList();
+  el('start').classList.remove('hide');
+  if(document.exitPointerLock) document.exitPointerLock();
 });
 
 function checkOrientation(){
@@ -2326,60 +2901,278 @@ var store=(function(){
   };
 })();
 
+/* ---------------- district names ----------------
+   He is five and cannot type. So a district always arrives with a name already
+   on it, and the shuffle button re-rolls; the text field exists for adults and
+   is never on the critical path. Two short words, both easy to say out loud. */
+var NAME_FIRST=['Green','Sunny','Star','Otter','Golden','Snowy','Quiet','Brave',
+                'Misty','Sandy','Coral','Copper','Silver','Little','Big','Happy',
+                'Cosy','Bright','Sleepy','Wild','Rocky','Frosty','Mellow','Jolly'];
+var NAME_SECOND=['Meadow','Cave','Bay','Valley','Hollow','Island','Ridge','Creek',
+                 'Harbour','Dunes','Forest','Garden','Lagoon','Peak','Shore','Glen',
+                 'Cove','Field','Hill','Spring','Grove','Reef','Marsh','Basin'];
+function randomDistrictName(){
+  var a=NAME_FIRST[(Math.random()*NAME_FIRST.length)|0];
+  var b=NAME_SECOND[(Math.random()*NAME_SECOND.length)|0];
+  return a+' '+b;
+}
+
+/* ---------------- districts ----------------
+   A district is one place, saved under its own key. The old code kept a single
+   world under SAVE_KEY and newWorld() reseeded it in place, which meant making a
+   new world destroyed the old one; districts are somewhere you go back to, so
+   each gets its own record and nothing ever overwrites a sibling.
+
+     henrycraft-districts            index: {list:[{slug,name,theme,created,lastPlayed}], current}
+     henrycraft-district-<slug>      one district's whole state
+
+   SAVE_KEY above is now only read, once, by migrateLegacy(). */
+var INDEX_KEY='henrycraft-districts';
+function districtKey(slug){ return 'henrycraft-district-'+slug; }
+
+var districtIndex={list:[],current:null};
+var current=null;                 /* the live district record, minus the world */
+
+function readJSON(k){
+  return new Promise(function(resolve){
+    if(!store) return resolve(null);
+    try{
+      store.get(k).then(function(raw){
+        if(!raw) return resolve(null);
+        try{ resolve(JSON.parse(raw)); }catch(e){ resolve(null); }
+      }).catch(function(){ resolve(null); });
+    }catch(e){ resolve(null); }
+  });
+}
+function writeJSON(k,v){
+  return new Promise(function(resolve){
+    if(!store) return resolve(false);
+    try{
+      store.set(k,JSON.stringify(v)).then(function(){ resolve(true); })
+                                    .catch(function(){ resolve(false); });
+    }catch(e){ resolve(false); }
+  });
+}
+function removeKey(k){
+  try{
+    if(window.storage && typeof window.storage.remove==='function') window.storage.remove(k,false);
+    else if(window.localStorage) window.localStorage.removeItem(k);
+  }catch(e){}
+}
+
+function slugify(name){
+  var s=String(name).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+  return s||'district';
+}
+function uniqueSlug(base){
+  var s=base, n=2;
+  var taken={};
+  districtIndex.list.forEach(function(d){ taken[d.slug]=1; });
+  while(taken[s]){ s=base+'-'+n; n++; }
+  return s;
+}
+/* Names must be unique too, since the picker shows names not slugs. */
+function uniqueName(name){
+  var taken={};
+  districtIndex.list.forEach(function(d){ taken[d.name.toLowerCase()]=1; });
+  if(!taken[name.toLowerCase()]) return name;
+  for(var n=2;;n++){
+    var candidate=name+' '+n;
+    if(!taken[candidate.toLowerCase()]) return candidate;
+  }
+}
+
 function scheduleSave(){ saveDirty=true; }
+
+/* Everything about the current district worth keeping. */
 function snapshot(){
-  return JSON.stringify({
+  return {
+    name:current?current.name:'Home',
+    slug:current?current.slug:'home',
+    theme:theme.key,
     seed:seed,
     starSeed:starSeed,
     edits:edits,
     p:[+player.x.toFixed(2),+player.y.toFixed(2),+player.z.toFixed(2),+yaw.toFixed(3)],
     stars:stars.map(function(s){ return s.done?1:0; }),
-    sel:selected
-  });
+    sel:selected,
+    created:current&&current.created?current.created:null,
+    lastPlayed:null            /* stamped by saveCurrent, which has a clock */
+  };
 }
+
+function saveCurrent(){
+  if(!store||!current) return Promise.resolve(false);
+  var rec=snapshot();
+  rec.created=current.created||nowStamp();
+  rec.lastPlayed=nowStamp();
+  current.name=rec.name; current.theme=rec.theme; current.created=rec.created;
+  /* keep the index in last-played order, most recent first */
+  var entry=null;
+  districtIndex.list=districtIndex.list.filter(function(d){
+    if(d.slug===rec.slug){ entry=d; return false; }
+    return true;
+  });
+  entry=entry||{slug:rec.slug};
+  entry.name=rec.name; entry.theme=rec.theme;
+  entry.created=rec.created; entry.lastPlayed=rec.lastPlayed;
+  districtIndex.list.unshift(entry);
+  districtIndex.current=rec.slug;
+  return writeJSON(districtKey(rec.slug),rec)
+    .then(function(){ return writeJSON(INDEX_KEY,districtIndex); })
+    .then(function(){ return true; });
+}
+function nowStamp(){ return new Date().toISOString(); }
+
 function doSave(){
   if(!saveDirty||saveBusy) return;
-  if(!store){ saveDirty=false; return; }
+  if(!store||!current){ saveDirty=false; return; }
   saveBusy=true; saveDirty=false;
   try{
-    store.set(SAVE_KEY,snapshot())
-      .then(function(){ saveBusy=false; })
-      .catch(function(){ saveBusy=false; });
+    saveCurrent().then(function(){ saveBusy=false; })
+                 .catch(function(){ saveBusy=false; });
   }catch(e){ saveBusy=false; }
 }
 setInterval(doSave,4000);
 document.addEventListener('visibilitychange',function(){ if(document.hidden){ saveDirty=true; doSave(); } });
 
-function loadSave(){
-  return new Promise(function(resolve){
-    if(!store) return resolve(null);
-    try{
-      store.get(SAVE_KEY)
-        .then(function(raw){
-          if(!raw) return resolve(null);
-          try{ resolve(JSON.parse(raw)); }catch(e){ resolve(null); }
-        })
-        .catch(function(){ resolve(null); });
-    }catch(e){ resolve(null); }
-  });
-}
-
-function newWorld(){
-  toggleMenu(false);
-  seed=Math.floor(Math.random()*1e9);
-  starSeed=seed;
-  edits={};
+/* Build the live world from a district record. */
+function enterDistrict(rec){
+  current={slug:rec.slug,name:rec.name,theme:rec.theme,created:rec.created};
+  seed=rec.seed>>>0;
+  starSeed=(typeof rec.starSeed==='number')?rec.starSeed>>>0:seed;
+  edits=rec.edits||{};
+  applyTheme(themeByKey(rec.theme));
   generateWorld();
+  applyEdits();
   for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
   rebuildAll();
-  placeStars(null);
+  placeStars(rec.stars||null);
   spawnAnimals();
   spawnFish();
   recountFire();
-  findSpawn();
+  if(rec.p && rec.p.length>=3){
+    player.x=rec.p[0]; player.y=rec.p[1]; player.z=rec.p[2]; yaw=rec.p[3]||0;
+    player.vx=player.vy=player.vz=0;
+    if(!boxFree(player.x,player.y,player.z)) findSpawn();
+  } else {
+    findSpawn();
+  }
+  if(rec.sel && DEFS[rec.sel]) selectBlock(rec.sel);
   setFly(false);
-  scheduleSave(); doSave();
-  toast('A brand new world!');
+  districtIndex.current=rec.slug;
+  refreshDistrictHud();
+}
+
+/* The single most important function in this file. The child has built things in
+   the pre-district save; converting it has to be lossless, so the edit map is
+   carried across by reference rather than rebuilt, and the legacy key is left
+   in place afterwards as a belt-and-braces backup. */
+function migrateLegacy(old){
+  var rec={
+    name:'Home', slug:'home', theme:'meadow',
+    seed:(typeof old.seed==='number')?old.seed:Math.floor(Math.random()*1e9),
+    starSeed:(typeof old.starSeed==='number')?old.starSeed:null,
+    edits:old.edits||{},
+    p:old.p||null,
+    stars:old.stars||null,
+    sel:old.sel||null,
+    created:nowStamp(), lastPlayed:nowStamp()
+  };
+  if(rec.starSeed===null) rec.starSeed=rec.seed;
+  return rec;
+}
+
+function freshDistrict(name,themeKey){
+  var nm=uniqueName(name);
+  return {
+    name:nm, slug:uniqueSlug(slugify(nm)), theme:themeKey,
+    seed:Math.floor(Math.random()*1e9),
+    starSeed:Math.floor(Math.random()*1e9),
+    edits:{}, p:null, stars:null, sel:null,
+    created:nowStamp(), lastPlayed:nowStamp()
+  };
+}
+
+/* Create, save, and go there. Touches only the new district's key plus the index. */
+function createDistrict(name,themeKey){
+  var rec=freshDistrict(name,themeKey);
+  return writeJSON(districtKey(rec.slug),rec).then(function(){
+    districtIndex.list.unshift({slug:rec.slug,name:rec.name,theme:rec.theme,
+                                created:rec.created,lastPlayed:rec.lastPlayed});
+    districtIndex.current=rec.slug;
+    return writeJSON(INDEX_KEY,districtIndex);
+  }).then(function(){
+    enterDistrict(rec);
+    return rec.slug;
+  });
+}
+
+/* Save where we are, then go somewhere else. */
+function switchDistrict(slug){
+  if(current && current.slug===slug) return Promise.resolve(slug);
+  return saveCurrent().then(function(){
+    return readJSON(districtKey(slug));
+  }).then(function(rec){
+    if(!rec) return null;
+    enterDistrict(rec);
+    return writeJSON(INDEX_KEY,districtIndex).then(function(){ return slug; });
+  });
+}
+
+function deleteDistrict(slug){
+  var wasCurrent=current&&current.slug===slug;
+  removeKey(districtKey(slug));
+  districtIndex.list=districtIndex.list.filter(function(d){ return d.slug!==slug; });
+  return writeJSON(INDEX_KEY,districtIndex).then(function(){
+    if(!wasCurrent) return null;
+    /* deleted the one we were standing in - go to the next, or make one */
+    if(districtIndex.list.length){
+      return switchDistrict(districtIndex.list[0].slug);
+    }
+    return createDistrict(randomDistrictName(),'meadow');
+  });
+}
+
+/* Boot: load the index, migrating the old single save if that is all there is. */
+function loadDistricts(){
+  return readJSON(INDEX_KEY).then(function(idx){
+    if(idx && idx.list && idx.list.length){
+      districtIndex={list:idx.list,current:idx.current||idx.list[0].slug};
+      var slug=districtIndex.current;
+      return readJSON(districtKey(slug)).then(function(rec){
+        if(rec) return rec;
+        /* index points at something that is gone; fall back to any survivor */
+        var rest=districtIndex.list.filter(function(d){ return d.slug!==slug; });
+        districtIndex.list=rest;
+        if(!rest.length) return null;
+        return readJSON(districtKey(rest[0].slug));
+      });
+    }
+    /* no index. Either an old single save to convert, or a first run. */
+    return readJSON(SAVE_KEY).then(function(old){
+      var rec = (old && typeof old.seed==='number')
+        ? migrateLegacy(old)
+        : freshDistrict('Home','meadow');
+      districtIndex={list:[{slug:rec.slug,name:rec.name,theme:rec.theme,
+                            created:rec.created,lastPlayed:rec.lastPlayed}],
+                     current:rec.slug};
+      return writeJSON(districtKey(rec.slug),rec)
+        .then(function(){ return writeJSON(INDEX_KEY,districtIndex); })
+        .then(function(){ return rec; });
+    });
+  }).then(function(rec){
+    if(!rec){
+      var fresh=freshDistrict('Home','meadow');
+      districtIndex={list:[{slug:fresh.slug,name:fresh.name,theme:fresh.theme,
+                            created:fresh.created,lastPlayed:fresh.lastPlayed}],
+                     current:fresh.slug};
+      return writeJSON(districtKey(fresh.slug),fresh)
+        .then(function(){ return writeJSON(INDEX_KEY,districtIndex); })
+        .then(function(){ return fresh; });
+    }
+    return rec;
+  });
 }
 
 /* ---------------- main loop ---------------- */
@@ -2462,28 +3255,12 @@ function boot(){
     el('h4').textContent='Press F to fly, then Space up and Shift down';
   }
 
-  loadSave().then(function(save){
-    if(save && typeof save.seed==='number'){
-      seed=save.seed;
-      starSeed=(typeof save.starSeed==='number')?save.starSeed:save.seed;
-      edits=save.edits||{};
-    }
-    generateWorld();
-    applyEdits();
-    rebuildAll();
-    placeStars(save?save.stars:null);
-    spawnAnimals();
-    spawnFish();
-    /* A restored save can contain fire Henry lit yesterday, so count after the
-       edits have gone in rather than assuming zero. */
-    recountFire();
-    if(save && save.p){
-      player.x=save.p[0]; player.y=save.p[1]; player.z=save.p[2]; yaw=save.p[3]||0;
-      if(!boxFree(player.x,player.y,player.z)) findSpawn();
-    } else {
-      findSpawn();
-    }
-    if(save && save.sel && DEFS[save.sel]) selectBlock(save.sel);
+  loadDistricts().then(function(rec){
+    /* enterDistrict does the generate/apply-edits/spawn dance, and counts fire
+       after the edits have gone in rather than assuming zero, since a restored
+       district can contain flames Henry lit yesterday. */
+    enterDistrict(rec);
+    buildDistrictList();
     ready=true;
   });
   frame();
@@ -2523,6 +3300,65 @@ window.__henrycraft={
   },
   animals:function(){ return animals.length; },
   fireCount:function(){ return fireCount; },
+
+  /* ---- districts ---- */
+  themes:function(){ return THEMES.map(function(t){ return JSON.parse(JSON.stringify(t)); }); },
+  districts:function(){
+    return {current:current?current.slug:null,
+            list:districtIndex.list.map(function(d){
+              return {slug:d.slug,name:d.name,theme:d.theme,lastPlayed:d.lastPlayed};
+            })};
+  },
+  createDistrict:createDistrict,
+  switchDistrict:switchDistrict,
+  deleteDistrict:deleteDistrict,
+  saveNow:function(){ saveDirty=false; return saveCurrent(); },
+  editsNow:function(){ return JSON.parse(JSON.stringify(edits)); },
+  starState:function(){ return stars.map(function(s){ return s.done?1:0; }); },
+  randomName:randomDistrictName,
+  /* Rebuild on a chosen theme and seed without going through storage - used to
+     sweep 20 seeds per theme in one page load. */
+  loadThemeSeed:function(themeKey,s){
+    applyTheme(themeByKey(themeKey));
+    seed=s>>>0; starSeed=seed; edits={};
+    generateWorld();
+    for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
+    rebuildAll();
+    placeStars(null); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
+    return {theme:theme.key,seed:seed,waterLevel:WATER_LEVEL};
+  },
+  /* Is where Henry starts actually dry land he can stand on? */
+  spawnIsDry:function(){
+    var fx=Math.floor(player.x), fz=Math.floor(player.z);
+    var below=getBlock(fx,Math.floor(player.y)-1,fz);
+    var at=getBlock(fx,Math.floor(player.y+0.5),fz);
+    return below!==AIR && below!==WATER && at!==WATER && boxFree(player.x,player.y,player.z);
+  },
+  /* The topmost solid block of every column, tallied by id. This is what makes
+     "desert is mostly sand" a measurement rather than an opinion. */
+  surfaceCensus:function(){
+    /* The ground Henry walks on, per column.
+
+       Two things are deliberately skipped. Submerged columns, because their top
+       block is the theme's shore block and counting the seabed read as 47% sand
+       for Meadow. And vegetation, because the topmost solid block over a tree is
+       its canopy - Snowy Peaks has the densest planting of the five, so pine
+       tops were being counted as the surface and it measured 57% snow when the
+       ground under them is snow almost everywhere. */
+    var PLANT={};
+    PLANT[LEAVES]=1; PLANT[PINE]=1; PLANT[WOOD]=1; PLANT[CACTUS]=1;
+    PLANT[MUSHCAP]=1; PLANT[MUSHCAP2]=1; PLANT[MUSHSTEM]=1;
+    var out={};
+    for(var x=0;x<WX;x++) for(var z=0;z<WZ;z++){
+      for(var y=WY-1;y>=0;y--){
+        var b=getBlock(x,y,z);
+        if(b===AIR||b===WATER||PLANT[b]) continue;
+        if(y>WATER_LEVEL) out[b]=(out[b]||0)+1;
+        break;
+      }
+    }
+    return out;
+  },
   /* Rebuild the world on a chosen seed. Used to sweep many seeds in one page
      load instead of reloading the browser 20 times. */
   loadSeed:function(s){

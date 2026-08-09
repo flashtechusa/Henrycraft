@@ -21,7 +21,30 @@ and only the repo owner can do it:
 
 Wait a minute or two, then open the play link. After this it stays on for good.
 
-## What's in the world
+## Districts
+
+A **district** is one place. Henry can have as many as he likes, each saved on its
+own, and switch between them from the title screen &mdash; making a new one never
+touches an existing one. Districts are picked from cards with a painted
+thumbnail of what that place looks like, so he can choose by looking rather than
+reading.
+
+Each district has one of five themes, fixed when it is created:
+
+| Theme | What it looks like |
+| --- | --- |
+| **Meadow** | rolling green hills, oak trees, blue lakes |
+| **Snowy Peaks** | tall white mountains, pine forest, ice at the water's edge |
+| **Desert Dunes** | low sand dunes, cacti, a few small oases |
+| **Island Bay** | turquoise sea broken into islands, palms on the sand |
+| **Mushroom Hollow** | lilac sky, dark soil, giant red and purple mushrooms |
+
+New districts arrive already named &mdash; two friendly words like *Otter Bay* &mdash;
+with a dice button to re-roll. The name can be typed over, but typing is never
+required. Deleting one is a small button in the corner of its card followed by a
+confirm, so a mis-tap cannot wipe a build.
+
+## What's in a district
 
 **19 blocks** to build with: grass, dirt, stone, sand, wood, leaves, planks,
 brick, glass, gold, diamond, rainbow, coal, copper, lapis, emerald, obsidian, an
@@ -64,14 +87,20 @@ stale, hard-refresh: `Ctrl+Shift+R` on Windows, `Cmd+Shift+R` on a Mac.
 
 ## Notes for whoever edits this next
 
-**Saving.** The world saves itself every 4 seconds into the browser's
-`localStorage`, under the key `henrycraft-world-v1`. Only the seed and Henry's
-own block changes are stored, not the whole world, so a save stays tiny — a
-couple of hundred bytes.
+**Saving.** The current district saves itself every 4 seconds into the browser's
+`localStorage`. Each district has its own key, `henrycraft-district-<slug>`, and
+`henrycraft-districts` is the index listing them in last-played order. Only the
+seed and Henry's own block changes are stored, not the whole world, so a district
+stays tiny — usually a few hundred bytes.
 
-The save is per-browser and per-device. Henry's world on the iPad is not the
-same world as on the laptop, and clearing the browser's site data wipes it.
-There is no server, so nothing is shared between devices.
+The single pre-district save, `henrycraft-world-v1`, is migrated to a district
+called *Home* the first time the new build loads, and is then left in place
+untouched as a backup. `tools/test-districts.js` asserts that migration is
+lossless down to the individual block edit.
+
+Saves are per-browser and per-device. Henry's districts on the iPad are not the
+same as on the laptop, and clearing the browser's site data wipes them. There is
+no server, so nothing is shared between devices.
 
 **3D engine.** three.js **r128** is bundled inside `index.html`, so the page
 needs no network at all. It is pinned to r128 on purpose: the game uses
@@ -123,6 +152,12 @@ Run `bash tools/check.sh` to verify the packaging setup. Two of its checks need 
 real Android build, so they only pass in CI.
 
 ## Testing the game itself
+
+`node tools/test-districts.js` covers districts: that the pre-district save
+migrates with every block edit intact, that districts stay isolated from each
+other, that switching and returning restores everything, and that all five themes
+generate playable worlds over 20 seeds each with measurably different terrain and
+colours.
 
 `node tools/test-game.js` drives the real `index.html` in headless Chromium and
 asserts against the live world. It needs Playwright; set `PLAYWRIGHT_PATH` if it
