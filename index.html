@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>HENRYCRAFT — Henry's Blocky World</title>
+<title>Henry's Block Adventure</title>
 <meta name="description" content="A gentle blocky world to explore, dig and build in. No enemies, no losing.">
 <meta name="theme-color" content="#123a63">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Henrycraft">
+<meta name="apple-mobile-web-app-title" content="Henry Block">
 <!-- Real files, not data URIs: iOS ignores a data-URI apple-touch-icon and
      falls back to drawing a screenshot or a letter, which is what made the
      home-screen icon look broken. -->
@@ -296,7 +296,7 @@ body.touch #hint{display:none}
 
 /* the signature: a title built like a stack of blocks */
 #title{
-  font-size:clamp(38px,11vw,88px);font-weight:900;letter-spacing:.02em;line-height:.92;
+  font-size:clamp(26px,7.6vw,62px);font-weight:900;letter-spacing:.02em;line-height:.92;
   color:var(--sun);margin:0;
   text-shadow:
     0 4px 0 var(--sun-dk),
@@ -304,8 +304,9 @@ body.touch #hint{display:none}
     0 12px 0 var(--ink),
     0 13px 0 var(--ink);
 }
+#title .line{display:block}
 #title span{display:inline-block}
-#title span:nth-child(odd){transform:translateY(-6px)}
+#title .line span:nth-child(odd){transform:translateY(-6px)}
 #sub{
   margin:0;font-size:clamp(13px,3.6vw,18px);font-weight:800;letter-spacing:.26em;text-transform:uppercase;
   color:var(--cream);text-shadow:0 3px 0 rgba(0,0,0,.6)
@@ -366,6 +367,27 @@ body.touch #hint{display:none}
   border-radius:8px;padding:4px 10px;font-size:12px;font-weight:800;
   letter-spacing:.02em;white-space:nowrap;pointer-events:none
 }
+/* The picture hint. No pointer events at all: it appears over the world, is
+   understood or not, and fades. Nothing to dismiss mid-build. */
+#portalHelp{
+  position:absolute;left:50%;transform:translateX(-50%);
+  top:calc(env(safe-area-inset-top) + 58px);
+  background:var(--panel);border:4px solid var(--ink);border-radius:14px;
+  box-shadow:0 6px 0 rgba(0,0,0,.45);
+  padding:8px 12px 6px;display:flex;flex-direction:column;align-items:center;gap:2px;
+  opacity:0;transition:opacity .25s;pointer-events:none;max-width:min(92vw,420px)
+}
+#portalHelp.on{opacity:1}
+#portalHelp small{font-size:12px;font-weight:800;opacity:.9;text-align:center}
+#portalHelpPic,#ideasPic{
+  max-width:100%;height:auto;image-rendering:pixelated;
+  image-rendering:-moz-crisp-edges;image-rendering:crisp-edges
+}
+/* Short screens are the phone case, where the pad already crowds the view. */
+@media (max-height:520px){
+  #portalHelp{top:calc(env(safe-area-inset-top) + 46px);padding:5px 8px 4px}
+  #portalHelp small{font-size:11px}
+}
 /* The join code is read aloud down a phone line, so it is big, spaced out and
    selectable, and it wraps rather than running off a narrow screen. */
 #joinCode{
@@ -397,7 +419,7 @@ body.touch #hint{display:none}
 
 <div id="ui">
   <div id="topLeft">
-    <div class="chip" id="logo">HENRYCRAFT</div>
+    <div class="chip" id="logo">HENRY'S BLOCK</div>
     <div class="chip" id="starChip">⭐ <b><span id="starNum">0</span>/<span id="starTot">10</span></b></div>
     <div class="chip" id="districtChip">Home</div>
   </div>
@@ -432,13 +454,14 @@ body.touch #hint{display:none}
     </div>
   </div>
 
+  <div id="portalHelp"><canvas id="portalHelpPic"></canvas><small id="portalHelpWords"></small></div>
   <div id="portalRing"><svg viewBox="0 0 100 100"><circle class="bg" cx="50" cy="50" r="42"></circle><circle class="fg" cx="50" cy="50" r="42"></circle></svg><span>🌀</span></div>
   <div id="toast"></div>
 </div>
 
 <div class="overlay" id="start">
-  <h1 id="title"><span>H</span><span>E</span><span>N</span><span>R</span><span>Y</span><span>C</span><span>R</span><span>A</span><span>F</span><span>T</span></h1>
-  <p id="sub">Henry's Blocky World</p>
+  <h1 id="title"><span class="line"><span>H</span><span>E</span><span>N</span><span>R</span><span>Y</span><span>'</span><span>S</span><span>&nbsp;</span><span>B</span><span>L</span><span>O</span><span>C</span><span>K</span></span><span class="line"><span>A</span><span>D</span><span>V</span><span>E</span><span>N</span><span>T</span><span>U</span><span>R</span><span>E</span></span></h1>
+  <p id="sub">Dig, build and fly</p>
   <div id="howto">
     <div><i>🕹️</i><span id="h1">Walk around with the stick</span></div>
     <div><i>⛏️</i><span id="h2">Dig blocks away</span></div>
@@ -463,6 +486,7 @@ body.touch #hint{display:none}
     <button class="blockbtn" id="mFly">Flying: off</button>
     <button class="blockbtn go" id="mRescue">Take me back to the start</button>
     <button class="blockbtn go" id="mGoHome">🏠 Go home</button>
+    <button class="blockbtn" id="mIdeas">💡 Things you can build</button>
     <button class="blockbtn" id="mTogether">👤 Playing alone</button>
     <button class="blockbtn" id="mDistricts">My districts</button>
     <button class="blockbtn" id="mHome">Title screen</button>
@@ -491,6 +515,18 @@ body.touch #hint{display:none}
     <small>Everything built there is lost. This cannot be undone.</small>
     <button class="blockbtn" id="delNo">Keep it</button>
     <button class="blockbtn danger" id="delYes">Delete it</button>
+  </div>
+</div>
+
+<div class="overlay hide" id="ideas">
+  <div class="card wide">
+    <h2>Things you can build</h2>
+    <div class="pickhead">A portal to a whole new district</div>
+    <canvas id="ideasPic"></canvas>
+    <small>Build a frame out of obsidian, fill the middle in with any block, then
+      light it with Flint &amp; Steel. Whatever you fill it with decides where it
+      goes &mdash; snow takes you somewhere snowy, sand somewhere sandy.</small>
+    <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
 
@@ -556,12 +592,12 @@ body.touch #hint{display:none}
 'use strict';
 
 /* =======================================================================
-   HENRYCRAFT — a gentle voxel sandbox
+   HENRY'S BLOCK ADVENTURE — a gentle voxel sandbox
    ======================================================================= */
 
 if (typeof THREE === 'undefined') {
   document.getElementById('start').innerHTML =
-    '<h1 id="title">Oops</h1><p id="sub">The 3D engine could not load. Check the internet connection and reload.</p>';
+    '<h1 id="title">Oops</h1><p id="sub">This device could not start 3D graphics. Try reloading, or a different browser.</p>';
   return;
 }
 
@@ -2517,18 +2553,219 @@ function tryLightPortal(x,y,z){
 
 /* Every near miss gets its own answer. Emoji rather than prose because he cannot
    read; the illustrated panel is a separate job. */
+/* The words are for whoever is reading over his shoulder. The picture is the
+   actual hint - see HINT_PICS - and the marker points at the block that is
+   wrong, so all three say the same thing in three different ways. */
+var HINT_WORDS={
+  gap:'One block is missing from the frame',
+  notRect:'Make the frame a rectangle',
+  flat:'Stand the frame up, like a doorway',
+  partial:'Fill in every square inside',
+  tooBig:'A bit smaller - 21 across at most',
+  tooSmall:'A bit bigger - at least 1 by 2',
+  notObsidian:'The whole frame has to be obsidian'
+};
 function portalHint(r){
-  var msg;
-  if(r.why==='gap')            msg='🧱❓ One block missing in the frame';
-  else if(r.why==='notRect')   msg='▭ Make the frame a rectangle';
-  else if(r.why==='flat')      msg='⬆️▭ Stand the frame up';
-  else if(r.why==='partial')   msg='🔲 Fill in every square inside';
-  else if(r.why==='tooBig')    msg='📏 A bit smaller (21 across at most)';
-  else if(r.why==='tooSmall')  msg='📏 A bit bigger - at least 1 by 2';
-  else if(r.why==='notObsidian') msg='⬛ The frame needs to be obsidian';
-  else                          msg='▭ Make the frame a rectangle';
-  toast(msg,2600);
+  var why=HINT_WORDS[r.why]?r.why:'notRect';
+  showHintPicture(why,HINT_WORDS[why]);
   if(r.at) markHint(r.at);
+}
+
+/* ---------------- pictures made of real blocks ----------------
+
+   He is five and cannot read, so every explanation in this game has to be a
+   picture. These are drawn from the same texture atlas the world is built from -
+   not separate artwork - which means a block always looks in a diagram exactly
+   the way it looks in his hands, and no drawing can ever go out of date when a
+   texture changes.
+
+   A picture is a grid of characters. One character per cell:
+
+     .  nothing        O  obsidian        f  the filling
+     s  the wrong block (stone)           p  a lit portal
+     h  an empty opening, drawn as a dark hole rather than left blank
+     x  marks the cell that is wrong - drawn as a red cross
+
+   Two grids side by side, one crossed out and one ticked, is the only wordless
+   idiom that reliably says "not like that, like this".
+*/
+var PIC_BLOCK={O:OBSIDIAN, f:GRASS, s:STONE, p:PORTAL};
+
+function drawTileAt(c,tile,x,y,size){
+  var sx=(tile%ACOLS)*TP, sy=Math.floor(tile/ACOLS)*TP;
+  c.drawImage(atlasCanvas,sx,sy,TP,TP,x,y,size,size);
+}
+function drawCross(c,x,y,size){
+  c.save();
+  c.strokeStyle='#e8453c'; c.lineWidth=Math.max(3,size*0.16);
+  c.lineCap='round';
+  var m=size*0.22;
+  c.beginPath();
+  c.moveTo(x+m,y+m); c.lineTo(x+size-m,y+size-m);
+  c.moveTo(x+size-m,y+m); c.lineTo(x+m,y+size-m);
+  c.stroke();
+  c.restore();
+}
+/* Grid -> pixels. `squash` draws the same frame flattened, which is what a portal
+   lying on the ground looks like from where he is standing. */
+function drawBlockGrid(c,rows,x,y,cell,squash){
+  c.save();
+  c.imageSmoothingEnabled=false;
+  if(squash){
+    /* Squash plus shear: flat-on-the-ground, not just short. Squashing alone was
+       indistinguishable from the "too wide" picture, which is the opposite
+       instruction. */
+    c.translate(x,y+cell*rows.length*0.34);
+    c.transform(1,0,-0.5,0.42,0,0);
+    c.translate(-x,-y);
+    c.translate(cell*rows[0].length*0.5,0);
+  }
+  var crosses=[];
+  for(var r=0;r<rows.length;r++){
+    for(var i=0;i<rows[r].length;i++){
+      var ch=rows[r].charAt(i);
+      var px=x+i*cell, py=y+r*cell;
+      if(ch==='x'){ crosses.push([px,py]); continue; }
+      /* An empty opening has to look like a hole. Left blank it takes the colour
+         of whatever is behind the canvas, which reads as a pale block - exactly
+         the wrong idea in a picture about what to fill in. */
+      if(ch==='h'){
+        c.fillStyle='rgba(9,14,22,0.62)';
+        c.fillRect(px,py,cell,cell);
+        continue;
+      }
+      var id=PIC_BLOCK[ch];
+      if(id===undefined) continue;
+      drawTileAt(c,DEFS[id].tiles[2],px,py,cell);
+    }
+  }
+  c.restore();
+  /* Crosses go on last and unsquashed, so they stay square and readable. */
+  for(var k=0;k<crosses.length;k++) drawCross(c,crosses[k][0],crosses[k][1],cell);
+}
+function drawBadge(c,ok,x,y,size){
+  c.save();
+  c.font='bold '+size+'px Trebuchet MS, Verdana, sans-serif';
+  c.textAlign='center'; c.textBaseline='middle';
+  c.fillStyle=ok?'#4fc04f':'#e8453c';
+  c.fillText(ok?'✓':'✗',x,y);
+  c.restore();
+}
+
+/* A good 2x3 portal, and every way he is likely to get it wrong. */
+var PIC_GOOD=['.OO.','OffO','OffO','OffO','.OO.'];
+var HINT_PICS={
+  /* a hole in the frame */
+  gap:        {bad:['.OO.','OffO','Offx','OffO','.OO.'], good:PIC_GOOD},
+  /* one block is not obsidian */
+  notObsidian:{bad:['.OO.','OffO','sffO','OffO','.OO.'], badMark:[2,0], good:PIC_GOOD},
+  /* the middle is not filled in */
+  partial:    {bad:['.OO.','OffO','OxfO','OffO','.OO.'], good:PIC_GOOD},
+  /* too small: a single square */
+  tooSmall:   {bad:['OOO','OfO','OOO'], good:PIC_GOOD},
+  /* too big: drawn small so it reads as a big frame */
+  tooBig:     {bad:['.OOOOOOO.','OfffffffO','OfffffffO','OfffffffO','.OOOOOOO.'],
+               good:PIC_GOOD},
+  /* lying on the ground instead of standing up */
+  flat:       {bad:PIC_GOOD, badSquash:true, good:PIC_GOOD},
+  /* not a rectangle */
+  notRect:    {bad:['.OO..','OffO.','OffOO','OfffO','.OOOO'], good:PIC_GOOD}
+};
+
+/* One canvas, redrawn each time: seven pictures cached would cost more memory
+   than redrawing one at 60x150. */
+function paintHintPicture(cv,why){
+  var pic=HINT_PICS[why]||HINT_PICS.notRect;
+  var c=cv.getContext('2d');
+  var cell=22, gap=26;
+  var badRows=pic.bad, goodRows=pic.good;
+  var badCell=Math.round(cell*(pic.badCell||1));
+  var wBad=badRows[0].length*badCell, wGood=goodRows[0].length*cell;
+  var hBad=badRows.length*badCell, hGood=goodRows.length*cell;
+  var W=wBad+gap+wGood+16, H=Math.max(hBad,hGood)+34;
+  cv.width=W; cv.height=H;
+  c.clearRect(0,0,W,H);
+
+  var bx=8, gx=8+wBad+gap;
+  drawBlockGrid(c,badRows,bx,26+(Math.max(hBad,hGood)-hBad)/2,badCell,pic.badSquash);
+  if(pic.badMark) drawCross(c,bx+pic.badMark[1]*badCell,
+                            26+(Math.max(hBad,hGood)-hBad)/2+pic.badMark[0]*badCell,badCell);
+  drawBlockGrid(c,goodRows,gx,26+(Math.max(hBad,hGood)-hGood)/2,cell,false);
+  drawBadge(c,false,bx+wBad/2,15,22);
+  drawBadge(c,true,gx+wGood/2,15,22);
+  return {w:W,h:H};
+}
+
+/* The panel itself. No tap needed and no pointer events: it appears, it is
+   understood or it is not, and it goes away. A dialog a child has to dismiss in
+   the middle of building is worse than no dialog. */
+var hintPanelEl=null, hintPanelCv=null, hintPanelWords=null, hintPanelTimer=null;
+function showHintPicture(why,words){
+  if(!hintPanelEl){
+    hintPanelEl=el('portalHelp');
+    hintPanelCv=document.getElementById('portalHelpPic');
+    hintPanelWords=document.getElementById('portalHelpWords');
+  }
+  paintHintPicture(hintPanelCv,why);
+  hintPanelWords.textContent=words||'';
+  hintPanelEl.classList.add('on');
+  if(hintPanelTimer) clearTimeout(hintPanelTimer);
+  hintPanelTimer=setTimeout(function(){
+    hintPanelEl.classList.remove('on');
+  },5500);
+}
+
+/* ---- things you can build ----
+   Three steps, left to right, in the order he would do them, with the block he
+   needs drawn beside each one. The words are there for whoever is reading over
+   his shoulder; the pictures are the instructions. */
+function paintPortalRecipe(cv){
+  var c=cv.getContext('2d');
+  var cell=20, steps=[
+    {rows:['.OO.','OhhO','OhhO','OhhO','.OO.'], block:OBSIDIAN},
+    {rows:['.OO.','OffO','OffO','OffO','.OO.'], block:GRASS},
+    {rows:['.OO.','OppO','OppO','OppO','.OO.'], block:null}
+  ];
+  var one=4*cell, colW=one+16, arrow=34, pad=10;
+  var W=pad*2+steps.length*colW+(steps.length-1)*arrow;
+  var H=5*cell+72;
+  cv.width=W; cv.height=H;
+  c.clearRect(0,0,W,H);
+  c.imageSmoothingEnabled=false;
+  for(var i=0;i<steps.length;i++){
+    var x=pad+i*(colW+arrow);
+    var mid=x+colW/2;
+    drawBlockGrid(c,steps[i].rows,x+8,34,cell,false);
+    /* the thing this step needs, sitting under it */
+    if(steps[i].block!==null){
+      drawTileAt(c,DEFS[steps[i].block].tiles[2],mid-14,34+5*cell+8,28);
+    } else {
+      c.save();
+      c.font='26px Trebuchet MS, Verdana, sans-serif';
+      c.textAlign='center'; c.textBaseline='top';
+      c.fillText('🔥',mid,34+5*cell+6);
+      c.restore();
+    }
+    c.save();
+    c.fillStyle='#f2c231';
+    c.font='bold 16px Trebuchet MS, Verdana, sans-serif';
+    c.textAlign='center'; c.textBaseline='top';
+    c.fillText(String(i+1),mid,10);
+    c.restore();
+    if(i<steps.length-1){
+      c.save();
+      c.fillStyle='#f6f1e4';
+      c.font='bold 26px Trebuchet MS, Verdana, sans-serif';
+      c.textAlign='center'; c.textBaseline='middle';
+      c.fillText('▶',x+colW+arrow/2,34+2.5*cell);
+      c.restore();
+    }
+  }
+  return {w:W,h:H};
+}
+function showIdeas(){
+  paintPortalRecipe(document.getElementById('ideasPic'));
+  el('ideas').classList.remove('hide');
 }
 
 /* ---------------- sound ---------------- */
@@ -4465,6 +4702,13 @@ function mpJoinByCode(raw){
    Turning sharing on is one press. Turning it off is a press inside the panel
    rather than the same button toggling straight back, so a mis-tap cannot end a
    session everybody else is still in. */
+el('mIdeas').addEventListener('click',function(){
+  toggleMenu(false);
+  showIdeas();
+});
+el('ideasDone').addEventListener('click',function(){
+  el('ideas').classList.add('hide');
+});
 el('mTogether').addEventListener('click',function(){
   toggleMenu(false);
   if(!mp.wanted) mpStart(null);
@@ -4814,6 +5058,37 @@ window.__henrycraft={
     return {sceneMeshes:meshes, glowMeshes:glowMeshes, glowTris:glowTris,
             portalBlocks:Object.keys(portalCells).length};
   },
+  /* The picture hints, so a test can check they are drawn from the real atlas
+     rather than assumed to be, and so they can be rendered out and looked at. */
+  hintPics:function(){ return Object.keys(HINT_PICS); },
+  hintWords:function(){ return HINT_WORDS; },
+  paintHint:function(cv,why){ return paintHintPicture(cv,why); },
+  paintRecipe:function(cv){ return paintPortalRecipe(cv); },
+  atlasTilePixels:function(tile,n){
+    /* The atlas itself, for comparison: if a diagram is really made of block
+       textures, the colours in it have to come from here. */
+    var c=atlasCanvas.getContext('2d');
+    var sx=(tile%ACOLS)*TP, sy=Math.floor(tile/ACOLS)*TP;
+    var d=c.getImageData(sx,sy,TP,TP).data, out=[];
+    for(var i=0;i<n;i++){
+      var k=Math.floor(i*(TP*TP)/n)*4;
+      out.push([d[k],d[k+1],d[k+2]]);
+    }
+    return out;
+  },
+  hintPanel:function(){
+    var e=document.getElementById('portalHelp');
+    return {on:!!e&&e.classList.contains('on'),
+            words:document.getElementById('portalHelpWords').textContent,
+            w:document.getElementById('portalHelpPic').width,
+            h:document.getElementById('portalHelpPic').height};
+  },
+  /* The whole light-it path including the hint, not just the analysis, so a test
+     can check what actually appears on screen. */
+  tryLight:function(x,y,z){ return tryLightPortal(x,y,z); },
+  showIdeas:showIdeas,
+  tiles:function(id){ return DEFS[id]?DEFS[id].tiles:null; },
+
   /* ---- multiplayer, for tools/test-multiplayer.js ----
      Everything here either reads state or does exactly what a button does. feed()
      is the one that matters for safety: it pushes a raw frame through the same

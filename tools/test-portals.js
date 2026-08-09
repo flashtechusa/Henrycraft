@@ -189,6 +189,99 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         JSON.stringify(hints));
   note('hints: ' + Object.entries(hints).map(([k, v]) => `${k}->${v}`).join(', '));
 
+  // ---- 2d: the hints are pictures, made of real blocks ---------------------
+  console.log('2d. every hint is a picture drawn from the real block textures');
+  const pics = await page.evaluate(() => {
+    const H = window.__henrycraft;
+    const cv = document.createElement('canvas');
+    const out = {reasons: H.hintPics(), sizes: {}, ink: {}, words: {}};
+
+    /* "Drawn from the real block textures" is the claim, so it gets checked
+       against the atlas rather than taken on trust: the average colour of the
+       first obsidian cell in the picture must match the average of obsidian's
+       side tile in the atlas. Hand-drawn artwork would not. */
+    function averageOf(list) {
+      let r = 0, g = 0, b = 0;
+      list.forEach(p => { r += p[0]; g += p[1]; b += p[2]; });
+      return [r / list.length, g / list.length, b / list.length];
+    }
+    const obsTile = H.tiles(H.ids.OBSIDIAN)[2];
+    const atlasAvg = averageOf(H.atlasTilePixels(obsTile, 256));
+
+    for (const why of out.reasons) {
+      H.paintHint(cv, why);
+      out.sizes[why] = [cv.width, cv.height];
+      const c = cv.getContext('2d');
+      const d = c.getImageData(0, 0, cv.width, cv.height).data;
+      let opaque = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i] > 200) opaque++;
+      out.ink[why] = opaque;
+      out.words[why] = H.hintWords()[why] || null;
+    }
+
+    /* The top-left obsidian block of the good frame: cell 22px, the good grid
+       starts after the bad one, so sample the bad picture's left edge column
+       instead - row 1, column 0, which is obsidian in every case. */
+    H.paintHint(cv, 'partial');
+    const c = cv.getContext('2d');
+    const cell = 22, x0 = 8, y0 = 26 + cell;      // row 1 of the bad grid
+    const px = c.getImageData(x0 + 2, y0 + 2, cell - 4, cell - 4).data;
+    const got = [];
+    for (let i = 0; i < px.length; i += 4) got.push([px[i], px[i + 1], px[i + 2]]);
+    out.cellAvg = averageOf(got);
+    out.atlasAvg = atlasAvg;
+    return out;
+  });
+  const dist = Math.hypot(pics.cellAvg[0] - pics.atlasAvg[0],
+                          pics.cellAvg[1] - pics.atlasAvg[1],
+                          pics.cellAvg[2] - pics.atlasAvg[2]);
+  check(`all ${pics.reasons.length} reasons have a picture, and none is blank`,
+        pics.reasons.length === 7 &&
+        pics.reasons.every(w => pics.ink[w] > 400 && pics.sizes[w][0] > 80),
+        JSON.stringify(pics.ink));
+  check(`the blocks in a picture come from the atlas, not from artwork ` +
+        `(colour distance ${dist.toFixed(1)})`,
+        dist < 24, `picture ${pics.cellAvg.map(v => v.toFixed(0))} vs ` +
+                   `atlas ${pics.atlasAvg.map(v => v.toFixed(0))}`);
+  check('each picture still carries words for whoever is reading aloud',
+        pics.reasons.every(w => typeof pics.words[w] === 'string' && pics.words[w].length > 8),
+        JSON.stringify(pics.words));
+  note('hint pictures: ' + pics.reasons.map(w => `${w} ${pics.sizes[w].join('x')}`).join(', '));
+
+  // the panel appears on a real near miss, and leaves on its own
+  const panel = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    H.loadThemeSeed('meadow', 783);
+    /* A frame with a hole in it, lit the way he would light it. */
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 8, ay: 26, fixed: 30,
+                            gapAt: {x: 8, y: 25, z: 30}});
+    const analysed = H.analyse(b.probe.x, b.probe.y, b.probe.z);
+    H.tryLight(b.probe.x, b.probe.y, b.probe.z);
+    await new Promise(r => setTimeout(r, 120));
+    const shown = H.hintPanel();
+    return {why: analysed.why, shown};
+  });
+  check('a wrong frame puts the picture on screen rather than a line of emoji',
+        panel.shown.on && panel.shown.w > 80 && /missing/i.test(panel.shown.words),
+        JSON.stringify(panel));
+
+  // the ideas page
+  const ideas = await page.evaluate(() => {
+    const H = window.__henrycraft;
+    H.showIdeas();
+    const cv = document.getElementById('ideasPic');
+    const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+    let opaque = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 200) opaque++;
+    const open = !document.getElementById('ideas').classList.contains('hide');
+    document.getElementById('ideasDone').click();
+    return {open, closed: document.getElementById('ideas').classList.contains('hide'),
+            size: [cv.width, cv.height], opaque};
+  });
+  check(`"Things you can build" shows a drawn portal recipe ` +
+        `(${ideas.size.join('x')}, ${ideas.opaque} painted pixels)`,
+        ideas.open && ideas.opaque > 2000 && ideas.closed, JSON.stringify(ideas));
+
   // ---- 2b: a 21x21 portal is one merged mesh -------------------------------
   console.log('2b. a 21x21 portal is part of the chunk mesh, not 441 objects');
   const big = await page.evaluate(async () => {

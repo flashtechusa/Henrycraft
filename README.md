@@ -1,7 +1,11 @@
-# Henrycraft
+# Henry's Block Adventure
 
-Henry's blocky world — a gentle voxel sandbox. No monsters, no falling damage,
-no night. Walk, dig, build, fly, and find 10 hidden stars.
+A gentle voxel sandbox. No monsters, no falling damage, no night. Walk, dig,
+build, fly, and find 10 hidden stars.
+
+The repository is still called `Henrycraft`, which was the working name, and so
+are the APK file and the test scripts. The game itself says *Henry's Block
+Adventure* everywhere a person can see it.
 
 ## Play it
 
@@ -144,6 +148,20 @@ random spot hits ore or a cave about 92% of the time.
 **Flint &amp; Steel** places a flickering fire block. It is purely decorative: it
 never spreads, never goes out, never hurts anything, and digs away like any other
 block.
+
+**Portals.** Build a frame out of obsidian, fill the middle with any block, then
+light it with Flint &amp; Steel. Whatever you fill it with decides where it goes:
+snow to somewhere snowy, sand to somewhere sandy. Anything from 1&times;2 to
+21&times;21 counts, corners optional, and a return portal is always built on the
+other side so he can never be stranded. **Things you can build** in the pause menu
+shows the three steps as a picture.
+
+**Every hint is a picture.** He cannot read, so a frame that will not light shows a
+drawn diagram &mdash; the wrong shape crossed out beside the right one, with a red
+cross on the exact block at fault &mdash; and it fades on its own rather than
+waiting to be dismissed. The diagrams are drawn from the same texture atlas the
+world is built from, so a block always looks the way it looks in his hands, and a
+test asserts that by comparing the pixels in a diagram against the atlas.
 
 **Animals.** Pigs, sheep and cows wander the land. Axolotls and sharks swim in
 any water at least three blocks deep. Nothing in this game can hurt Henry, and

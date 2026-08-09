@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Henrycraft</string>
+    <string name="app_name">Henry\'s Block Adventure</string>
+    <!-- Under the icon, where both launchers truncate hard. Same short form as
+         short_name in the web manifest, so the tablet and the phone agree. -->
+    <string name="launcher_name">Henry Block</string>
     <string name="quit_confirm">Press back again to quit</string>
 </resources>

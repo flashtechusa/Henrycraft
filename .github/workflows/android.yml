@@ -168,6 +168,6 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --title "Henrycraft $tag" --notes "Sideload henrycraft.apk on a Fire tablet. No network or permissions needed."
+            gh release create "$tag" --title "Henry's Block Adventure $tag" --notes "Sideload henrycraft.apk on a Fire tablet. Plays offline; the internet permission is only for playing together."
           fi
           gh release upload "$tag" dist/henrycraft.apk --clobber
