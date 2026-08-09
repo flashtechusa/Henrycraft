@@ -271,6 +271,33 @@ function dE(a, b) {
     check('no other key added or lost', del.added.length === 0,
           'added: ' + JSON.stringify(del.added));
     check('it is gone from the index', !del.stillListed);
+
+    // The path check 7 above never covered: deleting the district you are
+    // standing in. switchDistrict starts by saving where you are, so with the
+    // live record still pointing at the doomed district this wrote its key back
+    // out and re-added it to the index - the delete undid itself.
+    const delSelf = await page.evaluate(async () => {
+      const H = window.__henrycraft;
+      const extra = await H.createDistrict('Standing Here', 'snowy');
+      const beforeCount = H.districts().list.length;
+      const beforeKeys = Object.keys(localStorage).filter(k => k.startsWith('henrycraft-district-')).sort();
+      await H.deleteDistrict(extra);           // deleting the current one
+      // give any pending autosave a chance to resurrect it
+      await new Promise(r => setTimeout(r, 250));
+      await H.saveNow();
+      const afterKeys = Object.keys(localStorage).filter(k => k.startsWith('henrycraft-district-')).sort();
+      return {extra, beforeCount, afterCount: H.districts().list.length,
+              stillListed: H.districts().list.some(d => d.slug === extra),
+              keyBack: afterKeys.includes('henrycraft-district-' + extra),
+              beforeKeys, afterKeys, nowIn: H.districts().current};
+    });
+    check('deleting the district you are standing in does not recreate it',
+          !delSelf.stillListed && !delSelf.keyBack &&
+          delSelf.afterCount === delSelf.beforeCount - 1,
+          JSON.stringify(delSelf));
+    check('and it moves you to a surviving district',
+          !!delSelf.nowIn && delSelf.nowIn !== delSelf.extra, 'now in ' + delSelf.nowIn);
+
     check('no page errors', errs.length === 0, errs.join(' | '));
     await ctx.close();
   }

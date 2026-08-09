@@ -1,0 +1,31 @@
+name = "henrycraft-sync"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+# No account_id here on purpose. Wrangler picks it up from your login, and the
+# brief asks that it not be committed. Same for tokens - `wrangler login` uses a
+# browser session, so no credential needs to exist in this repo at all.
+
+# One Durable Object instance per district, addressed by its join code.
+[[durable_objects.bindings]]
+name = "DISTRICT"
+class_name = "District"
+
+# new_sqlite_classes, not new_classes. SQLite-backed Durable Objects run on the
+# Workers Free plan; the older key-value-backed kind needs a paid plan. Nothing
+# here needs the KV variety, and getting this wrong fails at deploy with a
+# billing error rather than a config one.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["District"]
+
+# Served from the game's own domain rather than *.workers.dev, which is blocked
+# by a fair number of school and family-filter DNS resolvers - and the people
+# joining this are grandparents on networks we cannot inspect. Wrangler creates
+# the DNS record on deploy; there is nothing to add in the dashboard by hand.
+[[routes]]
+pattern = "sync.henrysgame.com"
+custom_domain = true
+
+[observability]
+enabled = true

@@ -3122,6 +3122,16 @@ function switchDistrict(slug){
 
 function deleteDistrict(slug){
   var wasCurrent=current&&current.slug===slug;
+  if(wasCurrent){
+    /* Let go of the live record before anything can save it. switchDistrict
+       below starts by saving where we are, and with current still pointing at
+       the district being deleted that wrote its key straight back out and put it
+       back in the index - so deleting the district you were standing in undid
+       itself. saveDirty goes too, or the 4-second autosave does the same thing a
+       moment later. */
+    current=null;
+    saveDirty=false;
+  }
   removeKey(districtKey(slug));
   districtIndex.list=districtIndex.list.filter(function(d){ return d.slug!==slug; });
   return writeJSON(INDEX_KEY,districtIndex).then(function(){
