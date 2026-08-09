@@ -200,6 +200,29 @@ else
   bad "an icon or manifest link is absolute" "$rooted"
 fi
 
+# --- 8 -----------------------------------------------------------------------
+# GitHub Pages reads CNAME literally. A scheme, a path, a second line or a stray
+# space all break the custom domain, and the dashboard reports it as an unhelpful
+# "improperly formatted" with the site simply off.
+echo "8. CNAME file is well formed"
+if [[ ! -f CNAME ]]; then
+  meh "no CNAME file" "the site would serve from flashtechusa.github.io instead"
+else
+  lines=$(grep -c '' CNAME)
+  host=$(head -1 CNAME | tr -d '\r')
+  if [[ "$lines" -ne 1 ]]; then
+    bad "CNAME has $lines lines; it must contain exactly one"
+  elif [[ "$host" =~ ^https?:// ]]; then
+    bad "CNAME contains a scheme: $host" "it must be a bare hostname"
+  elif [[ "$host" == */* ]]; then
+    bad "CNAME contains a path: $host" "it must be a bare hostname"
+  elif [[ ! "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; then
+    bad "CNAME is not a valid hostname: '$host'"
+  else
+    ok "CNAME is a single bare hostname: $host"
+  fi
+fi
+
 # --- 6 -----------------------------------------------------------------------
 echo "6. the debug APK builds"
 if [[ $STATIC_ONLY -eq 1 ]]; then

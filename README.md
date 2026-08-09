@@ -5,21 +5,36 @@ no night. Walk, dig, build, fly, and find 10 hidden stars.
 
 ## Play it
 
-**https://flashtechusa.github.io/Henrycraft/**
+**https://henrysgame.com**
 
 That's the link to send to Henry. It works on any computer or tablet with a
 browser — nothing to install.
 
-## One-time setup (do this once)
+## Hosting and the domain
 
-The link above only works after GitHub Pages is switched on. It takes one click,
-and only the repo owner can do it:
+The site is GitHub Pages, served from `main` at `/ (root)`, with the custom
+domain set by the [`CNAME`](CNAME) file in this repo. The domain is registered at
+Cloudflare, which is also its DNS.
 
-1. Go to **Settings** → **Pages** (left sidebar).
-2. Under **Build and deployment** → **Source**, choose **Deploy from a branch**.
-3. Set **Branch** to `main` and the folder to `/ (root)`, then click **Save**.
+DNS (Cloudflare → DNS → Records), both **DNS only**, grey cloud:
 
-Wait a minute or two, then open the play link. After this it stays on for good.
+| Type | Name | Content |
+| --- | --- | --- |
+| CNAME | `henrysgame.com` | `flashtechusa.github.io` |
+| CNAME | `www` | `flashtechusa.github.io` |
+
+Cloudflare flattens the apex CNAME automatically, so there is no need for the
+four A and four AAAA records GitHub's docs list.
+
+**The records must stay on DNS only (grey cloud), not proxied.** With Cloudflare's
+proxy in front, it answers the ACME challenge itself and GitHub can never issue
+the certificate — the symptom is "certificate provisioning failed" sitting there
+for hours with no other explanation.
+
+Once the certificate exists, tick **Enforce HTTPS** in Settings → Pages.
+
+`flashtechusa.github.io/Henrycraft/` keeps working and redirects, so any link
+already sent out is fine.
 
 ## Districts
 
