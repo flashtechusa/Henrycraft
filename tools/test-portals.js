@@ -193,50 +193,126 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
   console.log('2b. a 21x21 portal is part of the chunk mesh, not 441 objects');
   const big = await page.evaluate(async () => {
     const H = window.__henrycraft;
+    /* Waits n frames. The obvious version (i++; i < n ? rAF : resolve) resolves
+       frames(1) without waiting for a single frame, which made settle() below spin
+       240 times inside one task: no frame ran, so no chunk was re-meshed, no spark
+       expired, and the glow mesh was never built. Every number 2b reported was
+       taken from a scene that had not been drawn yet. */
     function frames(n) {
       return new Promise(res => {
-        const t0 = performance.now();
         let i = 0;
-        (function step() { i++; i < n ? requestAnimationFrame(step) : res(1000 * i / (performance.now() - t0)); })();
+        (function step() { if (i++ >= n) return res(); requestAnimationFrame(step); })();
       });
     }
-    H.loadThemeSeed('meadow', 780);
-    const b = H.buildFrame({plane: 'x', w: 21, h: 21, ax: 6, ay: 12, fixed: 30, fill: H.ids.GRASS});
-    await frames(30);                                   // let chunks settle
-    // Snapshot around the lighting only. loadThemeSeed respawns animals and fish,
-    // which are Groups of meshes, so measuring across it counts the wrong thing.
-    const baseFps = await frames(45);
-    const before = H.portalMeshStats().sceneMeshes;
-    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
-    const sparks = H.particleCount();                   // sampled at ignition
-    await frames(30);                                   // chunk rebuild
-    const after = H.portalMeshStats();
-    const fps = await frames(45);
-    return {lit, before, after, fps, baseFps, interior: b.interior, sparks};
+    /* Wait until nothing is still changing: ignition sparks are individual
+       meshes, and each one is a draw call, so reading while they are still in the
+       air measures fireworks rather than the portal. Chunk meshing is flushed by
+       the loop, so the rebuild counter has to stop moving too. */
+    const why = [];
+    async function settle(maxFrames) {
+      for (let i = 0; i < maxFrames; i++) {
+        await frames(1);
+        if (H.particleCount() === 0) {
+          const r = H.renderStats().rebuilds;
+          await frames(2);
+          if (H.renderStats().rebuilds === r) return true;
+        }
+      }
+      why.push({p: H.particleCount(), r: H.renderStats().rebuilds,
+                g: H.portalMeshStats().glowMeshes});
+      return false;
+    }
+    /* One fixed viewpoint, chosen so the whole 21x21 footprint is in frame, and
+       used for every reading. Both portals sit in the same place in the same
+       world, so the two numbers differ only by the portal itself. */
+    const eye = {x: 16, y: 23, z: 62}, look = {x: 16, y: 23, z: 30};
+    async function measure(w, h) {
+      H.loadThemeSeed('meadow', 780);
+      await settle(240);
+      const b = H.buildFrame({plane: 'x', w, h, ax: 6, ay: 12, fixed: 30, fill: H.ids.GRASS});
+      await settle(240);
+      const before = H.renderProbe(eye, look);
+      const beforeMeshes = H.portalMeshStats().sceneMeshes;
+      const rebuildsBefore = H.renderStats().rebuilds;
+      const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+      const sparks = H.particleCount();
+      const quiet = await settle(240);
+      const after = H.renderProbe(eye, look);
+      const stats = H.portalMeshStats();
+      return {w, h, area: w * h, lit, sparks, quiet,
+              rebuildsOnLight: H.renderStats().rebuilds - rebuildsBefore,
+              glowTris: stats.glowTris,
+              callsBefore: before.calls, callsAfter: after.calls,
+              callDelta: after.calls - before.calls,
+              meshDelta: stats.sceneMeshes - beforeMeshes,
+              glowMeshes: stats.glowMeshes, portalBlocks: stats.portalBlocks,
+              interior: b.interior};
+    }
+    const small = await measure(1, 2);
+    const huge = await measure(21, 21);
+
+    // With a static lit portal, geometry must not be rebuilt at all - the shimmer
+    // is a scrolling texture, not per-block work.
+    const r0 = H.renderStats().rebuilds;
+    await frames(300);
+    const r1 = H.renderStats().rebuilds;
+
+    return {small, huge, rebuildsOver300: r1 - r0, why};
   });
-  check(`441-block portal lights (${big.interior} interior blocks)`, big.lit.ok, JSON.stringify(big.lit));
-  // The bar is "not one object per block", so it is measured against the block
-  // count rather than against a small absolute number: a handful of new meshes
-  // for 441 blocks is merged geometry, and the few extra are the capped ignition
-  // sparks, which are ordinary short-lived particles.
-  check(`441 portal blocks added ${big.after.sceneMeshes - big.before} meshes, not hundreds`,
-        (big.after.sceneMeshes - big.before) < big.after.portalBlocks / 20,
-        `${big.before} -> ${big.after.sceneMeshes} meshes for ${big.after.portalBlocks} portal blocks`);
-  check(`ignition sparks are capped by area, not per block (${big.sparks} for 441 blocks)`,
-        big.sparks <= 30, `${big.sparks} particles`);
+  const S = big.small, B = big.huge;
+  check(`441-block portal lights (${B.interior} interior blocks)`, B.lit.ok, JSON.stringify(B.lit));
+
+  /* The property that actually matters, and the reason the frame-rate bar was
+     dropped: an absolute fps figure under SwiftShader measures the software
+     rasteriser, not the portal. Draw calls do not. A portal 220 times the area
+     must cost the same number of them - anything else means per-block geometry.
+     The only legitimate growth is the extra chunk column a 21-wide portal
+     straddles, since chunks are meshed separately, so the allowance is 2 rather
+     than 0. Both readings come from the same fixed camera with the sparks gone;
+     see measure() for why that matters. */
+  check('both readings were taken with nothing still moving',
+        S.quiet && B.quiet,
+        `settled: 1x2 ${S.quiet}, 21x21 ${B.quiet}; gave up at ${JSON.stringify(big.why)}`);
+
+  /* Two controls, because both assertions below would pass on a scene where
+     nothing happened at all - which is exactly the state a broken frame helper
+     put this test in once already. If the probe cannot see the portal the draw
+     calls cannot grow, and if the rebuild counter never moves then zero rebuilds
+     over 300 frames proves nothing. */
+  check(`the portal's faces really are in the merged buffer ` +
+        `(${B.glowTris} glow triangles for ${B.area} blocks)`,
+        B.glowTris > B.area, `${B.glowTris} glow triangles across ${B.glowMeshes} meshes`);
+  check('and those meshes are drawn from the probe pose, so the comparison is not ' +
+        'zero against zero',
+        B.callDelta > 0 && S.callDelta > 0,
+        `deltas: 1x2 ${S.callDelta}, 21x21 ${B.callDelta}`);
+  check(`and the rebuild counter does move when the portal changes ` +
+        `(${B.rebuildsOnLight} on ignition)`,
+        B.rebuildsOnLight > 0, `${B.rebuildsOnLight} rebuilds when lighting 441 blocks`);
+  check(`draw calls do not grow with area: ${S.area} blocks adds ${S.callDelta}, ` +
+        `${B.area} blocks adds ${B.callDelta}`,
+        B.callDelta - S.callDelta <= 2,
+        `1x2 delta ${S.callDelta}, 21x21 delta ${B.callDelta} ` +
+        `(${S.callsBefore}->${S.callsAfter} vs ${B.callsBefore}->${B.callsAfter})`);
+  check(`and the 441-block portal is nowhere near one call per block`,
+        B.callDelta < B.area / 20, `${B.callDelta} calls for ${B.area} blocks`);
+
+  /* A naive version regenerating its 441 blocks every frame would still show two
+     merged meshes while being unplayable, so the rebuild counter is checked
+     directly. The shimmer is a scrolling texture; geometry must not move. */
+  check(`a static lit portal rebuilt no geometry over 300 frames ` +
+        `(${big.rebuildsOver300} rebuilds)`,
+        big.rebuildsOver300 === 0, `${big.rebuildsOver300} chunk rebuilds`);
+
+  check(`ignition sparks are capped by area, not per block (${B.sparks} for ${B.area} blocks)`,
+        B.sparks <= 30, `${B.sparks} particles`);
   check('the interior is merged into chunk geometry, not one object per block',
-        big.after.glowMeshes > 0 && big.after.glowMeshes <= 4,
-        `${big.after.glowMeshes} glow chunk meshes hold ${big.after.portalBlocks} portal blocks`);
-  // An absolute 30fps is not a meaningful bar under SwiftShader, which is a
-  // software rasteriser - the whole scene runs at a fraction of tablet speed
-  // here. What is meaningful is that a 441-block portal costs almost nothing
-  // relative to the same scene without one.
-  check(`lighting it cost little: ${big.fps.toFixed(1)}fps vs ${big.baseFps.toFixed(1)}fps baseline`,
-        big.fps >= big.baseFps * 0.8,
-        `${(100 * big.fps / big.baseFps).toFixed(0)}% of baseline`);
-  note(`21x21 portal: ${big.after.portalBlocks} blocks in ${big.after.glowMeshes} merged mesh(es), ` +
-       `+${big.after.sceneMeshes - big.before} scene meshes, ` +
-       `${big.fps.toFixed(1)}fps vs ${big.baseFps.toFixed(1)}fps baseline (software GL)`);
+        B.glowMeshes > 0 && B.glowMeshes <= 4 && B.meshDelta < B.area / 20,
+        `${B.glowMeshes} glow chunk meshes, +${B.meshDelta} scene meshes for ${B.portalBlocks} blocks`);
+  note(`draw calls: 1x2 portal +${S.callDelta}, 21x21 portal +${B.callDelta} ` +
+       `(area x${(B.area / S.area).toFixed(0)}); ${B.portalBlocks} blocks and ` +
+       `${B.glowTris} triangles in ${B.glowMeshes} merged mesh(es); ` +
+       `${big.rebuildsOver300} rebuilds over 300 static frames`);
 
   // ---- 3: fill chooses the theme ------------------------------------------
   console.log('3. the filling chooses the destination theme');
@@ -420,6 +496,34 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         JSON.stringify(rest.dwell));
   note(`dwell is ${rest.dwell.dwell}s: ${(rest.dwell.dwell * 0.5).toFixed(2)}s stays put, ` +
        `${(rest.dwell.dwell + 0.3).toFixed(2)}s travels`);
+
+  // ---- the ?fps=1 readout -------------------------------------------------
+  console.log('\n12. the hidden fps readout appears only when asked for');
+  const off = await page.evaluate(() => !!document.getElementById('fpsReadout'));
+  const fpsPage = await ctx.newPage();
+  await fpsPage.goto(url + '?fps=1', {waitUntil: 'load'});
+  await fpsPage.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
+                                {timeout: 60000});
+  /* Wait for a real number rather than a fixed sleep: under SwiftShader a frame
+     can take a third of a second, and the readout only reports once it has half a
+     second of frames to divide. */
+  let on = null;
+  try {
+    await fpsPage.waitForFunction(() => {
+      const e = document.getElementById('fpsReadout');
+      return !!e && /\d+ fps/.test(e.textContent);
+    }, {timeout: 30000});
+  } catch (_) { /* leaves on === null below, and the check fails with the text */ }
+  on = await fpsPage.evaluate(() => {
+    const e = document.getElementById('fpsReadout');
+    return e ? {text: e.textContent, visible: e.getBoundingClientRect().height > 0} : null;
+  });
+  await fpsPage.close();
+  check('absent without ?fps=1', off === false);
+  check('present and populated with ?fps=1',
+        !!on && on.visible && /\d+ fps/.test(on.text) && /calls/.test(on.text),
+        JSON.stringify(on));
+  note('?fps=1 shows: ' + (on ? on.text : 'nothing'));
 
   check('no page errors across the whole run', errs.length === 0, errs.slice(0, 3).join(' | '));
 

@@ -182,6 +182,29 @@ water over a minute of simulation per seed, that the shark's path does not depen
 on where Henry is, that fire never spreads, and the control layout at phone and
 desktop sizes.
 
+`node tools/test-portals.js` covers portals: frame detection at every size from
+1×2 to 21×21 in both vertical planes, a specific hint for each wrong shape, and
+50 travel trials across all five themes checking arrival safety, the return
+portal and edit preservation. It also asserts the performance properties that
+matter — that a 21×21 portal costs the same number of draw calls as a 1×2 one
+(441 blocks and 1,764 triangles arrive as 2 merged meshes and 3 draw calls), and
+that a lit portal rebuilds no geometry at all over 300 frames.
+
+## Measuring the frame rate
+
+Open the game with `?fps=1` — `henrysgame.com/?fps=1` — for a small readout in
+the corner: current frame rate, worst seen, draw calls, triangles and the number
+of portal blocks. It is off unless the URL asks for it, so it can never turn up
+in front of Henry by accident.
+
+Read it on the tablet, not in the test harness. The tests run on a software
+rasteriser that manages well under one frame a second, so a frame rate measured
+there is a fact about SwiftShader rather than about the game — which is why the
+portal tests assert draw calls and mesh rebuilds instead. The readout counts
+frames against `performance.now()` rather than the loop's `dt`, because `dt` is
+clamped to 0.05s to stop a hitch throwing Henry through the floor, and counting
+against a clamped clock would report 20 fps on a device actually managing 5.
+
 The game exposes `window.__henrycraft` purely for that harness — read-only
 accessors plus a couple of helpers for setting up a scenario. Nothing in the game
 reads it, so deleting it changes no behaviour; it only blinds the tests.

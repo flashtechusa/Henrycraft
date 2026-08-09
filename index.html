@@ -358,6 +358,14 @@ body.touch #hint{display:none}
   text-align:center;font-size:30px;line-height:1
 }
 /* Marks the one block that is wrong, so a hint points at something. */
+/* Only ever visible with ?fps=1 in the URL. */
+#fpsReadout{
+  position:absolute;left:50%;transform:translateX(-50%);
+  top:calc(env(safe-area-inset-top) + 62px);
+  background:rgba(11,20,32,.72);border:2px solid rgba(255,255,255,.25);
+  border-radius:8px;padding:4px 10px;font-size:12px;font-weight:800;
+  letter-spacing:.02em;white-space:nowrap;pointer-events:none
+}
 #toast{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   font-size:clamp(26px,7vw,46px);font-weight:900;color:var(--sun);letter-spacing:.06em;
@@ -1477,7 +1485,14 @@ function markDirty(x,y,z){
   if(lz===CHUNK-1){ n=chunkAt(x,z+1); if(n) n.dirty=true; }
 }
 
+/* Every call here throws away and rebuilds a chunk's geometry. Counted so a test
+   can prove a static lit portal rebuilds nothing: a naive implementation that
+   regenerated its 441 blocks each frame would still look like two merged meshes
+   while being ruinous on the tablet. */
+var chunkRebuilds=0;
+
 function buildChunk(ch){
+  chunkRebuilds++;
   var P=[],N=[],U=[],C=[],I=[];      // opaque buffers
   var tP=[],tN=[],tU=[],tC=[],tI=[]; // transparent buffers
   var gP=[],gN=[],gU=[],gC=[],gI=[]; // self-lit buffers (fire)
@@ -3470,6 +3485,50 @@ function portalsFromSave(list){
   reindexPortals();
 }
 
+/* ---------------- ?fps=1 ----------------
+   Hidden performance readout. Off unless the URL asks for it, so it can never
+   appear in front of Henry by accident. It exists because the headless harness
+   runs on a software rasteriser, where an absolute frame rate measures
+   SwiftShader rather than the game - the only honest place to read a real number
+   is the tablet itself.
+
+   On the Fire tablet, open  henrysgame.com/?fps=1  in Silk. */
+var fpsOn=/[?&]fps=1\b/.test(location.search);
+var fpsEl=null, fpsFrames=0, fpsClock=0, fpsValue=0, fpsWorst=999, fpsWindows=0;
+function updateFpsReadout(){
+  if(!fpsOn) return;
+  if(!fpsEl){
+    fpsEl=document.createElement('div');
+    fpsEl.id='fpsReadout';
+    /* Something honest on screen from the first frame, so a blank corner never
+       reads as "the readout is broken". */
+    fpsEl.textContent='-- fps  measuring';
+    document.getElementById('ui').appendChild(fpsEl);
+    fpsClock=performance.now();
+  }
+  fpsFrames++;
+  /* Real elapsed time, not the loop's dt: dt is clamped to 0.05 so that a hitch
+     cannot fling Henry through the floor, and counting frames against a clamped
+     clock reports 20 fps on a device actually managing 5. On a slow tablet - the
+     only place this readout is meant to be read - that is the one number that
+     must not be flattering. */
+  var t=performance.now();
+  if(t-fpsClock<500) return;
+  fpsValue=fpsFrames*1000/(t-fpsClock);
+  /* The first window straddles the tail of loading, so it is not a frame rate
+     anybody is playing at; the worst-case tracker starts after it. */
+  fpsWindows++;
+  if(fpsWindows>1 && fpsValue<fpsWorst) fpsWorst=fpsValue;
+  fpsFrames=0; fpsClock=t;
+  var r=renderer.info.render;
+  /* A decimal below 10, because "0 fps" is what a genuinely slow device would
+     print and it reads as a broken counter rather than a measurement. */
+  var fmt=function(v){ return v<10?v.toFixed(1):v.toFixed(0); };
+  fpsEl.textContent=fmt(fpsValue)+' fps (min '+(fpsWorst<999?fmt(fpsWorst):'--')+')  '+
+                    r.calls+' calls  '+(r.triangles/1000).toFixed(0)+'k tris  '+
+                    Object.keys(portalCells).length+' portal';
+}
+
 /* The dwell ring, and the marker a hint points at. */
 var ringEl=null, ringFg=null;
 function showPortalRing(t){
@@ -3871,6 +3930,7 @@ function frame(){
   }
   updateParticles(dt);
   renderer.render(scene,camera);
+  updateFpsReadout();
 }
 
 /* ---------------- boot ---------------- */
@@ -4042,11 +4102,43 @@ window.__henrycraft={
   /* How many meshes carry portal geometry. A 21x21 portal must be part of the
      chunk mesh, not 441 objects. */
   particleCount:function(){ return particles.length; },
+  /* Read straight after a frame: three.js resets info.render each render(), so
+     these are the last frame's numbers. */
+  renderStats:function(){
+    return {calls:renderer.info.render.calls,
+            triangles:renderer.info.render.triangles,
+            rebuilds:chunkRebuilds};
+  },
+  /* Draw one frame from a camera pose the test chooses, then put the camera back.
+     Reading renderer.info after an ordinary frame is useless for comparing two
+     portals: on the start screen the camera orbits slowly, so between two
+     readings a different set of chunks is inside the frustum and the difference
+     swamps the thing being measured. Rendering from a fixed pose makes the two
+     readings differ only by the portal. The loop overwrites this on its next
+     frame, so nothing here changes what the player sees. */
+  renderProbe:function(from,look){
+    var pos=camera.position.clone(), quat=camera.quaternion.clone();
+    camera.position.set(from.x,from.y,from.z);
+    camera.lookAt(look.x,look.y,look.z);
+    renderer.render(scene,camera);
+    var r={calls:renderer.info.render.calls,
+           triangles:renderer.info.render.triangles};
+    camera.position.copy(pos); camera.quaternion.copy(quat);
+    return r;
+  },
   portalMeshStats:function(){
-    var meshes=0, glowMeshes=0;
+    var meshes=0, glowMeshes=0, glowTris=0;
     scene.traverse(function(o){ if(o.isMesh) meshes++; });
-    for(var i=0;i<chunks.length;i++) if(chunks[i].glow) glowMeshes++;
-    return {sceneMeshes:meshes, glowMeshes:glowMeshes,
+    for(var i=0;i<chunks.length;i++){
+      var g=chunks[i].glow;
+      if(!g) continue;
+      glowMeshes++;
+      /* Faces actually in the merged buffer. A portal that vanished into thin air
+         and one merged into the chunk mesh both report a small draw-call count;
+         only this tells them apart. */
+      if(g.geometry.index) glowTris+=g.geometry.index.count/3;
+    }
+    return {sceneMeshes:meshes, glowMeshes:glowMeshes, glowTris:glowTris,
             portalBlocks:Object.keys(portalCells).length};
   },
   deleteDistrict:deleteDistrict,
