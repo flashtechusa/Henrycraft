@@ -1739,22 +1739,31 @@ ghost.visible=false;
 scene.add(ghost);
 
 /* ---------------- Henry ---------------- */
-function faceTexture(){
+/* The face takes its colours from the look, so a character's head matches the rest
+   of them. Called with Henry's own values it draws exactly the face it always drew.
+   Cached per look: eight 32x32 canvases is nothing, eight per avatar would not be. */
+var faceTexCache={};
+function faceTextureFor(L){
+  var k=L.skin+'|'+L.skinTop+'|'+L.brow+'|'+L.cheek+'|'+L.freckle;
+  if(!faceTexCache[k]) faceTexCache[k]=faceTexture(L);
+  return faceTexCache[k];
+}
+function faceTexture(L){
   var cv=document.createElement('canvas'); cv.width=32; cv.height=32;
   var c=cv.getContext('2d');
-  c.fillStyle='#efc49c'; c.fillRect(0,0,32,32);
-  c.fillStyle='#e0b287'; c.fillRect(0,0,32,3);
-  /* ginger eyebrows */
-  c.fillStyle='#c9662c'; c.fillRect(6,10,7,2); c.fillRect(19,10,7,2);
+  c.fillStyle=L.skin; c.fillRect(0,0,32,32);
+  c.fillStyle=L.skinTop; c.fillRect(0,0,32,3);
+  /* eyebrows, in the same family as the hair */
+  c.fillStyle=L.brow; c.fillRect(6,10,7,2); c.fillRect(19,10,7,2);
   /* eyes */
   c.fillStyle='#ffffff'; c.fillRect(6,13,7,6); c.fillRect(19,13,7,6);
   c.fillStyle='#7d4d27'; c.fillRect(9,14,4,5); c.fillRect(22,14,4,5);
   c.fillStyle='#241a12'; c.fillRect(10,15,2,3); c.fillRect(23,15,2,3);
   c.fillStyle='#ffffff'; c.fillRect(10,15,1,1); c.fillRect(23,15,1,1);
   /* rosy cheeks */
-  c.fillStyle='#f0a08c'; c.fillRect(2,19,5,4); c.fillRect(25,19,5,4);
+  c.fillStyle=L.cheek; c.fillRect(2,19,5,4); c.fillRect(25,19,5,4);
   /* freckles across the nose */
-  c.fillStyle='#d9986a';
+  c.fillStyle=L.freckle;
   [[11,20],[13,21],[9,22],[19,20],[21,21],[23,22],[15,19],[16,21],[14,18],[18,18]]
     .forEach(function(q){ c.fillRect(q[0],q[1],1,1); });
   /* big open grin */
@@ -1806,18 +1815,64 @@ function limb(w,h,d,mat,pivotTop){
    their own name over it - nothing about them is a new kind of thing that could
    behave differently. The shorts and face textures are built once and shared,
    since eight players would otherwise mean eight canvases. */
-var shortsTex=null, faceTex=null;
-function buildAvatar(shirtHex,tagText){
+var shortsTex=null;
+
+/* Eight characters, one per shirt colour.
+
+   The colour is the only thing about a player that already travels - the server
+   validates it against a fixed list and broadcasts it - so the whole character
+   hangs off it. No protocol change, no new field anybody could put text in, and the
+   coloured dot beside a name in the roster is genuinely that person. Index 0 is
+   Henry, with the exact values he has always had. */
+var LOOKS=[
+  /* 0 Henry: ginger, cream top, green slides */
+  {shirt:0xe4d7bb, stripe:0xc4413a, collar:0x2f5b99, shoe:0x7fc03c,
+   hairCol:0xc9682f, hairHi:0xdd8038, skinNum:0xefc49c, long:false,
+   skin:'#efc49c', skinTop:'#e0b287', brow:'#c9662c', cheek:'#f0a08c', freckle:'#d9986a'},
+  /* 1 dark hair, red top */
+  {shirt:0xc0392b, stripe:0xf4ecd9, collar:0x7b241c, shoe:0x2f3138,
+   hairCol:0x2b2118, hairHi:0x3f3226, skinNum:0xe0aa7e, long:false,
+   skin:'#e0aa7e', skinTop:'#cf9a6f', brow:'#2b2118', cheek:'#dd9075', freckle:'#c98a5e'},
+  /* 2 long blonde, blue top */
+  {shirt:0x2f7fd6, stripe:0xf2c231, collar:0x1b4f86, shoe:0xf4ecd9,
+   hairCol:0xe8c65a, hairHi:0xf6dd8a, skinNum:0xf5d3ae, long:true,
+   skin:'#f5d3ae', skinTop:'#e6c39c', brow:'#c9a33f', cheek:'#f4a795', freckle:'#dfae82'},
+  /* 3 black hair, green top */
+  {shirt:0x4fc04f, stripe:0x1e5c1e, collar:0xf4ecd9, shoe:0x8a5a2b,
+   hairCol:0x171310, hairHi:0x2a2320, skinNum:0x8d5a3b, long:false,
+   skin:'#8d5a3b', skinTop:'#7d4d31', brow:'#171310', cheek:'#8a4f38', freckle:'#7a4a2f'},
+  /* 4 long dark brown, yellow top */
+  {shirt:0xf2c231, stripe:0x8a5a2b, collar:0x5c3d15, shoe:0xc0392b,
+   hairCol:0x5a3a20, hairHi:0x7a5230, skinNum:0xc98d63, long:true,
+   skin:'#c98d63', skinTop:'#b87e57', brow:'#5a3a20', cheek:'#c07a5c', freckle:'#ad7449'},
+  /* 5 silver, purple top */
+  {shirt:0x9b59b6, stripe:0xf4ecd9, collar:0x5b2c6f, shoe:0x2f7fd6,
+   hairCol:0xd8d8de, hairHi:0xeeeef2, skinNum:0xf0c9a8, long:false,
+   skin:'#f0c9a8', skinTop:'#dfb896', brow:'#b9b9c2', cheek:'#eda593', freckle:'#d5a37c'},
+  /* 6 auburn, orange top */
+  {shirt:0xe67e22, stripe:0x6e3410, collar:0xf4ecd9, shoe:0x4fc04f,
+   hairCol:0x8c3b1b, hairHi:0xab4f28, skinNum:0xe8b98d, long:false,
+   skin:'#e8b98d', skinTop:'#d7a87d', brow:'#8c3b1b', cheek:'#e59a83', freckle:'#cf9668'},
+  /* 7 long black, teal top */
+  {shirt:0x1abc9c, stripe:0x0e6b59, collar:0xf4ecd9, shoe:0xf2c231,
+   hairCol:0x120f0d, hairHi:0x241d18, skinNum:0x9c6742, long:true,
+   skin:'#9c6742', skinTop:'#8a5a39', brow:'#120f0d', cheek:'#98593f', freckle:'#875532'}
+];
+function lookForColour(hex){
+  var i=MP_COLOURS.indexOf(mpSafeColour(hex));
+  return LOOKS[i>=0?i%LOOKS.length:0];
+}
+function buildAvatar(L,tagText){
   var g=new THREE.Group(), parts={};
-  var SKIN=0xefc49c, SHIRT=shirtHex, HAIR=0xc9682f, HAIR_HI=0xdd8038, SHOE=0x7fc03c;
+  var SKIN=L.skinNum, SHIRT=L.shirt, HAIR=L.hairCol, HAIR_HI=L.hairHi, SHOE=L.shoe;
   var skinMat  = new THREE.MeshLambertMaterial({color:srgb(SKIN)});
   var shirtMat = new THREE.MeshLambertMaterial({color:srgb(SHIRT)});
   var hairMat  = new THREE.MeshLambertMaterial({color:srgb(HAIR)});
   var hairHi   = new THREE.MeshLambertMaterial({color:srgb(HAIR_HI)});
   var shortsMat= new THREE.MeshLambertMaterial({map:(shortsTex||(shortsTex=shortsTexture()))});
   var shoeMat  = new THREE.MeshLambertMaterial({color:srgb(SHOE)});
-  var redMat   = new THREE.MeshLambertMaterial({color:srgb(0xc4413a)});
-  var blueMat  = new THREE.MeshLambertMaterial({color:srgb(0x2f5b99)});
+  var redMat   = new THREE.MeshLambertMaterial({color:srgb(L.stripe)});
+  var blueMat  = new THREE.MeshLambertMaterial({color:srgb(L.collar)});
   function box(w,h,d,mat){ return new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); }
 
   /* cream long-sleeve top with a red-and-blue band */
@@ -1826,13 +1881,17 @@ function buildAvatar(shirtHex,tagText){
   var collar=box(0.30,0.04,0.268,blueMat);  collar.position.y=1.045; g.add(collar);
 
   /* head - hair is parented to the head so it tips with him */
-  var faceMat=new THREE.MeshLambertMaterial({map:(faceTex||(faceTex=faceTexture()))});
+  var faceMat=new THREE.MeshLambertMaterial({map:faceTextureFor(L)});
   var head=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.42,0.42),
     [skinMat,skinMat,skinMat,skinMat,faceMat,skinMat]);
   head.position.y=1.28; g.add(head); parts.head=head;
 
   var cap=box(0.455,0.13,0.455,hairMat);  cap.position.set(0,0.205,0);       head.add(cap);
-  var back=box(0.455,0.26,0.07,hairMat);  back.position.set(0,0.06,-0.215);  head.add(back);
+  /* Longer hair down the back on some characters, so they are told apart by
+     silhouette and not only by colour. */
+  var back=L.long?box(0.47,0.44,0.09,hairMat):box(0.455,0.26,0.07,hairMat);
+  back.position.set(0,L.long?-0.05:0.06,L.long?-0.222:-0.215);
+  head.add(back);
   var sideL=box(0.065,0.16,0.44,hairMat); sideL.position.set(-0.215,0.13,0); head.add(sideL);
   var sideR=box(0.065,0.16,0.44,hairMat); sideR.position.set( 0.215,0.13,0); head.add(sideR);
   var fringe=box(0.40,0.085,0.085,hairHi);fringe.position.set(0,0.155,0.19); head.add(fringe);
@@ -1868,7 +1927,7 @@ function buildAvatar(shirtHex,tagText){
 }
 
 /* Henry, with the shirt colour and name he has always had. */
-var built=buildAvatar(0xe4d7bb,'HENRY');
+var built=buildAvatar(LOOKS[0],'HENRY');
 var henry=built.group, hParts=built.parts;
 scene.add(henry);
 
@@ -4754,10 +4813,11 @@ function mpAddPlayer(p){
   if(!p || typeof p.id!=='string' || mp.players[p.id]) return;
   if(p.id===mp.me) return;
   var label=mpSafeName(p.name);
-  var built=buildAvatar(mpColourHex(p.colour), label.toUpperCase());
+  var look=lookForColour(p.colour);
+  var built=buildAvatar(look, label.toUpperCase());
   built.group.visible=false;             /* until we know where they are */
   scene.add(built.group);
-  mp.players[p.id]={id:p.id, label:label, colour:mpSafeColour(p.colour),
+  mp.players[p.id]={id:p.id, label:label, colour:mpSafeColour(p.colour), look:look,
                     group:built.group, parts:built.parts,
                     from:null, to:null, t:1, walk:0, speed:0};
 }
@@ -5431,6 +5491,52 @@ window.__henrycraft={
   /* The whole light-it path including the hint, not just the analysis, so a test
      can check what actually appears on screen. */
   tryLight:function(x,y,z){ return tryLightPortal(x,y,z); },
+  /* Stand all eight characters in a row where the start-screen camera is already
+     looking, so they can be seen rather than taken on trust. */
+  lineup:function(){
+    /* Flat, clear ground of its own: the spawn is usually on a hillside, and eight
+       avatars planted at the player's own height end up buried in it. */
+    var g=safeGroundAnywhere()||{x:Math.floor(WX/2),y:20,z:Math.floor(WZ/2)};
+    var y=g.y;
+    for(var dx=-9;dx<=9;dx++) for(var dz=-9;dz<=9;dz++){
+      for(var dy=0;dy<7;dy++) setBlock(g.x+dx,y+dy,g.z+dz,AIR);
+      setBlock(g.x+dx,y-1,g.z+dz,STONE);
+    }
+    player.x=g.x+0.5; player.y=y; player.z=g.z+0.5;
+    player.vx=player.vy=player.vz=0;
+    /* Lined up across the camera's view rather than along some fixed axis, since
+       the start-screen camera is slowly orbiting and a row placed north-south is
+       edge-on half the time. */
+    var fx=player.x-camera.position.x, fz=player.z-camera.position.z;
+    var fl=Math.hypot(fx,fz)||1; fx/=fl; fz/=fl;
+    var px=-fz, pz=fx;
+    var out=[];
+    for(var i=0;i<LOOKS.length;i++){
+      var a=buildAvatar(LOOKS[i],'P'+(i+1));
+      var off=(i-(LOOKS.length-1)/2)*1.25;
+      a.group.position.set(player.x-fx*3.0+px*off, y, player.z-fz*3.0+pz*off);
+      a.group.rotation.y=Math.atan2(fx,fz)+Math.PI;
+      scene.add(a.group);
+      out.push({i:i,shirt:LOOKS[i].shirt.toString(16),hair:LOOKS[i].hairCol.toString(16),
+                skin:LOOKS[i].skinNum.toString(16),shoe:LOOKS[i].shoe.toString(16),
+                long:!!LOOKS[i].long});
+    }
+    for(var ci=0;ci<chunks.length;ci++) chunks[ci].dirty=true;
+    rebuildAll();
+    return out;
+  },
+  looks:function(){
+    return LOOKS.map(function(L){
+      return {shirt:L.shirt,hair:L.hairCol,hairHi:L.hairHi,skin:L.skinNum,
+              shoe:L.shoe,stripe:L.stripe,collar:L.collar,long:!!L.long,
+              face:[L.skin,L.skinTop,L.brow,L.cheek,L.freckle].join(',')};
+    });
+  },
+  lookForColour:function(hex){
+    var L=lookForColour(hex);
+    return {shirt:L.shirt,hair:L.hairCol,skin:L.skinNum,long:!!L.long};
+  },
+  colours:function(){ return MP_COLOURS.slice(); },
   /* Recreate the mess the old code left: a crowd of lit return portals to the same
      district, all close together. */
   packWithReturnPortals:function(destSlug,n){
@@ -5492,6 +5598,8 @@ window.__henrycraft={
       return Object.keys(mp.players).map(function(id){
         var p=mp.players[id];
         return {id:id, label:p.label, colour:p.colour, visible:p.group.visible,
+                shirt:p.look.shirt, hair:p.look.hairCol, skin:p.look.skinNum,
+                longHair:!!p.look.long,
                 x:+p.group.position.x.toFixed(2), y:+p.group.position.y.toFixed(2),
                 z:+p.group.position.z.toFixed(2), yaw:p.yawNow||0};
       });

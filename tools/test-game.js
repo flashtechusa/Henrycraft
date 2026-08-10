@@ -97,6 +97,17 @@ function slope(pts) {
   console.log('Henrycraft game tests\n');
 
   // ---- 1: atlas tiles unique, every UV inside the atlas ---------------------
+  /* Henry himself must not drift as characters are added around him. Recorded
+     before the avatar builder was parameterised, and again before it grew eight
+     looks: 25 nodes, the same position hash, the same 22 material colours. */
+  const henry = await page.evaluate(() => window.__henrycraft.avatarProbe());
+  check(`Henry is built exactly as he was (${henry.nodes} nodes, hash ${henry.posHash})`,
+        henry.nodes === 25 && henry.posHash === 5445.5 &&
+        henry.colours === 'c5ad7e,8c0d0a,071a51,942307,942307,942307,942307,b8370a,' +
+                          'b8370a,c5ad7e,dc8c54,c5ad7e,dc8c54,ffffff,dc8c54,36860b,' +
+                          '36860b,ffffff,dc8c54,36860b,36860b,ffffff',
+        JSON.stringify(henry));
+
   console.log('1. atlas tiles are unique and every UV lands inside the atlas');
   const atlas = await page.evaluate(() => {
     const H = window.__henrycraft, a = H.atlas(), slots = a.cols * a.rows;

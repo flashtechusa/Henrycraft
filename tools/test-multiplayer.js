@@ -493,6 +493,51 @@ function requireNode22() {
     check('and starts playing rather than sitting on the title screen', gState.playing,
           JSON.stringify(gState));
 
+    // ---- one character per colour ------------------------------------------
+    console.log('\nEight characters, one per shirt colour');
+    const looks = await A.evaluate(() => {
+      const H = window.__henrycraft;
+      const L = H.looks(), cols = H.colours();
+      const key = k => [k.hair, k.skin, k.shirt, k.shoe, k.long].join('/');
+      return {n: L.length, colours: cols.length,
+              distinct: new Set(L.map(key)).size,
+              faces: new Set(L.map(l => l.face)).size,
+              longHaired: L.filter(l => l.long).length,
+              henryShirt: L[0].shirt, henryHair: L[0].hair, henrySkin: L[0].skin,
+              byColour: cols.map(c => H.lookForColour(c).shirt),
+              unknownColour: H.lookForColour('#not-a-colour').shirt};
+    });
+    check(`there are ${looks.n} characters, one for each of the ${looks.colours} colours`,
+          looks.n === 8 && looks.colours === 8, JSON.stringify(looks));
+    check('no two characters share a hair, skin, shirt and shoe combination',
+          looks.distinct === looks.n, `${looks.distinct} distinct of ${looks.n}`);
+    check(`each has its own face, drawn for its own skin (${looks.faces} of ${looks.n})`,
+          looks.faces === looks.n, `${looks.faces} distinct faces`);
+    check(`three of them have long hair, so they differ in silhouette too ` +
+          `(${looks.longHaired})`,
+          looks.longHaired >= 2, String(looks.longHaired));
+    check('Henry is still the ginger one in the cream top',
+          looks.henryShirt === 0xe4d7bb && looks.henryHair === 0xc9682f &&
+          looks.henrySkin === 0xefc49c, JSON.stringify(looks));
+    check('every colour maps to its own character, and an unknown colour falls back',
+          new Set(looks.byColour).size === 8 && looks.unknownColour === 0xe4d7bb,
+          JSON.stringify(looks.byColour.map(v => v.toString(16))));
+
+    /* End to end: the character another player is drawn as has to follow from the
+       colour that actually came over the wire. */
+    const seen = await A.evaluate(() => {
+      const H = window.__henrycraft;
+      return H.mp.players().map(p => ({colour: p.colour, shirt: p.shirt,
+                                       hair: p.hair, expect: H.lookForColour(p.colour)}));
+    });
+    check(`remote players are drawn as the character their colour names ` +
+          `(${seen.length} checked)`,
+          seen.length > 0 && seen.every(p => p.shirt === p.expect.shirt &&
+                                            p.hair === p.expect.hair),
+          JSON.stringify(seen));
+    note(`characters: ${looks.n} distinct, ${looks.longHaired} long-haired, ` +
+         `${looks.faces} faces drawn per skin tone`);
+
     // leaving the district leaves the session
     await A.evaluate(() => window.__henrycraft.goHome());
     await sleep(500);

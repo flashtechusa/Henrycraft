@@ -92,6 +92,14 @@ that same list before they are drawn, and written with `textContent`. No text fr
 another player can reach the screen, and a test asserts it by feeding the client
 a hostile name directly.
 
+**Eight characters, one per shirt colour.** Other players turn up as their own
+person &mdash; their own hair colour and length, skin tone, top and shoes &mdash;
+with their name over their head. The character follows from the shirt colour,
+which is the one thing about a player the server already validates and passes on,
+so no new field was added to the protocol and the coloured dot beside a name in
+the roster really is that person. Henry keeps the look he has always had, and a
+test asserts he is built from exactly the same 25 pieces and 22 colours as before.
+
 Nobody can affect anybody else. Positions are advisory: they move a mesh and are
 never fed into physics, so a remote player cannot push, trap or startle Henry.
 There is no message that damages anybody, because there is no damage.
