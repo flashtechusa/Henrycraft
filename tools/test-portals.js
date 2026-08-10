@@ -668,27 +668,44 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
   console.log('\n11b. walking into a lit portal, using the real physics');
   const walk = await page.evaluate(async () => {
     const H = window.__henrycraft, ids = H.ids;
-    H.loadThemeSeed('meadow', 795);
-    /* Standing on the ground, as he builds them - not floating in the air. */
-    const gy = H.surfaceY(30, 30);
-    for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
-      for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    /* A fresh lit portal per case: two of the three cases below actually travel,
+       and once he has gone the portal he came through is in the district he left. */
+    async function setup(seed) {
+      H.loadThemeSeed('meadow', seed);
+      const gy = H.surfaceY(30, 30);
+      for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
+        for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+      }
+      const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                              fill: ids.SAND});
+      /* A floor, laid after the frame: buildFrame clears a generous box around
+         itself, which leaves a trench immediately in front of the opening. Without
+         this he falls into it on the approach and the test fails for a reason that
+         has nothing to do with portals. Only air is filled, so the frame's own ring
+         is left alone. */
+      for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
+        if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+      }
+      const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+      return lit;
     }
-    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
-                            fill: ids.SAND});
-    /* A floor, laid after the frame: buildFrame clears a generous box around
-       itself, which leaves a trench immediately in front of the opening. Without
-       this he falls into it on the approach and the test fails for a reason that
-       has nothing to do with portals. Only air is filled, so the frame's own ring
-       is left alone. */
-    for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
-      if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
-    }
-    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+
+    let lit = await setup(795);
     if (!lit.ok) return {error: 'would not light', lit};
     const enterable = H.canStandIn(lit.id);
+    /* Holding the stick down, which is what he does: he must come out the far side
+       without being taken anywhere. */
+    const straightThrough = await H.walkInto(lit.id, H.portalDwell() + 1.2, true);
+
+    /* Standing in the doorway rather than dead centre in the glass - one block in
+       front of it - has to count, because a slab one block thick is not a target a
+       five-year-old can stop inside. */
+    lit = await setup(796);
+    const inFront = await H.standInFront(lit.id, 1.0, H.portalDwell() + 0.4);
+
+    lit = await setup(797);
     const walked = await H.walkInto(lit.id, H.portalDwell() + 1.2);
-    return {lit, enterable, walked, destTheme: lit.destTheme};
+    return {lit, enterable, straightThrough, walked, inFront, destTheme: lit.destTheme};
   });
   check('a lit portal is something a body can occupy, not a wall',
         walk.enterable === true, JSON.stringify(walk));
@@ -696,7 +713,26 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         walk.walked && walk.walked.reached === true, JSON.stringify(walk.walked));
   check('and standing there takes him through',
         walk.walked && walk.walked.travelled === true, JSON.stringify(walk.walked));
+  check('but holding the stick down walks him out the far side, taking him nowhere',
+        walk.straightThrough && walk.straightThrough.through === true &&
+        walk.straightThrough.travelled === false, JSON.stringify(walk.straightThrough));
+  check('standing a block in front of the glass counts as standing in the doorway',
+        walk.inFront && walk.inFront.inDoorway === true && walk.inFront.travelled === true,
+        JSON.stringify(walk.inFront));
   note(`walked in unaided and arrived in ${walk.walked && walk.walked.now}`);
+
+  // arriving somewhere must not put him back on the doorstep of the way home
+  const bounce = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    const before = H.districts().current;
+    const still = await H.standStill(3.0);
+    return {before, still, inDoorway: H.inDoorway(),
+            portals: H.portals().filter(p => p.lit).length};
+  });
+  check('after arriving, standing still does not send him straight back',
+        bounce.still.moved === false && bounce.inDoorway === false,
+        JSON.stringify(bounce));
+  note(`arrived beside ${bounce.portals} lit portal(s) and stayed put for 3s`);
 
   check('11. half the dwell time does not travel; the full time does',
         rest.dwell.brief.travelled === false && rest.dwell.held.travelled === true,

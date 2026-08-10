@@ -3679,11 +3679,12 @@ function standableColumn(x,z){
    column. 64x64 is 4096 checks, which costs nothing next to travelling. Needed
    because the old fallback was findSpawn(), which does not know about portals and
    once dropped him inside a return portal from an earlier visit. */
-function safeGroundAnywhere(){
+function safeGroundAnywhere(avoid){
   var best=null, bestD=1e9, cx=WX/2, cz=WZ/2;
   for(var x=3;x<WX-3;x++) for(var z=3;z<WZ-3;z++){
     var gy=standableColumn(x,z);
     if(!gy) continue;
+    if(avoid&&avoid(x+0.5,gy,z+0.5)) continue;
     var d=(x-cx)*(x-cx)+(z-cz)*(z-cz);
     if(d<bestD){ bestD=d; best={x:x,y:gy,z:z}; }
   }
@@ -3700,7 +3701,7 @@ function safeGroundNear(cx,cz,avoid){
       var x=Math.round(cx+Math.cos(ang)*r), z=Math.round(cz+Math.sin(ang)*r);
       var gy=standableColumn(x,z);
       if(!gy) continue;
-      if(avoid&&avoid(x,gy,z)) continue;
+      if(avoid&&avoid(x+0.5,gy,z+0.5)) continue;
       best={x:x,y:gy,z:z};
     }
   }
@@ -3774,12 +3775,17 @@ function travelThrough(p){
        arrived inside his own way home. Placing him afterwards means
        standableColumn can see the portal blocks and refuses to put him in
        them. */
-    var centre=safeGroundNear(player.x,player.z,null)||
-               safeGroundNear(WX/2,WZ/2,null)||
-               safeGroundAnywhere();
+    var centre=safeGroundNear(player.x,player.z,nearAnyDoorway)||
+               safeGroundNear(WX/2,WZ/2,nearAnyDoorway)||
+               safeGroundAnywhere(nearAnyDoorway);
     var cx=centre?centre.x:Math.floor(WX/2), cz=centre?centre.z:Math.floor(WZ/2);
     if(from) buildReturnPortal(from,fromTheme,cx,cz);
-    var spot=safeGroundNear(cx,cz,null)||safeGroundAnywhere();
+    /* Clear of the doorway as well as clear of the blocks: now that standing in
+       front of a portal counts, being put down in front of the way home would send
+       him straight back the moment he stopped to look around. */
+    var spot=safeGroundNear(cx,cz,nearAnyDoorway)||
+             safeGroundAnywhere(nearAnyDoorway)||
+             safeGroundAnywhere();
     if(spot){ player.x=spot.x+0.5; player.y=spot.y+0.05; player.z=spot.z+0.5;
               player.vx=player.vy=player.vz=0; }
     else findSpawn();          /* only if the district has no dry land at all */
@@ -3793,12 +3799,60 @@ function travelThrough(p){
 
 /* Standing still in an opening for PORTAL_DWELL seconds. Not instant, because he
    will walk through one by accident. */
+/* Standing in the doorway, not standing inside one particular block.
+
+   The first version asked whether the player's centre block was a portal block.
+   That is a slab one block thick: crossing it at walking pace takes about a
+   quarter of a second, and to travel he had to come to a dead stop inside it and
+   hold that for a second and a half. He walked straight through every time, which
+   is exactly what got reported.
+
+   The doorway is the opening plus about a block of standing room either side of
+   the glass. Walking through that zone still takes well under half a second at
+   full speed, so "walking through is not enough, standing is" holds - it is now
+   just possible to do the standing. */
+var PORTAL_REACH=1.1;                 /* how far in front of the glass counts */
+function inPortalDoorway(p,x,y,z,reach){
+  if(!p.lit) return false;
+  reach=reach===undefined?PORTAL_REACH:reach;
+  var across = p.plane==='x' ? x : z;
+  var depth  = p.plane==='x' ? z : x;
+  if(Math.abs(depth-(p.fixed+0.5))>reach) return false;
+  if(across<p.a0-0.15 || across>p.a1+1.15) return false;
+  var eye=y+0.6;
+  if(eye<p.y0-0.25 || eye>p.y1+1.25) return false;
+  return true;
+}
+function doorwayPortal(){
+  for(var i=0;i<portals.length;i++){
+    if(inPortalDoorway(portals[i],player.x,player.y,player.z)) return portals[i];
+  }
+  return null;
+}
+/* Somewhere he could be put down without the dwell timer immediately starting. A
+   wider margin than the doorway itself, so arriving and standing still to look
+   around cannot send him straight back where he came from. */
+function nearAnyDoorway(x,y,z){
+  for(var i=0;i<portals.length;i++){
+    if(inPortalDoorway(portals[i],x,y,z,PORTAL_REACH+1.4)) return true;
+  }
+  return false;
+}
 function updatePortals(dt){
   animatePortals(dt);
   if(!playing||travelling){ return; }
-  var k=keyOf(Math.floor(player.x),Math.floor(player.y+0.6),Math.floor(player.z));
-  var p=portalCells[k];
-  if(!p||!p.lit){ dwell=0; dwellPortal=null; hidePortalRing(); return; }
+  var p=doorwayPortal();
+  if(!p){
+    /* Drain rather than reset. Wobbling a step out of the doorway should not throw
+       away his progress, but it drains faster than it fills so two separate
+       walk-throughs cannot add up into a trip he did not ask for. */
+    if(dwell>0){
+      dwell=Math.max(0,dwell-dt*2);
+      if(dwell>0) showPortalRing(dwell/PORTAL_DWELL);
+    }
+    if(dwell<=0){ dwellPortal=null; hidePortalRing(); }
+    return;
+  }
   if(dwellPortal!==p){ dwellPortal=p; dwell=0; }
   dwell+=dt;
   showPortalRing(dwell/PORTAL_DWELL);
@@ -5054,7 +5108,7 @@ window.__henrycraft={
      standIn(), which teleports - and teleporting is exactly how a solid portal
      went unnoticed. This drives the same input the keyboard fills in and the same
      updatePlayer that collides, so if the portal is a wall he stays outside it. */
-  walkInto:function(id,seconds){
+  walkInto:function(id,seconds,keepWalking){
     var p=null;
     portals.forEach(function(q){ if(q.id===id) p=q; });
     if(!p) return Promise.resolve({error:'no such portal'});
@@ -5074,26 +5128,81 @@ window.__henrycraft={
     playing=true;
     var before=current?current.slug:null;
     var dt=1/60, steps=Math.max(1,Math.round(seconds/dt));
-    var reached=false;
+    var reached=false, through=false;
     input.fwd=1; input.strafe=0; input.jump=false; input.down=false;
+    var startDepth=p.plane==='x'?player.z:player.x;
     for(var i=0;i<steps;i++){
       updatePlayer(dt);
       if(portalCells[keyOf(Math.floor(player.x),Math.floor(player.y),Math.floor(player.z))]){
         reached=true;
-        input.fwd=0;                  /* stop pushing and stand still, as he would */
+        /* keepWalking is the case that was broken: he holds the stick and sails
+           out the far side. Otherwise stop pushing and stand, as he would once he
+           knows to. */
+        if(!keepWalking) input.fwd=0;
       }
+      var depthNow=p.plane==='x'?player.z:player.x;
+      if(reached && (depthNow-(p.fixed+0.5))*(startDepth-(p.fixed+0.5))<0) through=true;
       updatePortals(dt);
     }
     input.fwd=0;
     return new Promise(function(res){
       setTimeout(function(){
         playing=wasPlaying;
-        res({reached:reached, travelled:(current?current.slug:null)!==before,
+        res({reached:reached, through:through,
+             travelled:(current?current.slug:null)!==before,
              at:{x:+player.x.toFixed(2),y:+player.y.toFixed(2),z:+player.z.toFixed(2)},
              from:before, now:current?current.slug:null});
       },260);
     });
   },
+  /* Put him on the ground a given distance in front of the opening and let him
+     stand. This is the case that matters in practice: nobody stops inside the
+     glass, they stop in the doorway. */
+  standInFront:function(id,distance,seconds){
+    var p=null;
+    portals.forEach(function(q){ if(q.id===id) p=q; });
+    if(!p) return Promise.resolve({error:'no such portal'});
+    var mid=portalCentre(p);
+    var nx=p.plane==='x'?0:1, nz=p.plane==='x'?1:0;
+    var sx=mid.x+nx*distance, sz=mid.z+nz*distance;
+    var gy=standableColumn(Math.floor(sx),Math.floor(sz));
+    player.x=sx; player.y=gy||p.y0; player.z=sz;
+    player.vx=player.vy=player.vz=0;
+    var wasPlaying=playing; playing=true;
+    var here=!!doorwayPortal();
+    var before=current?current.slug:null;
+    var dt=1/60, steps=Math.max(1,Math.round(seconds/dt));
+    for(var i=0;i<steps;i++) updatePortals(dt);
+    return new Promise(function(res){
+      setTimeout(function(){
+        playing=wasPlaying;
+        res({inDoorway:here, travelled:(current?current.slug:null)!==before,
+             now:current?current.slug:null});
+      },260);
+    });
+  },
+  /* Stand exactly where he is and let the portal logic run. Used to check that
+     arriving somewhere does not immediately send him back. */
+  standStill:function(seconds){
+    var wasPlaying=playing; playing=true;
+    var before=current?current.slug:null;
+    var dt=1/60, steps=Math.max(1,Math.round(seconds/dt));
+    var at={x:player.x,y:player.y,z:player.z};
+    for(var i=0;i<steps;i++){
+      player.x=at.x; player.y=at.y; player.z=at.z;
+      player.vx=player.vy=player.vz=0;
+      updatePortals(dt);
+    }
+    return new Promise(function(res){
+      setTimeout(function(){
+        playing=wasPlaying;
+        res({moved:(current?current.slug:null)!==before,
+             now:current?current.slug:null, from:before});
+      },260);
+    });
+  },
+  inDoorway:function(){ return !!doorwayPortal(); },
+
   /* Can a player body occupy the middle of the opening at all? */
   canStandIn:function(id){
     var p=null;
