@@ -46,6 +46,9 @@ function check(name, ok, detail) {
   else { failed++; console.log(`  FAIL  ${name}`); if (detail) console.log(`        ${detail}`); }
 }
 function note(l) { notes.push(l); console.log(`        ${l}`); }
+/* A short code has no words in it, so the district it makes needs a name of its
+   own rather than the code. */
+const H_words = w => typeof w === 'string' && w.length > 3 && !/[0-9]/.test(w);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function serveGame() {
@@ -122,7 +125,15 @@ function rawClient(port, code, name, colour, offer, look) {
   });
 }
 
-function code(prefix) {
+/* Short codes, as the game now makes them. The long slug-plus-ten form is still
+   accepted by the server, and `codeLong` covers that. */
+function code() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < 6; i++) s += A[Math.floor(Math.random() * A.length)];
+  return s;
+}
+function codeLong(prefix) {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let s = '';
   for (let i = 0; i < 10; i++) s += A[Math.floor(Math.random() * A.length)];
@@ -167,7 +178,7 @@ function requireNode22() {
     await page.goto(overrideUrl || (url + (extraQuery || '')),
                     {waitUntil: 'load', timeout: 120000});
     await page.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
-                              {timeout: 90000});
+                              {timeout: 150000});
     pages.push({label, page, ctx});
     return page;
   }
@@ -177,7 +188,7 @@ function requireNode22() {
   try {
     // ---- 1: two clients, edits both ways --------------------------------------
     console.log('1. two clients in one district see each other\'s edits');
-    const c1 = code('green-meadow');
+    const c1 = code();
     const A = await newPlayer('A');
     const B = await newPlayer('B');
 
@@ -195,26 +206,20 @@ function requireNode22() {
     });
     await waitFor(A, () => window.__henrycraft.mp.queued() === 0);
 
+    /* Somebody joining by a code has a district two seconds old with nothing in it.
+       Asking them to choose between that and the shared world is a question with one
+       answer, and it is what made joining feel complicated - so it is not asked. */
     await B.evaluate(c => window.__henrycraft.mp.join(c), c1);
-    // B must be *asked* before anything of its own is replaced - that is B1.
-    const asked = await waitFor(B, () => window.__henrycraft.mp.pending());
-    const panel = await B.evaluate(() => {
-      const p = document.getElementById('serverCopy');
-      return {shown: p && !p.classList.contains('hide'),
-              text: document.getElementById('scWhat').textContent};
-    });
-    check('the second client is told the server already has a copy, and nothing ' +
-          'is replaced until it says so',
-          asked && panel.shown && /blocks in it/.test(panel.text),
-          JSON.stringify(panel));
-    note('B was shown: ' + panel.text);
-
-    const before = await B.evaluate(() => Object.keys(window.__henrycraft.editsNow()).length);
-    await B.evaluate(() => window.__henrycraft.mp.adopt());
-    await waitFor(B, () => window.__henrycraft.mp.status() === 'sharing');
-    const kept = await B.evaluate(() => window.__henrycraft.districts().list.length);
-    check('accepting the shared copy keeps the old one as a separate district',
-          kept >= 2, `${kept} districts after adopting (had ${before} edits)`);
+    const bIn = await waitFor(B, () => window.__henrycraft.mp.status() === 'sharing',
+                              null, 30000);
+    const bPanels = await B.evaluate(() => ({
+      pending: window.__henrycraft.mp.pending(),
+      copyPanel: !document.getElementById('serverCopy').classList.contains('hide'),
+      joinPanel: !document.getElementById('joinPanel').classList.contains('hide'),
+    }));
+    check('joining with an empty district just joins - no question, no second button',
+          bIn && !bPanels.pending && !bPanels.copyPanel && !bPanels.joinPanel,
+          JSON.stringify(bPanels));
 
     const bSaw = await waitFor(B, s => window.__henrycraft.getBlock(s.x, s.y, s.z) === s.id,
                                spot);
@@ -273,11 +278,34 @@ function requireNode22() {
 
     // ---- 2: third and fourth clients see accumulated state --------------------
     console.log('\n2. a third and fourth client arrive and see everything already built');
+    /* This one HAS built something of its own, which is the case where the question
+       is a real question: B1 says never merge silently, and never lose a build. */
     const C = await newPlayer('C');
-    await C.evaluate(c => window.__henrycraft.mp.join(c), c1);
-    await waitFor(C, () => window.__henrycraft.mp.pending());
+    /* Build in the district first, then share it under the existing code - join()
+       would make a brand new empty district and there would be nothing to ask
+       about, which is how this test first fooled itself. */
+    await C.evaluate(() => {
+      const H = window.__henrycraft;
+      H.setBlock(40, H.surfaceY(40, 40) + 1, 40, H.ids.BRICK);
+    });
+    await C.evaluate(c => window.__henrycraft.mp.start(c), c1);
+    const cAsked = await waitFor(C, () => window.__henrycraft.mp.pending(), null, 30000);
+    const cPanel = await C.evaluate(() => ({
+      shown: !document.getElementById('serverCopy').classList.contains('hide'),
+      text: document.getElementById('scWhat').textContent,
+      together: !document.getElementById('together').classList.contains('hide'),
+    }));
+    check('a client that has built something IS asked before anything is replaced',
+          cAsked && cPanel.shown && /blocks in it/.test(cPanel.text),
+          JSON.stringify(cPanel));
+    check('and only one panel is on screen while it asks',
+          cPanel.shown && !cPanel.together, JSON.stringify(cPanel));
+    note('the joiner with a build was shown: ' + cPanel.text);
     await C.evaluate(() => window.__henrycraft.mp.adopt());
     await waitFor(C, () => window.__henrycraft.mp.status() === 'sharing');
+    const kept = await C.evaluate(() => window.__henrycraft.districts().list.length);
+    check('accepting the shared copy keeps its own as a separate district',
+          kept >= 2, `${kept} districts after adopting`);
     const cSees = await C.evaluate(s => ({
       a: window.__henrycraft.getBlock(s[0].x, s[0].y, s[0].z),
       b: window.__henrycraft.getBlock(s[1].x, s[1].y, s[1].z),
@@ -306,7 +334,7 @@ function requireNode22() {
 
     // ---- 3: the ninth is refused, kindly -------------------------------------
     console.log('\n3. the ninth player is turned away without a scene');
-    const c2 = code('star-cave');
+    const c2 = code();
     const crowd = [];
     for (let i = 0; i < 8; i++) {
       crowd.push(await rawClient(wPort, c2, 'Blue Otter', '#2f7fd6',
@@ -448,10 +476,11 @@ function requireNode22() {
       out.code = H.mp.code();
       out.re = H.mp.codeRe();
       out.made = H.mp.makeCode('green-meadow');
-      out.tidy = [H.mp.tidy('Green Meadow k7q4xm2p9t'),
-                  H.mp.tidy('  green-meadow-K7Q4XM2P9T  '),
-                  H.mp.tidy('GREEN-MEADOW-k7q4xm2p9t')];
+      out.tidy = [H.mp.tidy('k4tpuy'), H.mp.tidy('  K4TPUY '),
+                  H.mp.tidy('K4tPuY'),
+                  H.mp.tidy('  green-meadow-K7Q4XM2P9T  ')];
       out.words = H.mp.words('green-meadow-K7Q4XM2P9T');
+      out.shortWords = H.mp.words('K4TPUY');
       out.link = H.mp.shareLink();
       out.max = H.mp.max();
       out.host = H.mp.host();
@@ -459,17 +488,20 @@ function requireNode22() {
       return out;
     });
     const re = new RegExp(shapes.re);
-    check('generated codes match what the server will accept', re.test(shapes.made),
+    check(`generated codes are six characters and nothing else ("${shapes.made}")`,
+          re.test(shapes.made) && /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/.test(shapes.made),
           shapes.made);
-    check(`the suffix is ten characters with no lookalikes (${shapes.made.split('-').pop()})`,
-          /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{10}$/.test(shapes.made.split('-').pop()),
-          shapes.made);
-    check('a code typed with spaces or the wrong case still works',
+    check('and the long codes already shared with the family still work',
+          re.test('little-spring-mine-K4TPUYSCGJ'), 'long form rejected');
+    check('no lookalike characters in a code, so it survives being read aloud',
+          !/[IO01]/.test(shapes.made), shapes.made);
+    check('a code typed in the wrong case still works',
           shapes.tidy.every(t => re.test(t)), JSON.stringify(shapes.tidy));
     check('a joined district gets a readable name, not the code',
-          shapes.words === 'Green Meadow', shapes.words);
+          shapes.words === 'Green Meadow' &&
+          H_words(shapes.shortWords), JSON.stringify([shapes.words, shapes.shortWords]));
     check('the share link carries the code and nothing else',
-          /\?district=green-meadow-[A-Z0-9]{10}$/.test(shapes.link), shapes.link);
+          /\?district=[A-Z0-9]{6}$/.test(shapes.link), shapes.link);
     check('the cap is 8 players', shapes.max === 8, String(shapes.max));
     note(`endpoint in production: wss://${shapes.host}/district/<code>`);
 
@@ -526,8 +558,8 @@ function requireNode22() {
     check('every colour maps to its own character, and an unknown colour falls back',
           new Set(looks.byColour).size === 8 && looks.unknownColour === 0xe4d7bb,
           JSON.stringify(looks.byColour.map(v => v.toString(16))));
-    check(`the family are all there and named (${looks.named.join(', ')})`,
-          looks.named.join(',') === 'Pops,GiGi,Jonathan,Dad,Mommy,Christian',
+    check(`everybody named is there (${looks.named.join(', ')})`,
+          looks.named.join(',') === 'Henry,Pops,GiGi,Jonathan,Dad,Mommy,Christian',
           JSON.stringify(looks.named));
 
     /* End to end: the character another player is drawn as has to follow from the
@@ -581,21 +613,34 @@ function requireNode22() {
     console.log('\nThe same character on every screen');
     const aName = await A.evaluate(() => window.__henrycraft.mp.me().name);
     const aLook = await A.evaluate(() => window.__henrycraft.localLook());
-    const bSawBefore = await B.evaluate(n => (window.__henrycraft.mp.players()
-                          .find(p => p.label === n) || {}).shirt, aName);
+    const bSawBefore = await B.evaluate(() => (window.__henrycraft.mp.players()
+                          .find(p => p.lookIndex === 0) || {}).shirt);
     check('what he sees himself as is what the room sees him as',
           aLook.shirt === bSawBefore,
           JSON.stringify({heSees: aLook.shirt, roomSees: bSawBefore, name: aName}));
 
+    /* And the name over his head, which the check above does not cover: Henry's
+       own character had no name in the table, so the server named him from the word
+       list and he turned up on somebody else's screen as "Silver Otter" while his
+       own screen said HENRY. Both clients are on character 0 here, which is exactly
+       the case that was broken. */
+    const labels = await A.evaluate(() => ({mine: window.__henrycraft.localLabel(),
+                                            look: window.__henrycraft.localLook().index}));
+    const bLabelForA = await B.evaluate(() => window.__henrycraft.mp.players()
+                          .map(p => ({label: p.label, look: p.lookIndex})));
+    check(`the name over his own head is the name the room shows ("${labels.mine}")`,
+          labels.look === 0 && labels.mine === 'Henry' &&
+          bLabelForA.some(p => p.look === 0 && p.label === 'Henry'),
+          JSON.stringify({heIs: labels, roomSees: bLabelForA}));
+
     /* Pick a different character, and it has to travel. */
     await A.evaluate(() => window.__henrycraft.chooseCharacter(3));
     const picked = await A.evaluate(() => window.__henrycraft.localLook());
-    const travelled = await waitFor(B, ({n, shirt}) => {
-      const p = window.__henrycraft.mp.players().find(q => q.label === n);
-      return !!p && p.shirt === shirt;
-    }, {n: aName, shirt: picked.shirt}, 40000);
-    const bSawAfter = await B.evaluate(n => (window.__henrycraft.mp.players()
-                         .find(p => p.label === n) || {}).shirt, aName);
+    const travelled = await waitFor(B, shirt =>
+      window.__henrycraft.mp.players().some(q => q.shirt === shirt),
+      picked.shirt, 40000);
+    const bSawAfter = await B.evaluate(shirt => (window.__henrycraft.mp.players()
+                         .find(p => p.shirt === shirt) || {}).shirt, picked.shirt);
     check('choosing a character changes the body he walks around in',
           picked.index === 3 && picked.chosen === true, JSON.stringify(picked));
     check('and the room is drawing him as that character too',
@@ -623,6 +668,21 @@ function requireNode22() {
     note(`character choice travels: he picked ${picked.shirt.toString(16)} and the ` +
          `room redrew him as ${bSawAfter && bSawAfter.toString(16)}`);
 
+    /* How many people are here, where he can see it without opening anything. */
+    const chip = await A.evaluate(() => {
+      const c = document.getElementById('peopleChip');
+      return {shown: !c.classList.contains('hide'),
+              count: document.getElementById('peopleNum').textContent,
+              who: c.title,
+              players: window.__henrycraft.mp.players().length};
+    });
+    check(`the player count is on screen and right (${chip.count} here)`,
+          chip.shown && Number(chip.count) === chip.players + 1,
+          JSON.stringify(chip));
+    check('and it names who is here',
+          chip.who.split(',').length === chip.players + 1, JSON.stringify(chip.who));
+    note(`count chip: ${chip.count} people - ${chip.who}`);
+
     // leaving the district leaves the session
     await A.evaluate(() => window.__henrycraft.goHome());
     await sleep(500);
@@ -636,6 +696,14 @@ function requireNode22() {
        Pressing the button with nothing listening must not produce an error, a
        dialog, or a game that stops working. This is also the tunnel case, and the
        hotel-wifi case, and the case where a grandparent's link is stale. */
+    /* Everything still open is a software-rendered voxel world competing for the
+       same CPU, and the page below has to load from cold. Close the ones that are
+       finished, or its load outruns the wait and the failure looks like a bug. */
+    for (const label of ['B', 'link']) {
+      const pg = pages.find(p => p.label === label);
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+
     console.log('\nUndeployed and unreachable: the button still cannot break anything');
     const dead = 8799;
     const D = await newPlayer('dead', null, `http://127.0.0.1:${port}/index.html?sync=127.0.0.1:${dead}`);
@@ -663,8 +731,9 @@ function requireNode22() {
     });
     check('the pause menu offers the toggle, labelled for playing alone',
           /Playing alone/.test(menuShown || ''), JSON.stringify(menuShown));
-    check('one press opens the panel with a join code already generated',
-          stranded.togetherPanel && /-[A-Z0-9]{10}$/.test(stranded.codeShown),
+    check(`one press opens the panel with a join code already generated ` +
+          `("${stranded.codeShown}")`,
+          stranded.togetherPanel && /^[A-Z0-9]{6}$/.test(stranded.codeShown),
           JSON.stringify({panel: stranded.togetherPanel, code: stranded.codeShown}));
     check('with nothing listening it keeps trying quietly and shows no error',
           stranded.status === 'reconnecting' && !stranded.dialogOpen,

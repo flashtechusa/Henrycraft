@@ -77,10 +77,17 @@ everybody else is still in.
 
 **To join one:** *Join with a code* on the title screen, or open the shared link.
 That is the whole of it &mdash; no account, no sign-in, no email, nothing to
-remember. A code looks like `green-meadow-K7Q4XM2P9T`: the district's name plus
-ten random characters, which is what stops a stranger finding a child's world by
-guessing likely names. I, O, 0 and 1 are left out so nothing is misheard when it
-is read aloud.
+remember. A code is **six characters**, like `K4TPUY`: a little over a billion of
+them, which no one finds by hand, and short enough to read down a telephone. I, O,
+0 and 1 are left out so nothing is misheard. The older, much longer
+`green-meadow-K7Q4XM2P9T` form still works, so codes already shared with the family
+keep working.
+
+Joining with a code just joins &mdash; no question, no second button. The
+whose-copy-wins panel only appears for somebody who has actually **built**
+something in the district they are sharing, because that is the only time it is a
+real question. A **👥 count** sits next to the star at the top while sharing; tap
+it for who is here.
 
 Up to **eight** people at once. A ninth is turned away politely and simply keeps
 playing in their own copy.

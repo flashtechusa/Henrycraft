@@ -411,6 +411,7 @@ body.touch #hint{display:none}
   image-rendering:-moz-crisp-edges;image-rendering:crisp-edges
 }
 .ccard b{font-size:11px;font-weight:900;letter-spacing:.04em}
+#peopleChip{cursor:pointer;font:inherit}
 #roster{display:flex;flex-direction:column;gap:6px;margin:4px 0 10px}
 .rosterRow{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
 .rosterRow .dot{
@@ -436,6 +437,8 @@ body.touch #hint{display:none}
     <div class="chip" id="logo">HENRY'S BLOCK</div>
     <div class="chip" id="starChip">⭐ <b><span id="starNum">0</span>/<span id="starTot">10</span></b></div>
     <div class="chip" id="districtChip">Home</div>
+    <!-- Only there while sharing. Tap it for who. -->
+    <button class="chip hide" id="peopleChip" title="Who is here">👥 <b><span id="peopleNum">1</span></b></button>
   </div>
 
   <div id="topRight">
@@ -1873,8 +1876,12 @@ var shortsTex=null;
    coloured dot beside a name in the roster is genuinely that person. Index 0 is
    Henry, with the exact values he has always had. */
 var LOOKS=[
-  /* 0 Henry: ginger, cream top, green slides */
-  {shirt:0xe4d7bb, stripe:0xc4413a, collar:0x2f5b99, shoe:0x7fc03c,
+  /* 0 Henry: ginger, cream top, green slides. Named like the rest of them, because
+     a character with no name here gets one from the word list instead - which is
+     how Henry turned up on somebody else's screen as "Silver Otter" while his own
+     screen said HENRY. */
+  {name:'Henry',
+   shirt:0xe4d7bb, stripe:0xc4413a, collar:0x2f5b99, shoe:0x7fc03c,
    hairCol:0xc9682f, hairHi:0xdd8038, skinNum:0xefc49c, long:false,
    skin:'#efc49c', skinTop:'#e0b287', brow:'#c9662c', cheek:'#f0a08c', freckle:'#d9986a'},
   /* 1 dark hair, red top */
@@ -4622,7 +4629,16 @@ var MP_COLOURS=['#e4d7bb','#c0392b','#2f7fd6','#4fc04f','#f2c231','#9b59b6',
    from 32 is a little over 2^50, which is not guessable, and none of them can be
    misheard as another. */
 var MP_CODE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-var MP_CODE_RE=/^[a-z0-9]+(?:-[a-z0-9]+){0,4}-[A-Z0-9]{10}$/;
+/* Six characters, and nothing else. "little-spring-mine-K4TPUYSCGJ" was
+   twenty-eight characters to read down a telephone, and the district name in front
+   of it earned nothing - the random part is the whole of the security. Six from a
+   32-symbol alphabet is a little over a billion codes, which no one is finding by
+   hand, and it fits on one line at a size a grandparent can read.
+
+   The long form is still accepted, because codes already shared with the family
+   have to keep working. New ones are short. */
+var MP_CODE_LEN=6;
+var MP_CODE_RE=/^([a-z0-9]+(?:-[a-z0-9]+){0,4}-[A-Z0-9]{10}|[A-Z0-9]{6})$/;
 
 /* The one place a name becomes visible text. Anything not from the lists above
    is replaced rather than shown, and deliberately without an error: an error
@@ -4646,15 +4662,16 @@ function mpRandom(n){
   else for(var i=0;i<n;i++) r[i]=Math.floor(Math.random()*256);
   return r;
 }
-function makeJoinCode(slug){
-  var r=mpRandom(10), s='';
-  for(var i=0;i<10;i++) s+=MP_CODE_CHARS.charAt(r[i]%MP_CODE_CHARS.length);
-  return slug+'-'+s;
+function makeJoinCode(){
+  var r=mpRandom(MP_CODE_LEN), s='';
+  for(var i=0;i<MP_CODE_LEN;i++) s+=MP_CODE_CHARS.charAt(r[i]%MP_CODE_CHARS.length);
+  return s;
 }
 /* "green-meadow-K7Q4XM2P9T" -> "Green Meadow", so a district joined by code gets
    a name a child recognises instead of the code itself. */
 function mpCodeWords(code){
   var parts=String(code).split('-');
+  if(parts.length<2) return 'Shared District';   /* a short code has no words in it */
   parts.pop();
   var words=parts.filter(function(p){ return /[a-z]/.test(p); }).map(function(p){
     return p.charAt(0).toUpperCase()+p.slice(1);
@@ -4667,7 +4684,8 @@ function mpTidyCode(raw){
   var s=String(raw||'').trim().replace(/\s+/g,'-').replace(/-+/g,'-')
          .replace(/^-|-$/g,'');
   var i=s.lastIndexOf('-');
-  if(i<1) return '';
+  /* A short code has no dashes at all, so it is simply upper-cased. */
+  if(i<1) return s.toUpperCase();
   return s.slice(0,i).toLowerCase()+'-'+s.slice(i+1).toUpperCase();
 }
 function mpEndpoint(code){
@@ -4796,7 +4814,7 @@ function mpSend(o){
 function mpStart(code){
   if(!current) return;
   mp.wanted=true;
-  mp.code=code||current.code||makeJoinCode(current.slug);
+  mp.code=code||current.code||makeJoinCode();
   mp.retry=0;
   if(!current.code || current.code!==mp.code){
     current.code=mp.code;
@@ -4897,6 +4915,7 @@ function mpWelcome(w){
     toast('🌍 Sharing this district',2400);
     return;
   }
+  if(mp.joining){ /* handled below, then announced by mpJoinedCleanly */ }
   if(mp.accepted){
     /* A reconnect. Both sides may have moved on, so take the server's blocks and
        push up anything of ours it has not got. Neither side loses work. */
@@ -4905,8 +4924,18 @@ function mpWelcome(w){
     mpPaintPanel();
     return;
   }
-  /* First time in, and the server already has a copy of this district. Nothing
-     is touched until somebody says which one to keep. */
+  /* First time in, and the server already has a copy of this district.
+
+     Only worth asking about if there is something of his here to lose. Somebody
+     joining by a code has a district that was made two seconds ago and is empty,
+     and asking them to choose between that and the shared world is a question with
+     one sensible answer dressed up as a decision - which is exactly what made
+     joining feel complicated. Take the shared copy and say so. */
+  if(Object.keys(edits).length===0){
+    mp.pending=w;
+    mpAdoptServerCopy().then(function(){ mpJoinedCleanly(); });
+    return;
+  }
   mp.pending=w;
   mpSetStatus('choose');
   mpShowServerCopy(w);
@@ -5105,6 +5134,16 @@ function mpStatusLine(){
 }
 function mpPaintPanel(){
   mpPaintToggle();
+  /* The count sits with the star and the district name, where he already looks.
+     Hidden entirely when playing alone, so nothing new appears for a child who is
+     not sharing. */
+  var chip=document.getElementById('peopleChip');
+  if(chip){
+    var here=1+Object.keys(mp.players).length;
+    chip.classList.toggle('hide',mp.status!=='sharing');
+    document.getElementById('peopleNum').textContent=String(here);
+    chip.title=mpWhoList();
+  }
   var code=document.getElementById('joinCode');
   if(code) code.textContent=mp.code||'';
   var st=document.getElementById('tStatus');
@@ -5135,6 +5174,13 @@ function mpPaintPanel(){
     host.appendChild(row);
   });
 }
+/* Every name in the room, for the chip's tooltip - and it is the same list the
+   roster draws, from the same validated labels. */
+function mpWhoList(){
+  var names=[lookName(localLookIndex())||((mpMe&&mpMe.name)||'You')];
+  for(var id in mp.players) names.push(mp.players[id].label);
+  return names.join(', ');
+}
 function mpShareLink(){
   return location.origin+location.pathname+'?district='+encodeURIComponent(mp.code||'');
 }
@@ -5143,6 +5189,9 @@ function mpShowTogether(){
   el('together').classList.remove('hide');
 }
 function mpShowServerCopy(w){
+  /* One panel at a time. Two overlapping dialogs, each with two buttons, is what
+     the join screen looked like. */
+  el('together').classList.add('hide');
   var n=Object.keys(w.edits||{}).length;
   var mine=Object.keys(edits).length;
   el('scWhat').textContent=
@@ -5151,6 +5200,18 @@ function mpShowServerCopy(w){
     (mine?'Yours will be kept here as a separate district - nothing you built is lost.'
         :'Nothing of yours is affected.');
   el('serverCopy').classList.remove('hide');
+}
+
+/* In you go. One clear message, and the panel that shows who is here - rather
+   than a question about whose copy wins followed by another button to press. */
+function mpJoinedCleanly(){
+  mp.joining=false;
+  el('serverCopy').classList.add('hide');
+  el('joinPanel').classList.add('hide');
+  mpSetStatus('sharing');
+  mpPaintPanel();
+  var n=Object.keys(mp.players).length;
+  toast('🌍 You are in! '+(n?('Playing with '+n+' other'+(n===1?'':'s')):'Nobody else here yet'),2800);
 }
 
 /* Joining: a code and nothing else. No account, no sign-in, no email. */
@@ -5167,6 +5228,7 @@ function mpJoinByCode(raw){
                 :createDistrict(mpCodeWords(code),'meadow');
   return step.then(function(){
     if(current) current.code=code;
+    mp.joining=true;
     mpStart(code);
     return saveCurrent();
   }).then(function(){ return true; });
@@ -5257,6 +5319,7 @@ el('mTogether').addEventListener('click',function(){
   });
 });
 el('tWho').addEventListener('click',showWhoAmI);
+el('peopleChip').addEventListener('click',function(){ mpShowTogether(); });
 el('whoDone').addEventListener('click',function(){
   el('whoAmI').classList.add('hide');
 });
@@ -5810,6 +5873,13 @@ window.__henrycraft={
             chosen:!!(mpMe&&mpMe.chosen)};
   },
   chooseCharacter:chooseCharacter,
+  /* The name over his own head, so a test can check it against the name the room
+     shows for him - the half of "same person on every screen" that the character
+     check missed. */
+  localLabel:function(){
+    var i=localLookIndex();
+    return lookName(i)||(mpMe?mpSafeName(mpMe.name):'Blue Fox');
+  },
   cardPixels:function(i){
     var cv=document.createElement('canvas');
     paintCharacterCard(cv,i);

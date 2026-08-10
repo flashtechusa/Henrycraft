@@ -25,7 +25,11 @@ const PERSIST_DEBOUNCE_MS = 1000;
    random characters. The suffix is the only thing standing between a stranger
    and a child's game, so it is long enough that guessing is hopeless. Validated
    here so a malformed or over-long code cannot create junk Durable Objects. */
-const CODE_RE = /^[a-z0-9]+(?:-[a-z0-9]+){0,4}-[A-Z0-9]{10}$/;
+/* Two shapes accepted. New codes are six characters - a little over a billion of
+   them, short enough to read down a telephone, and the random part was always the
+   whole of the security. The long "slug-plus-ten" form stays valid because codes
+   already shared with the family have to keep working. */
+const CODE_RE = /^([a-z0-9]+(?:-[a-z0-9]+){0,4}-[A-Z0-9]{10}|[A-Z0-9]{6})$/;
 
 /* The client builds names from these, and only these. Anything else that
    arrives is not shown - see safeName(). */
@@ -45,7 +49,7 @@ const COLOURS = ['#e4d7bb','#c0392b','#2f7fd6','#4fc04f','#f2c231','#9b59b6',
    client cannot arrive claiming to be Christian, or claiming that Christian is
    called something else. It sends a number; the server supplies the name. */
 const CHARACTER_NAMES = [
-  null, null, null, null, null, null, null, null,
+  'Henry', null, null, null, null, null, null, null,
   'Pops', 'GiGi', 'Jonathan', 'Dad', 'Mommy', 'Christian',
 ];
 function safeLook(v) {
