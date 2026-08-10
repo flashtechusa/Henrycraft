@@ -1966,10 +1966,11 @@ var LOOKS=[
 /* Named characters take their name from here, and so does the server: nobody can
    arrive claiming to be somebody they picked out of a list of real people. */
 function lookName(i){ return (LOOKS[i]&&LOOKS[i].name)||null; }
-function lookForColour(hex){
+function mpColourIndex(hex){
   var i=MP_COLOURS.indexOf(mpSafeColour(hex));
-  return LOOKS[i>=0?i%LOOKS.length:0];
+  return i>=0?i:0;
 }
+function lookForColour(hex){ return LOOKS[mpColourIndex(hex)]; }
 function buildAvatar(L,tagText){
   var g=new THREE.Group(), parts={};
   var SKIN=L.skinNum, SHIRT=L.shirt, HAIR=L.hairCol, HAIR_HI=L.hairHi, SHOE=L.shoe;
@@ -4201,6 +4202,8 @@ function updateFpsReadout(){
   var portalBit=Object.keys(portalCells).length+' portal';
   if(dwellPortal) portalBit+='  dwell '+dwell.toFixed(2)+'/'+PORTAL_DWELL;
   if(storeError) portalBit+='  SAVE FAILED '+storeError;
+  /* Worth shouting about: it means everybody is being drawn from a guess. */
+  if(mp.stale) portalBit+='  SERVER OUT OF DATE (redeploy)';
   fpsEl.textContent=fmt(fpsValue)+' fps (min '+(fpsWorst<999?fmt(fpsWorst):'--')+')  '+
                     r.calls+' calls  '+(r.triangles/1000).toFixed(0)+'k tris  '+
                     portalBit;
@@ -4704,7 +4707,7 @@ function mpEndpoint(code){
 
 var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
         retry:0, timer:null, clock:0, last:null, queue:[], applying:false,
-        accepted:false, pending:null, calls:0, ever:false};
+        accepted:false, pending:null, calls:0, ever:false, stale:false};
 
 function mpOn(){ return mp.wanted; }
 function mpSetStatus(s){ mp.status=s; mpPaintPanel(); }
@@ -4838,6 +4841,7 @@ function mpStop(quiet){
   mp.accepted=false;
   mp.pending=null;
   mp.ever=false;
+  mp.stale=false;
   mpSetStatus('off');
   mpPaintToggle();
   if(!quiet) toast('👤 Playing alone',1800);
@@ -5023,9 +5027,18 @@ function mpAddPlayer(p){
   if(p.id===mp.me) return;
   /* A named character's label comes from the character, not from the wire: the
      server sends the name it chose for that number, and this is the only spelling
-     the game will draw. Everybody else keeps a name from the word list. */
-  var idx=safeLookIndex(p.look);
-  var label=lookName(idx)||mpSafeName(p.name);
+     the game will draw. Everybody else keeps a name from the word list.
+
+     If the server is an older one that does not send a character number at all,
+     do NOT quietly settle on character 0 - that is Henry, and a room of four then
+     looks like four Henrys, which is what this looked like on a phone. Fall back to
+     the colour, which every version of the server has always sent, so people are at
+     least different from one another; and do not claim a character's name we were
+     never told. */
+  var told=Number.isInteger(p.look);
+  var idx=told?safeLookIndex(p.look):mpColourIndex(p.colour);
+  var label=(told&&lookName(idx))||mpSafeName(p.name);
+  if(!told) mp.stale=true;
   var look=LOOKS[idx];
   var built=buildAvatar(look, label.toUpperCase());
   built.group.visible=false;             /* until we know where they are */
@@ -5119,6 +5132,10 @@ function mpPaintToggle(){
 function mpStatusLine(){
   if(mp.status==='sharing'){
     var n=Object.keys(mp.players).length;
+    if(mp.stale){
+      return 'Playing with '+n+', but the sync server needs updating - everyone '+
+             'is being drawn from a guess';
+    }
     return n?('Playing with '+n+(n===1?' other person':' other people')):'Waiting for someone to join';
   }
   if(mp.status==='connecting') return 'Connecting…';
@@ -5929,6 +5946,7 @@ window.__henrycraft={
     code:function(){ return mp.code; },
     me:function(){ return mpMe?{name:mpMe.name,colour:mpMe.colour}:null; },
     calls:function(){ return mp.calls; },
+    stale:function(){ return mp.stale; },
     queued:function(){ return mp.queue.length; },
     endpoint:mpEndpoint,
     tidy:mpTidyCode,

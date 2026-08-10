@@ -86,12 +86,16 @@ async function startWorker(port) {
     try {
       const ok = await new Promise(res => {
         const r = http.get({host: '127.0.0.1', port, path: '/health', timeout: 1500}, s => {
-          let b = ''; s.on('data', c => b += c); s.on('end', () => res(b.trim() === 'ok'));
+          /* startsWith, not equals: /health now also says what the Worker can do,
+             so that an out-of-date deployment can be spotted with curl. */
+          let b = '';
+          s.on('data', c => b += c);
+          s.on('end', () => res(b.trim().startsWith('ok') ? b.trim() : false));
         });
         r.on('error', () => res(false));
         r.on('timeout', () => { r.destroy(); res(false); });
       });
-      if (ok) return {child, persist, log: () => log};
+      if (ok) return {child, persist, health: ok, log: () => log};
     } catch (_) {}
     await sleep(700);
   }
@@ -162,6 +166,7 @@ function requireNode22() {
   const worker = await startWorker(wPort);
   const {srv, port} = await serveGame();
   const url = `http://127.0.0.1:${port}/index.html?sync=127.0.0.1:${wPort}`;
+  console.log(`worker says: ${worker.health}`);
 
   const browser = await chromium.launch({
     args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
@@ -668,6 +673,32 @@ function requireNode22() {
     note(`character choice travels: he picked ${picked.shirt.toString(16)} and the ` +
          `room redrew him as ${bSawAfter && bSawAfter.toString(16)}`);
 
+    /* ---- an older server, which is what he actually hit ----
+       A Worker that predates the character number sends everybody without one. The
+       client used to settle on character 0 for those, and character 0 is Henry - so
+       two players both showed up as Henry on the phone while the PC happened to look
+       right. Falling back to the colour keeps people distinct, and the name of a
+       character we were never told is not claimed. */
+    console.log('\nAn out-of-date server must not turn everybody into Henry');
+    const old = await A.evaluate(async () => {
+      const H = window.__henrycraft;
+      /* Exactly what an older server broadcasts: no look field at all. */
+      H.mp.feed({type: 'joined', player: {id: 'old1', name: 'Gold Owl', colour: '#4fc04f'}});
+      H.mp.feed({type: 'joined', player: {id: 'old2', name: 'Teal Wren', colour: '#9b59b6'}});
+      await new Promise(r => setTimeout(r, 200));
+      const them = H.mp.players().filter(p => /old/.test(p.id));
+      return {them: them.map(p => ({label: p.label, look: p.lookIndex, shirt: p.shirt})),
+              stale: H.mp.stale(), line: H.mp.statusLine()};
+    });
+    check('two players with no character number are not both drawn as Henry',
+          old.them.length === 2 && old.them[0].look !== old.them[1].look &&
+          old.them.every(p => p.label !== 'Henry'),
+          JSON.stringify(old.them));
+    check('and it says the server needs updating rather than saying nothing',
+          old.stale === true && /needs updating/.test(old.line),
+          JSON.stringify({stale: old.stale, line: old.line}));
+    note(`an old server reads as: "${old.line}"`);
+
     /* How many people are here, where he can see it without opening anything. */
     const chip = await A.evaluate(() => {
       const c = document.getElementById('peopleChip');
@@ -741,6 +772,11 @@ function requireNode22() {
     check('and the world still works while it cannot connect', stranded.built,
           JSON.stringify(stranded));
     note(`unreachable server reads as: "${stranded.line}"`);
+
+    /* The marker that tells a deployed Worker apart from an older one. */
+    check(`/health advertises what it can do ("${worker.health}")`,
+          /look=1/.test(worker.health) && /characters=14/.test(worker.health),
+          worker.health);
 
     check('no page errors in any client', errs.length === 0, errs.slice(0, 3).join(' | '));
   } finally {

@@ -81,7 +81,13 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/health') {
-      return new Response('ok', {headers: {'content-type': 'text/plain'}});
+      /* Says what it can do, not just that it is alive. Two versions of this Worker
+         are now possible in the wild, and the difference is invisible from the game:
+         an older one drops the character number, and every player is drawn as
+         character 0 - which is Henry, so a room of four looks like four Henrys.
+         `curl https://sync.henrysgame.com/health` tells you which one is deployed. */
+      return new Response('ok look=1 characters=' + CHARACTER_NAMES.length,
+                          {headers: {'content-type': 'text/plain'}});
     }
 
     // /district/<code>, WebSocket only.

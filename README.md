@@ -163,6 +163,19 @@ Until it is deployed, pressing *Playing together* does no harm &mdash; the game
 keeps trying quietly in the background and stays playable. There is a test for
 exactly that.
 
+**Check which version is deployed:**
+
+```
+curl https://sync.henrysgame.com/health
+```
+
+`ok look=1 characters=14` is current. Plain `ok` is an older Worker that drops the
+character number, and the symptom is subtle rather than obvious: every player gets
+drawn from a guess, and the guess used to be character 0 &mdash; which is Henry, so
+a room of four looked like four Henrys. The game now falls back to the shirt colour
+instead, keeps people distinct, and says *"the sync server needs updating"* in the
+Playing-together panel. **Redeploy after any change under `server/`.**
+
 ## What's in a district
 
 **19 blocks** to build with: grass, dirt, stone, sand, wood, leaves, planks,
