@@ -126,7 +126,21 @@ function code(prefix) {
   return `${prefix}-${s}`;
 }
 
+/* Fail with the reason rather than with a stack trace from inside wrangler, which
+   is how this first showed up in CI: the workflow pinned Node 20, wrangler needs
+   22, and the raw clients below use the global WebSocket that Node 20 only has
+   behind a flag. */
+function requireNode22() {
+  const major = Number(process.versions.node.split('.')[0]);
+  if (major >= 22) return;
+  console.error(`This suite needs Node 22 or newer; this is v${process.versions.node}.`);
+  console.error('wrangler will not start below 22, and the raw test clients need');
+  console.error('a global WebSocket. The other suites are fine on older Node.');
+  process.exit(2);
+}
+
 (async () => {
+  requireNode22();
   const {chromium} = loadPlaywright();
   const wPort = 8800 + Math.floor(Math.random() * 300);
   console.log('Henrycraft multiplayer tests\n');

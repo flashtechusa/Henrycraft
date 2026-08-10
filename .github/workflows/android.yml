@@ -36,10 +36,14 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v4
 
+      # 22, not 20, for two reasons that both come from the multiplayer tests:
+      # wrangler refuses to start on anything below v22, and the raw socket
+      # clients in tools/test-multiplayer.js use the global WebSocket, which Node
+      # 20 only has behind a flag.
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install Playwright with Chromium
         run: npm install --no-save playwright@1.56.1 && npx playwright install --with-deps chromium
