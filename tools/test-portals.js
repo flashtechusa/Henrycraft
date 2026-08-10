@@ -83,6 +83,49 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         idCover.missing.length === 0, 'missing: ' + idCover.missing.join(', '));
 
 
+  // ---- 0b: the dwell ring, in the order real play reaches it ----------------
+  /* This runs first on purpose. Every other test in this file calls something that
+     shows the ring before anything hides it, and that ordering hid a crash: hide
+     cached the ring element without its progress arc, so the first time he actually
+     stood in a portal, show dereferenced a null. It threw inside the frame loop,
+     which skips everything after it - including renderer.render - so standing in a
+     portal froze the picture and travel never happened. Real play hides the ring on
+     every frame he is not in a portal, so real play always got the bad order. */
+  console.log('0b. the dwell ring survives being hidden before it is ever shown');
+  const ring = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    /* Hide first, with no portal anywhere near him - exactly what the frame loop
+       does from the moment he starts playing. */
+    await H.standStill(0.5);
+    const afterHide = document.getElementById('portalRing').classList.contains('on');
+
+    H.loadThemeSeed('meadow', 760);
+    const gy = H.surfaceY(30, 30);
+    for (let y = gy; y < gy + 8; y++) for (let x = 26; x <= 34; x++) {
+      for (let d = -3; d <= 3; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                            fill: ids.GRASS});
+    for (let x = 26; x <= 34; x++) for (let d = -3; d <= 3; d++) {
+      if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+    }
+    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    /* Now show it, for a fraction of the dwell so nothing travels. */
+    const part = await H.standInFront(lit.id, 0.6, H.portalDwell() * 0.35);
+    return {afterHide, lit: lit.ok, part,
+            shown: document.getElementById('portalRing').classList.contains('on'),
+            offset: document.querySelector('#portalRing .fg').style.strokeDashoffset};
+  });
+  check('the ring appears when he stands in the doorway, having been hidden first',
+        ring.lit && ring.shown === true && ring.part.travelled === false,
+        JSON.stringify(ring));
+  check('and its progress arc is actually being driven',
+        ring.offset !== '' && Number(ring.offset) < 264 && Number(ring.offset) > 0,
+        `strokeDashoffset = "${ring.offset}" (264 is empty, 0 is full)`);
+  check('no error was thrown in the frame that showed it', errs.length === 0,
+        errs.slice(0, 2).join(' | '));
+  note(`ring driven to strokeDashoffset ${ring.offset} of 264`);
+
   // ---- 1: frame detection, both planes, every size 1x2 .. 21x21 -------------
   console.log('1. frames are detected in both vertical planes at every size');
   const sizes = await page.evaluate(() => {
@@ -666,6 +709,7 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         rest.afterHome.at === rest.afterHome.home, JSON.stringify(rest));
   // ---- 11b: he has to be able to walk in, on his own legs ------------------
   console.log('\n11b. walking into a lit portal, using the real physics');
+  const dwellSecs = await page.evaluate(() => window.__henrycraft.portalDwell());
   const walk = await page.evaluate(async () => {
     const H = window.__henrycraft, ids = H.ids;
     /* A fresh lit portal per case: two of the three cases below actually travel,
@@ -703,9 +747,14 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
     lit = await setup(796);
     const inFront = await H.standInFront(lit.id, 1.0, H.portalDwell() + 0.4);
 
+    /* Two and a half blocks back: near it, not in it. */
     lit = await setup(797);
+    const outside = await H.standInFront(lit.id, 2.8, H.portalDwell() + 0.6);
+
+    lit = await setup(798);
     const walked = await H.walkInto(lit.id, H.portalDwell() + 1.2);
-    return {lit, enterable, straightThrough, walked, inFront, destTheme: lit.destTheme};
+    return {lit, enterable, straightThrough, walked, inFront, outside,
+            destTheme: lit.destTheme};
   });
   check('a lit portal is something a body can occupy, not a wall',
         walk.enterable === true, JSON.stringify(walk));
@@ -713,9 +762,30 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         walk.walked && walk.walked.reached === true, JSON.stringify(walk.walked));
   check('and standing there takes him through',
         walk.walked && walk.walked.travelled === true, JSON.stringify(walk.walked));
-  check('but holding the stick down walks him out the far side, taking him nowhere',
-        walk.straightThrough && walk.straightThrough.through === true &&
-        walk.straightThrough.travelled === false, JSON.stringify(walk.straightThrough));
+  /* This deliberately asserts the opposite of what it used to. Requiring a walk
+     straight through to take him nowhere was my reading of "walking through is not
+     enough, standing is", and in practice it meant a five-year-old with his thumb
+     on the stick could never use a portal at all: he crossed the doorway before the
+     ring filled, every single time. A lit portal now holds whoever steps into it,
+     so walking in deliberately gets him where he was going. Standing outside it
+     still does nothing, which is the part that actually protects him. */
+  check(`the doorway holds him to a crawl (${walk.straightThrough &&
+        walk.straightThrough.heldSpeed} blocks a second, from 5)`,
+        walk.straightThrough && walk.straightThrough.heldSpeed <= 1.0,
+        JSON.stringify(walk.straightThrough));
+  /* The property the whole thing rests on: he cannot get across the doorway faster
+     than the ring fills, however hard he pushes. */
+  check(`and he cannot cross it faster than the ring fills ` +
+        `(${((walk.straightThrough.doorwayFrames || 0) / 60).toFixed(2)}s in the ` +
+        `doorway against a ${dwellSecs}s dwell)`,
+        walk.straightThrough && walk.straightThrough.doorwayFrames / 60 > dwellSecs,
+        JSON.stringify(walk.straightThrough));
+  check('so walking in while still pushing forward does take him somewhere',
+        walk.straightThrough && walk.straightThrough.travelled === true,
+        JSON.stringify(walk.straightThrough));
+  check('but standing well clear of it is not standing in it',
+        walk.outside && walk.outside.inDoorway === false &&
+        walk.outside.travelled === false, JSON.stringify(walk.outside));
   check('standing a block in front of the glass counts as standing in the doorway',
         walk.inFront && walk.inFront.inDoorway === true && walk.inFront.travelled === true,
         JSON.stringify(walk.inFront));

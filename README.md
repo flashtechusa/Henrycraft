@@ -156,11 +156,11 @@ sand to somewhere sandy, and the district you arrive in is named to suit. Anythi
 from 1&times;2 to 21&times;21 counts, corners optional, and a return portal is
 always built on the other side so he can never be stranded.
 
-To travel, **stand in the doorway for a second and a half** &mdash; anywhere in the
-opening or about a block in front of it, with a ring filling up to show it working.
-Walking straight through without stopping does nothing on purpose, so he cannot be
-whisked away by accident; the zone is wide enough to stand in but far too narrow to
-cross slowly enough to trigger. Finishing a frame shows a picture of the
+To travel, **just walk into it.** A lit portal slows whoever steps into it to a
+crawl and holds them there while a ring fills, about a second and a half &mdash; so
+he cannot cross the doorway faster than the ring fills however hard he pushes, and
+he does not have to learn to stop at the right moment. Standing *outside* it does
+nothing at all, which is the part that stops him being taken anywhere by accident. Finishing a frame shows a picture of the
 last step, and **Things you can build** in the pause menu shows all three.
 
 **Every hint is a picture.** He cannot read, so a frame that will not light shows a

@@ -2348,6 +2348,15 @@ function updatePlayer(dt){
   var fx=-Math.sin(yaw), fz=-Math.cos(yaw);
   var rx= Math.cos(yaw), rz=-Math.sin(yaw);
   var speed=player.fly?9.5:(swim?3.2:5.0);
+  /* A lit portal holds on to whoever steps into it, the way deep water slows him
+     down two lines above. Without this he cannot use one: he keeps his thumb on the
+     stick, and no amount of damping applied after the fact can hold him, because
+     updatePlayer adds wish*accel*dt back every frame - the floor on his speed works
+     out at 1.5 blocks a second however hard you damp, which crosses the doorway in
+     under the time the ring needs. Capping the target speed is the only version
+     that actually holds. It applies solely to somebody standing in a lit
+     doorway. */
+  if(doorwayPortal()) speed=Math.min(speed,0.9);
   var wishX=(fx*f+rx*s)*speed, wishZ=(fz*f+rz*s)*speed;
 
   var accel=player.onGround||player.fly?18:8;
@@ -3812,6 +3821,7 @@ function travelThrough(p){
    full speed, so "walking through is not enough, standing is" holds - it is now
    just possible to do the standing. */
 var PORTAL_REACH=1.1;                 /* how far in front of the glass counts */
+
 function inPortalDoorway(p,x,y,z,reach){
   if(!p.lit) return false;
   reach=reach===undefined?PORTAL_REACH:reach;
@@ -3943,15 +3953,31 @@ function updateFpsReadout(){
 }
 
 /* The dwell ring, and the marker a hint points at. */
+/* Both halves get looked up together, by one function.
+
+   They used not to: hidePortalRing cached ringEl on its own and left ringFg null,
+   and in real play hide runs on every frame he is *not* standing in a portal - so
+   by the time he stepped into one, showPortalRing skipped its own lazy init
+   (ringEl was already set) and dereferenced a null. That threw inside the frame
+   loop, which skips everything after it including renderer.render, so standing in
+   a portal froze the picture and travel never happened. Every test missed it
+   because in a test something always calls show before hide; only real play gets
+   the order the other way round. */
 var ringEl=null, ringFg=null;
+function ringParts(){
+  if(!ringEl){
+    ringEl=el('portalRing');
+    ringFg=ringEl?ringEl.querySelector('.fg'):null;
+  }
+  return ringEl;
+}
 function showPortalRing(t){
-  if(!ringEl){ ringEl=el('portalRing'); ringFg=ringEl.querySelector('.fg'); }
+  if(!ringParts()||!ringFg) return;
   ringEl.classList.add('on');
   ringFg.style.strokeDashoffset=String(264*(1-clamp(t,0,1)));
 }
 function hidePortalRing(){
-  if(!ringEl) ringEl=el('portalRing');
-  if(ringEl) ringEl.classList.remove('on');
+  if(ringParts()) ringEl.classList.remove('on');
 }
 
 var hintBox=new THREE.Mesh(
@@ -5128,7 +5154,7 @@ window.__henrycraft={
     playing=true;
     var before=current?current.slug:null;
     var dt=1/60, steps=Math.max(1,Math.round(seconds/dt));
-    var reached=false, through=false;
+    var reached=false, through=false, held=99, inFrames=0, maxDwell=0;
     input.fwd=1; input.strafe=0; input.jump=false; input.down=false;
     var startDepth=p.plane==='x'?player.z:player.x;
     for(var i=0;i<steps;i++){
@@ -5143,12 +5169,16 @@ window.__henrycraft={
       var depthNow=p.plane==='x'?player.z:player.x;
       if(reached && (depthNow-(p.fixed+0.5))*(startDepth-(p.fixed+0.5))<0) through=true;
       updatePortals(dt);
+      if(reached) held=Math.min(held,Math.hypot(player.vx,player.vz));
+      if(doorwayPortal()) inFrames++;
+      maxDwell=Math.max(maxDwell,dwell);
     }
     input.fwd=0;
     return new Promise(function(res){
       setTimeout(function(){
         playing=wasPlaying;
-        res({reached:reached, through:through,
+        res({reached:reached, through:through, heldSpeed:+held.toFixed(2),
+             doorwayFrames:inFrames, maxDwell:+maxDwell.toFixed(2), steps:steps,
              travelled:(current?current.slug:null)!==before,
              at:{x:+player.x.toFixed(2),y:+player.y.toFixed(2),z:+player.z.toFixed(2)},
              from:before, now:current?current.slug:null});
