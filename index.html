@@ -3363,6 +3363,19 @@ var saveDirty=false, saveBusy=false;
    every time he closed the tab. Prefer window.storage when it is there, fall
    back to localStorage everywhere else, and if neither works (private windows
    block localStorage) carry on without saving rather than throwing. */
+/* Storage failures used to be invisible. writeJSON resolved false and nobody
+   looked, so on a device with no room left every save quietly did nothing - the
+   exact disaster the first brief warned about - and travel concluded that a
+   district whose record had failed to write was a district that no longer existed,
+   and put the portal out. Failures are recorded here and said out loud. */
+var storeError=null, storeWarned=false, storeBroken=false;
+function noteStoreError(e){
+  storeError=((e&&e.name)?e.name:'Error')+((e&&e.message)?': '+e.message:'');
+  if(!storeWarned){
+    storeWarned=true;
+    toast('⚠️ Cannot save right now - fetch a grown-up',5000);
+  }
+}
 var store=(function(){
   if(window.storage && typeof window.storage.get==='function' && typeof window.storage.set==='function'){
     return {
@@ -3384,7 +3397,11 @@ var store=(function(){
   if(!ok) return null;
   return {
     get:function(k){ return Promise.resolve(window.localStorage.getItem(k)); },
-    set:function(k,v){ window.localStorage.setItem(k,v); return Promise.resolve(); }
+    set:function(k,v){
+      if(storeBroken) throw new Error('storage broken on purpose (test)');
+      window.localStorage.setItem(k,v);
+      return Promise.resolve();
+    }
   };
 })();
 
@@ -3402,7 +3419,7 @@ var store=(function(){
    own interior limit, so it is generous and familiar at once. */
 
 var PORTAL_MAX=21;                  /* interior, per side */
-var PORTAL_DWELL=1.5;               /* seconds standing still before travel */
+var PORTAL_DWELL=0.8;               /* seconds in the doorway before travel */
 var RETURN_W=2, RETURN_H=3;         /* return portals are always this small */
 
 /* What the filling means. */
@@ -3764,13 +3781,29 @@ function travelThrough(p){
   var from=current?current.slug:null;
   var fromTheme=theme.key;
   sfx('travel');
-  return saveCurrent().then(function(){
+  return saveCurrent().then(function(saved){
+    /* Going anywhere means leaving this district behind, so if it could not be
+       written down we do not go. Standing still and being told beats arriving
+       somewhere new having lost what he built. */
+    if(!saved){
+      travelling=false; dwell=0;
+      toast('⚠️ Could not save - staying here for now',4000);
+      return null;
+    }
     return readJSON(districtKey(p.dest));
   }).then(function(rec){
+    if(rec===null && !travelling) return false;   /* the save failed above */
     if(!rec){
-      /* Destination deleted. The portal goes dark rather than crashing, and can
-         be lit again to bind somewhere new. */
-      travelling=false;
+      /* Missing record. Two very different reasons, and telling them apart matters:
+         if the index still lists it, the place exists and something went wrong
+         reading it, so the portal stays lit and he can try again. Putting it out
+         would throw away a binding over a hiccup. */
+      var listed=districtIndex.list.some(function(d){ return d.slug===p.dest; });
+      travelling=false; dwell=0;
+      if(listed){
+        toast('⚠️ Could not open that place - try again',3200);
+        return false;
+      }
       extinguishPortal(p,true);
       toast('🌀 That place is gone - light it again',2400);
       return false;
@@ -3820,7 +3853,7 @@ function travelThrough(p){
    the glass. Walking through that zone still takes well under half a second at
    full speed, so "walking through is not enough, standing is" holds - it is now
    just possible to do the standing. */
-var PORTAL_REACH=1.1;                 /* how far in front of the glass counts */
+var PORTAL_REACH=1.4;                 /* how far in front of the glass counts */
 
 function inPortalDoorway(p,x,y,z,reach){
   if(!p.lit) return false;
@@ -3947,9 +3980,12 @@ function updateFpsReadout(){
   /* A decimal below 10, because "0 fps" is what a genuinely slow device would
      print and it reads as a broken counter rather than a measurement. */
   var fmt=function(v){ return v<10?v.toFixed(1):v.toFixed(0); };
+  var portalBit=Object.keys(portalCells).length+' portal';
+  if(dwellPortal) portalBit+='  dwell '+dwell.toFixed(2)+'/'+PORTAL_DWELL;
+  if(storeError) portalBit+='  SAVE FAILED '+storeError;
   fpsEl.textContent=fmt(fpsValue)+' fps (min '+(fpsWorst<999?fmt(fpsWorst):'--')+')  '+
                     r.calls+' calls  '+(r.triangles/1000).toFixed(0)+'k tris  '+
-                    Object.keys(portalCells).length+' portal';
+                    portalBit;
 }
 
 /* The dwell ring, and the marker a hint points at. */
@@ -4082,8 +4118,8 @@ function writeJSON(k,v){
     if(!store) return resolve(false);
     try{
       store.set(k,JSON.stringify(v)).then(function(){ resolve(true); })
-                                    .catch(function(){ resolve(false); });
-    }catch(e){ resolve(false); }
+                                    .catch(function(e){ noteStoreError(e); resolve(false); });
+    }catch(e){ noteStoreError(e); resolve(false); }
   });
 }
 function removeKey(k){
@@ -4154,9 +4190,11 @@ function saveCurrent(){
   entry.created=rec.created; entry.lastPlayed=rec.lastPlayed;
   districtIndex.list.unshift(entry);
   districtIndex.current=rec.slug;
-  return writeJSON(districtKey(rec.slug),rec)
-    .then(function(){ return writeJSON(INDEX_KEY,districtIndex); })
-    .then(function(){ return true; });
+  return writeJSON(districtKey(rec.slug),rec).then(function(okRec){
+    return writeJSON(INDEX_KEY,districtIndex).then(function(okIndex){
+      return okRec&&okIndex;
+    });
+  });
 }
 function nowStamp(){ return new Date().toISOString(); }
 
@@ -5350,6 +5388,15 @@ window.__henrycraft={
   /* The whole light-it path including the hint, not just the analysis, so a test
      can check what actually appears on screen. */
   tryLight:function(x,y,z){ return tryLightPortal(x,y,z); },
+  /* Storage failure, on purpose, so the paths that used to fail silently can be
+     driven from a test. */
+  breakStore:function(on){ storeBroken=!!on; if(!on){ storeError=null; storeWarned=false; } },
+  storeError:function(){ return storeError; },
+  saveResult:function(){ saveDirty=false; return saveCurrent(); },
+  dropRecord:function(slug){ return removeKey(districtKey(slug)); },
+  indexLists:function(slug){
+    return districtIndex.list.some(function(d){ return d.slug===slug; });
+  },
   /* The nudge that fires when a placed block finishes a frame. */
   promptCheck:function(x,y,z){ return maybePromptToLight(x,y,z); },
   forgetPrompts:function(){ litPrompted={}; },

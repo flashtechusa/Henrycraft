@@ -470,17 +470,26 @@ function requireNode22() {
     check('the cap is 8 players', shapes.max === 8, String(shapes.max));
     note(`endpoint in production: wss://${shapes.host}/district/<code>`);
 
+    /* The ninth-player page has done its job, and every page still open is a
+       software-rendered voxel world competing for the same CPU. Leaving it running
+       made the join below take longer than its wait allowed, which showed up as an
+       intermittent failure rather than an honest one. */
+    const ninthPage = pages.find(p => p.label === 'ninth');
+    if (ninthPage) { await ninthPage.ctx.close(); pages.splice(pages.indexOf(ninthPage), 1); }
+    d.close();
+
     // the deep link, in a fresh browser, as a grandparent would use it
     const G = await newPlayer('link', `&district=${c1}`);
     const arrived = await waitFor(G, () => window.__henrycraft.mp.status() === 'sharing' ||
-                                            window.__henrycraft.mp.pending(), null, 30000);
+                                            window.__henrycraft.mp.pending(), null, 60000);
     const gState = await G.evaluate(() => ({
       code: window.__henrycraft.mp.code(),
       name: window.__henrycraft.districts().list[0].name,
       playing: !document.getElementById('start').classList.contains('hide') === false,
     }));
     check('a ?district= link opens straight into that district', arrived && gState.code === c1,
-          JSON.stringify(gState));
+          JSON.stringify({arrived, wanted: c1, got: gState.code, gState,
+                          status: await G.evaluate(() => window.__henrycraft.mp.status())}));
     check('and starts playing rather than sitting on the title screen', gState.playing,
           JSON.stringify(gState));
 

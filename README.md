@@ -157,10 +157,16 @@ from 1&times;2 to 21&times;21 counts, corners optional, and a return portal is
 always built on the other side so he can never be stranded.
 
 To travel, **just walk into it.** A lit portal slows whoever steps into it to a
-crawl and holds them there while a ring fills, about a second and a half &mdash; so
-he cannot cross the doorway faster than the ring fills however hard he pushes, and
-he does not have to learn to stop at the right moment. Standing *outside* it does
-nothing at all, which is the part that stops him being taken anywhere by accident. Finishing a frame shows a picture of the
+crawl and holds them there while a ring fills, about eight tenths of a second
+&mdash; so he cannot cross the doorway faster than the ring fills however hard he
+pushes, and he does not have to learn to stop at the right moment. Standing
+*outside* it does nothing at all, which is the part that stops him being taken
+anywhere by accident.
+
+If the tablet cannot save &mdash; no room left, most likely &mdash; the game says
+so on screen and **refuses to travel**, because leaving a district that could not
+be written down is how a build gets lost. `?fps=1` shows the dwell timer and any
+save error, which is the quickest way to see what a portal is actually doing. Finishing a frame shows a picture of the
 last step, and **Things you can build** in the pause menu shows all three.
 
 **Every hint is a picture.** He cannot read, so a frame that will not light shows a

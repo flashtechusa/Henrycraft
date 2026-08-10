@@ -810,6 +810,61 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
   note(`dwell is ${rest.dwell.dwell}s: ${(rest.dwell.dwell * 0.5).toFixed(2)}s stays put, ` +
        `${(rest.dwell.dwell + 0.3).toFixed(2)}s travels`);
 
+  // ---- 13: storage failures must never be silent ---------------------------
+  /* All three of these used to pass quietly and do the wrong thing. A device with
+     no room left is the realistic case - a child who has been building for weeks -
+     and the first brief was explicit that losing his world silently is the worst
+     thing this code can do. */
+  console.log('\n13. what happens when the tablet cannot save');
+  const stor = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    const out = {};
+    H.loadThemeSeed('meadow', 799);
+
+    /* (a) a failed write is reported, not swallowed */
+    H.breakStore(true);
+    out.saved = await H.saveResult();
+    out.error = H.storeError();
+    H.breakStore(false);
+    out.clearedAfter = H.storeError();
+
+    /* (b) travel must not leave the district when it could not be written down */
+    const gy = H.surfaceY(30, 30);
+    for (let y = gy; y < gy + 8; y++) for (let x = 26; x <= 34; x++) {
+      for (let d = -3; d <= 3; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    let b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30, fill: ids.SNOW});
+    let lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    const home = H.districts().current;
+    H.breakStore(true);
+    const wentAnyway = await H.travel(lit.id);
+    H.breakStore(false);
+    out.blockedTravel = {travelled: wentAnyway, still: H.districts().current === home,
+                         litStill: H.portals().filter(p => p.lit && p.id === lit.id).length};
+
+    /* (c) a record that cannot be read, while the index still lists it, is a
+       hiccup and not a deleted district - the portal must stay lit */
+    out.listed = H.indexLists(lit.dest);
+    await H.dropRecord(lit.dest);
+    const afterMissing = await H.travel(lit.id);
+    out.missing = {travelled: afterMissing,
+                   stillListed: H.indexLists(lit.dest),
+                   litStill: H.portals().filter(p => p.lit && p.id === lit.id).length};
+    return out;
+  });
+  check('a save that fails says so instead of reporting success',
+        stor.saved === false && /broken on purpose/.test(stor.error || ''),
+        JSON.stringify({saved: stor.saved, error: stor.error}));
+  check('and the warning clears once saving works again',
+        stor.clearedAfter === null, String(stor.clearedAfter));
+  check('travel refuses to leave a district it could not write down',
+        stor.blockedTravel.travelled === false && stor.blockedTravel.still === true &&
+        stor.blockedTravel.litStill === 1, JSON.stringify(stor.blockedTravel));
+  check('a record that will not read, but is still in the index, leaves the portal lit',
+        stor.missing.travelled === false && stor.missing.litStill === 1,
+        JSON.stringify(stor.missing));
+  note('a failed save blocks travel rather than losing the district he came from');
+
   // ---- the ?fps=1 readout -------------------------------------------------
   console.log('\n12. the hidden fps readout appears only when asked for');
   const off = await page.evaluate(() => !!document.getElementById('fpsReadout'));
