@@ -396,6 +396,40 @@ function dE(a, b) {
   note('sky colours: ' + cols.map(c => `${c.key} #${c.sky.toString(16).padStart(6, '0')}`).join(', '));
   note('water tints: ' + cols.map(c => `${c.key} #${c.water.toString(16).padStart(6, '0')}`).join(', '));
 
+  // ---- names have to suit the place -----------------------------------------
+  console.log('\nNames match the theme they belong to');
+  const naming = await page.evaluate(() => {
+    const H = window.__henrycraft;
+    /* Words that would contradict the place. A sand portal announcing "Snowy
+       Island" is what sent this back. */
+    const wrong = {
+      meadow:  [/snow/i, /frost/i, /dune/i, /sand/i, /reef/i, /lagoon/i],
+      snowy:   [/dune/i, /sand/i, /reef/i, /lagoon/i, /coral/i],
+      desert:  [/snow/i, /frost/i, /reef/i, /lagoon/i, /marsh/i, /coral/i],
+      island:  [/snow/i, /frost/i, /dune/i, /peak/i],
+      mushroom:[/snow/i, /frost/i, /dune/i, /sand/i, /reef/i, /coral/i]
+    };
+    const out = {bad: [], samples: {}, count: 0};
+    for (const theme of Object.keys(wrong)) {
+      const seen = new Set();
+      for (let i = 0; i < 300; i++) {
+        const n = H.randomName(theme);
+        seen.add(n);
+        out.count++;
+        for (const re of wrong[theme]) {
+          if (re.test(n)) { out.bad.push({theme, name: n, re: String(re)}); break; }
+        }
+      }
+      out.samples[theme] = Array.from(seen).slice(0, 3).join(', ');
+      out.variety = Math.max(out.variety || 0, 0);
+      if (seen.size < 20) out.bad.push({theme, name: 'too few distinct names: ' + seen.size});
+    }
+    return out;
+  });
+  check(`${naming.count} generated names, none contradicting its own theme`,
+        naming.bad.length === 0, JSON.stringify(naming.bad.slice(0, 4)));
+  Object.keys(naming.samples).forEach(t => note(`${t} names: ${naming.samples[t]}`));
+
   check('no page errors across the theme sweep', errs.length === 0, errs.join(' | '));
   await ctx.close();
   await browser.close();

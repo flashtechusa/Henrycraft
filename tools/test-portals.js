@@ -664,6 +664,40 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         rest.deleted.litNow === 0, JSON.stringify(rest.deleted));
   check('10. Go home works from a district with no portals',
         rest.afterHome.at === rest.afterHome.home, JSON.stringify(rest));
+  // ---- 11b: he has to be able to walk in, on his own legs ------------------
+  console.log('\n11b. walking into a lit portal, using the real physics');
+  const walk = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 795);
+    /* Standing on the ground, as he builds them - not floating in the air. */
+    const gy = H.surfaceY(30, 30);
+    for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
+      for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                            fill: ids.SAND});
+    /* A floor, laid after the frame: buildFrame clears a generous box around
+       itself, which leaves a trench immediately in front of the opening. Without
+       this he falls into it on the approach and the test fails for a reason that
+       has nothing to do with portals. Only air is filled, so the frame's own ring
+       is left alone. */
+    for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
+      if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+    }
+    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    if (!lit.ok) return {error: 'would not light', lit};
+    const enterable = H.canStandIn(lit.id);
+    const walked = await H.walkInto(lit.id, H.portalDwell() + 1.2);
+    return {lit, enterable, walked, destTheme: lit.destTheme};
+  });
+  check('a lit portal is something a body can occupy, not a wall',
+        walk.enterable === true, JSON.stringify(walk));
+  check('walking forwards into it actually gets him inside',
+        walk.walked && walk.walked.reached === true, JSON.stringify(walk.walked));
+  check('and standing there takes him through',
+        walk.walked && walk.walked.travelled === true, JSON.stringify(walk.walked));
+  note(`walked in unaided and arrived in ${walk.walked && walk.walked.now}`);
+
   check('11. half the dwell time does not travel; the full time does',
         rest.dwell.brief.travelled === false && rest.dwell.held.travelled === true,
         JSON.stringify(rest.dwell));

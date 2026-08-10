@@ -150,11 +150,16 @@ never spreads, never goes out, never hurts anything, and digs away like any othe
 block.
 
 **Portals.** Build a frame out of obsidian, fill the middle with any block, then
-light it with Flint &amp; Steel. Whatever you fill it with decides where it goes:
-snow to somewhere snowy, sand to somewhere sandy. Anything from 1&times;2 to
-21&times;21 counts, corners optional, and a return portal is always built on the
-other side so he can never be stranded. **Things you can build** in the pause menu
-shows the three steps as a picture.
+light it with Flint &amp; Steel &mdash; pick it from the block picker and tap the
+filling. Whatever you fill it with decides where it goes: snow to somewhere snowy,
+sand to somewhere sandy, and the district you arrive in is named to suit. Anything
+from 1&times;2 to 21&times;21 counts, corners optional, and a return portal is
+always built on the other side so he can never be stranded.
+
+To travel, **walk into it and stand still for a second and a half** &mdash; a ring
+fills up to show it working. Walking straight through does nothing on purpose, so
+he cannot be whisked away by accident. Finishing a frame shows a picture of the
+last step, and **Things you can build** in the pause menu shows all three.
 
 **Every hint is a picture.** He cannot read, so a frame that will not light shows a
 drawn diagram &mdash; the wrong shape crossed out beside the right one, with a red

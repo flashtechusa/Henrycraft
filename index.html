@@ -1156,7 +1156,12 @@ function isOpaque(x,y,z){
 function isSolid(x,y,z){
   if(!inside(x,y,z)) return false;
   var b=blocks[idx(x,y,z)];
-  return b!==AIR && !DEFS[b].liquid;
+  /* A lit portal has to be walked into - that is the entire way you use one - so
+     it is no more solid than water. Without this the portal is a wall: it lights,
+     it says where it goes, and he cannot get in. The dwell test missed it for the
+     worst possible reason: standIn() put the player inside by assigning
+     coordinates, which never asks about collision. */
+  return b!==AIR && !DEFS[b].liquid && !DEFS[b].portal;
 }
 function surfaceY(x,z){
   for(var y=WY-1;y>=0;y--){ var b=getBlock(x,y,z); if(b!==AIR && b!==WATER) return y+1; }
@@ -3005,9 +3010,14 @@ function refreshDistrictHud(){
 
 /* ---- create ---- */
 var pendingTheme='meadow';
+/* The last name the game suggested. If the field still holds it, picking a theme
+   is free to suggest a better-suited one; if a grown-up has typed over it, that
+   name is theirs and nothing touches it. */
+var autoName='';
 function openNewDistrict(){
   pendingTheme='meadow';
-  el('dName').value=randomDistrictName();
+  el('dName').value=randomDistrictName(pendingTheme);
+  autoName=el('dName').value;
   var grid=el('themeGrid');
   grid.innerHTML='';
   THEMES.forEach(function(T){
@@ -3017,6 +3027,10 @@ function openNewDistrict(){
     var b=document.createElement('b'); b.textContent=T.emoji+' '+T.name; c.appendChild(b);
     c.addEventListener('click',function(){
       pendingTheme=T.key;
+      if(el('dName').value===autoName){
+        el('dName').value=randomDistrictName(pendingTheme);
+        autoName=el('dName').value;
+      }
       var all=grid.querySelectorAll('.tcard');
       for(var i=0;i<all.length;i++) all[i].classList.remove('on');
       c.classList.add('on');
@@ -3269,12 +3283,13 @@ el('playBtn').addEventListener('click',startPlaying);
 
 /* ---- district buttons ---- */
 el('dShuffle').addEventListener('click',function(){
-  el('dName').value=randomDistrictName();
+  el('dName').value=randomDistrictName(pendingTheme);
+  autoName=el('dName').value;
   tone(620,0.06,'square',0.05);
 });
 el('dCancel').addEventListener('click',closeNewDistrict);
 el('dCreate').addEventListener('click',function(){
-  var nm=(el('dName').value||'').trim()||randomDistrictName();
+  var nm=(el('dName').value||'').trim()||randomDistrictName(pendingTheme);
   closeNewDistrict();
   createDistrict(nm,pendingTheme).then(function(){
     buildDistrictList();
@@ -3546,7 +3561,7 @@ function bindDestination(themeKey){
   }
   if(match) return Promise.resolve(match);
   /* none yet, so make one and keep it */
-  return createDistrictRecord(randomDistrictName(),themeKey);
+  return createDistrictRecord(randomDistrictName(themeKey),themeKey);
 }
 
 /* Write a district to storage without entering it - lighting a portal must not
@@ -3933,10 +3948,26 @@ var NAME_FIRST=['Green','Sunny','Star','Otter','Golden','Snowy','Quiet','Brave',
 var NAME_SECOND=['Meadow','Cave','Bay','Valley','Hollow','Island','Ridge','Creek',
                  'Harbour','Dunes','Forest','Garden','Lagoon','Peak','Shore','Glen',
                  'Cove','Field','Hill','Spring','Grove','Reef','Marsh','Basin'];
-function randomDistrictName(){
-  var a=NAME_FIRST[(Math.random()*NAME_FIRST.length)|0];
-  var b=NAME_SECOND[(Math.random()*NAME_SECOND.length)|0];
-  return a+' '+b;
+/* Names have to suit the place. Drawing from the whole list regardless of theme
+   announced "Portal to Snowy Island" for a portal filled with sand, and then
+   dropped him in a desert - which for someone who cannot read the theme name and
+   only hears it read aloud is simply a lie about where he is going. */
+var THEME_WORDS={
+  meadow:  {a:['Green','Sunny','Quiet','Happy','Mellow','Jolly','Little','Bright'],
+            b:['Meadow','Valley','Glen','Field','Grove','Garden','Creek','Spring']},
+  snowy:   {a:['Snowy','Frosty','Misty','Silver','Sleepy','Quiet','Bright','Big'],
+            b:['Peak','Ridge','Hollow','Valley','Basin','Glen','Hill','Spring']},
+  desert:  {a:['Sandy','Golden','Copper','Sunny','Wild','Bright','Big','Quiet'],
+            b:['Dunes','Basin','Ridge','Cave','Hollow','Field','Hill','Spring']},
+  island:  {a:['Coral','Sunny','Bright','Little','Happy','Golden','Wild','Quiet'],
+            b:['Bay','Island','Lagoon','Shore','Cove','Reef','Harbour','Creek']},
+  mushroom:{a:['Misty','Quiet','Sleepy','Cosy','Wild','Little','Mellow','Happy'],
+            b:['Hollow','Grove','Marsh','Forest','Glen','Basin','Cave','Garden']}
+};
+function randomDistrictName(themeKey){
+  var w=THEME_WORDS[themeKey];
+  var A=w?w.a:NAME_FIRST, B=w?w.b:NAME_SECOND;
+  return A[(Math.random()*A.length)|0]+' '+B[(Math.random()*B.length)|0];
 }
 
 /* ---------------- districts ----------------
@@ -4172,7 +4203,7 @@ function deleteDistrict(slug){
     if(districtIndex.list.length){
       return switchDistrict(districtIndex.list[0].slug);
     }
-    return createDistrict(randomDistrictName(),'meadow');
+    return createDistrict(randomDistrictName('meadow'),'meadow');
   });
 }
 
@@ -5019,6 +5050,59 @@ window.__henrycraft={
     if(!p) return Promise.resolve(false);
     return travelThrough(p);
   },
+  /* Walk in on his own legs. Everything else about travel is tested through
+     standIn(), which teleports - and teleporting is exactly how a solid portal
+     went unnoticed. This drives the same input the keyboard fills in and the same
+     updatePlayer that collides, so if the portal is a wall he stays outside it. */
+  walkInto:function(id,seconds){
+    var p=null;
+    portals.forEach(function(q){ if(q.id===id) p=q; });
+    if(!p) return Promise.resolve({error:'no such portal'});
+    var mid=portalCentre(p);
+    /* Stand him two blocks in front of the opening, on the ground, facing it. */
+    var nx=p.plane==='x'?0:1, nz=p.plane==='x'?1:0;
+    var sx=mid.x+nx*2.5, sz=mid.z+nz*2.5;
+    var gy=standableColumn(Math.floor(sx),Math.floor(sz));
+    if(!gy) return Promise.resolve({error:'nowhere to stand outside it'});
+    player.x=sx+0.0; player.y=gy; player.z=sz;
+    player.vx=player.vy=player.vz=0; player.fly=false;
+    /* Forward in updatePlayer is (-sin yaw, -cos yaw), so facing the opening -
+       walking along -n - means sin yaw = nx and cos yaw = nz. Getting this
+       backwards had him march away from the portal for a second and a half. */
+    yaw=Math.atan2(nx,nz);
+    var wasPlaying=playing, wasTouch=isTouch;
+    playing=true;
+    var before=current?current.slug:null;
+    var dt=1/60, steps=Math.max(1,Math.round(seconds/dt));
+    var reached=false;
+    input.fwd=1; input.strafe=0; input.jump=false; input.down=false;
+    for(var i=0;i<steps;i++){
+      updatePlayer(dt);
+      if(portalCells[keyOf(Math.floor(player.x),Math.floor(player.y),Math.floor(player.z))]){
+        reached=true;
+        input.fwd=0;                  /* stop pushing and stand still, as he would */
+      }
+      updatePortals(dt);
+    }
+    input.fwd=0;
+    return new Promise(function(res){
+      setTimeout(function(){
+        playing=wasPlaying;
+        res({reached:reached, travelled:(current?current.slug:null)!==before,
+             at:{x:+player.x.toFixed(2),y:+player.y.toFixed(2),z:+player.z.toFixed(2)},
+             from:before, now:current?current.slug:null});
+      },260);
+    });
+  },
+  /* Can a player body occupy the middle of the opening at all? */
+  canStandIn:function(id){
+    var p=null;
+    portals.forEach(function(q){ if(q.id===id) p=q; });
+    if(!p) return null;
+    var mid=portalCentre(p);
+    return boxFree(mid.x,p.y0,mid.z);
+  },
+
   /* Walk the dwell timer forward without a render loop. */
   standIn:function(id,seconds){
     var p=null;
