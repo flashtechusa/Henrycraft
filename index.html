@@ -3438,6 +3438,12 @@ var portalCells={};                 /* "x,y,z" -> portal, for fast lookup */
 var portalFrame={};                 /* "x,y,z" -> [portal,...], frame blocks */
 var portalFrames=0;
 var dwell=0, dwellPortal=null, travelling=false;
+/* Set on arrival, cleared the first time he is standing in no doorway at all.
+   While it is set, no dwell accumulates - so however he ends up placed, a portal
+   cannot take him anywhere he did not walk into himself. Without it, an arrival
+   spot that happened to fall inside a doorway would throw him straight back, and
+   then back again, for as long as he stood still. */
+var arrivalGrace=false;
 
 function keyOf(x,y,z){ return x+','+y+','+z; }
 
@@ -3826,6 +3832,19 @@ function travelThrough(p){
     for(var bi=0;bi<portals.length;bi++){
       if(portals[bi].lit && portals[bi].dest===from){ back=portals[bi]; break; }
     }
+    /* Tidy up after the old behaviour. Worlds built before duplicates were stopped
+       hold a crowd of identical return portals, and every lit one now carries an
+       exclusion zone that arrival has to dodge. Only the ones the game built itself
+       are put out, never one he lit - and putting one out leaves its obsidian frame
+       exactly where it is, because the frame is his. */
+    if(back){
+      var spare=portals.filter(function(q){
+        return q!==back && q.lit && q.isReturn && q.dest===from;
+      });
+      spare.forEach(function(q){ extinguishPortal(q,true); });
+      if(spare.length) toast('Tidied up '+spare.length+' spare portal'+
+                             (spare.length>1?'s':''),2600);
+    }
     var cx,cz;
     if(back){
       var bc=portalCentre(back);
@@ -3847,6 +3866,7 @@ function travelThrough(p){
               player.vx=player.vy=player.vz=0; }
     else findSpawn();          /* only if the district has no dry land at all */
     dwell=0; dwellPortal=null; travelling=false;
+    arrivalGrace=true;
     buildDistrictList();
     scheduleSave(); doSave();
     toast('🌀 '+districtName(p.dest),2000);
@@ -3901,6 +3921,7 @@ function updatePortals(dt){
   if(!playing||travelling){ return; }
   var p=doorwayPortal();
   if(!p){
+    arrivalGrace=false;          /* he is standing clear; the grace is spent */
     /* Drain rather than reset. Wobbling a step out of the doorway should not throw
        away his progress, but it drains faster than it fills so two separate
        walk-throughs cannot add up into a trip he did not ask for. */
@@ -3911,6 +3932,7 @@ function updatePortals(dt){
     if(dwell<=0){ dwellPortal=null; hidePortalRing(); }
     return;
   }
+  if(arrivalGrace) return;     /* he was put here; he did not walk in */
   if(dwellPortal!==p){ dwellPortal=p; dwell=0; }
   dwell+=dt;
   showPortalRing(dwell/PORTAL_DWELL);
@@ -5241,15 +5263,19 @@ window.__henrycraft={
   /* Put him on the ground a given distance in front of the opening and let him
      stand. This is the case that matters in practice: nobody stops inside the
      glass, they stop in the doorway. */
-  standInFront:function(id,distance,seconds){
+  standInFront:function(id,distance,seconds,keepGrace){
     var p=null;
     portals.forEach(function(q){ if(q.id===id) p=q; });
     if(!p) return Promise.resolve({error:'no such portal'});
     var mid=portalCentre(p);
     var nx=p.plane==='x'?0:1, nz=p.plane==='x'?1:0;
     var sx=mid.x+nx*distance, sz=mid.z+nz*distance;
-    var gy=standableColumn(Math.floor(sx),Math.floor(sz));
+    /* Inside the opening there is no "ground": standableColumn finds the top of the
+       frame and would put him on the roof, which is not the doorway at all. Only
+       ask it once he is far enough out to be standing on something. */
+    var gy=distance>=1?standableColumn(Math.floor(sx),Math.floor(sz)):0;
     player.x=sx; player.y=gy||p.y0; player.z=sz;
+    if(!keepGrace) arrivalGrace=false;
     player.vx=player.vy=player.vz=0;
     var wasPlaying=playing; playing=true;
     var here=!!doorwayPortal();
@@ -5285,6 +5311,7 @@ window.__henrycraft={
     });
   },
   inDoorway:function(){ return !!doorwayPortal(); },
+  grace:function(){ return arrivalGrace; },
 
   /* Can a player body occupy the middle of the opening at all? */
   canStandIn:function(id){
@@ -5303,6 +5330,7 @@ window.__henrycraft={
     var mid=portalCentre(p);
     player.x=mid.x; player.y=p.y0; player.z=mid.z;
     player.vx=player.vy=player.vz=0;
+    arrivalGrace=false;          /* stands in for him having walked in */
     var wasPlaying=playing; playing=true;
     var dt=1/30, steps=Math.max(1,Math.round(seconds/dt));
     var before=current?current.slug:null;
@@ -5403,6 +5431,20 @@ window.__henrycraft={
   /* The whole light-it path including the hint, not just the analysis, so a test
      can check what actually appears on screen. */
   tryLight:function(x,y,z){ return tryLightPortal(x,y,z); },
+  /* Recreate the mess the old code left: a crowd of lit return portals to the same
+     district, all close together. */
+  packWithReturnPortals:function(destSlug,n){
+    var made=0;
+    for(var i=0;i<n && i<12;i++){
+      var x=6+i*4;
+      var col=standableColumn(x,34);
+      if(!col) continue;
+      buildReturnPortal(destSlug,'meadow',x,34);
+      made++;
+    }
+    reindexPortals();
+    return made;
+  },
   /* Storage failure, on purpose, so the paths that used to fail silently can be
      driven from a test. */
   breakStore:function(on){ storeBroken=!!on; if(!on){ storeError=null; storeWarned=false; } },

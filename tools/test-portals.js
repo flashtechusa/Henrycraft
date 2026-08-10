@@ -936,6 +936,145 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         JSON.stringify(on));
   note('?fps=1 shows: ' + (on ? on.text : 'nothing'));
 
+  // ---- 13b: a district already full of the old duplicate portals ------------
+  /* His worlds were built before duplicates were stopped, so they contain a cluster
+     of return portals to the same place. Every lit portal now carries an exclusion
+     zone for arrival, and a clustered pile of them can leave nowhere clear to stand
+     - at which point the last-resort spot could be inside a doorway, and he would
+     be thrown straight back where he came from, over and over. */
+  console.log('\n13b. arriving in a district already littered with old portals');
+  const clutter = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    const away = await H.createDistrict('Clutter Away', 'snowy');
+    const home = await H.createDistrict('Clutter Home', 'meadow');
+
+    /* A portal out, plus a deliberate pile of extra lit portals bound back to
+       home, exactly as the old code left them - all crowded together. */
+    const gy = H.surfaceY(30, 30);
+    for (let y = gy; y < gy + 8; y++) for (let x = 20; x <= 44; x++) {
+      for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    for (let x = 20; x <= 44; x++) for (let d = -4; d <= 4; d++) {
+      if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+    }
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 41, ay: gy, fixed: 30,
+                            fill: ids.SNOW});
+    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    if (!lit.ok) return {error: 'would not light'};
+
+    const went = await H.travel(lit.id);
+    if (!went) return {error: 'first travel failed'};
+    /* Now in the away district. Crowd it with copies of the way home. */
+    const packed = H.packWithReturnPortals(H.districts().list.find(d => d.name === 'Clutter Home').slug, 8);
+
+    /* Go home and come back, which is the moment the old code would have dumped
+       him inside one of them. */
+    const backP = H.portals().filter(p => p.lit)[0];
+    const wentHome = await H.travel(backP.id);
+    const again = await H.travel(lit.id);
+    const still = await H.standStill(2.5);
+    return {away, home, packed, wentHome, again,
+            arrivedIn: H.inDoorway(), stayed: still.moved === false,
+            at: H.districts().current, lits: H.portals().filter(p => p.lit).length};
+  });
+  check('arriving among a pile of old portals does not put him inside one',
+        !clutter.error && clutter.arrivedIn === false, JSON.stringify(clutter));
+  check('and he is not thrown straight back out again',
+        !clutter.error && clutter.stayed === true, JSON.stringify(clutter));
+  check(`the duplicates left by the old code are put out on arrival ` +
+        `(${clutter.lits} lit portal now)`,
+        !clutter.error && clutter.lits === 1, JSON.stringify(clutter));
+  note(`packed ${clutter.packed} old-style return portals in, arrived clear of all of them`);
+
+  // ---- 13c: put him inside a doorway on purpose ------------------------------
+  /* The net under all of the above. Whatever the arrival search does, a portal must
+     never take him somewhere he did not walk into - so the dwell does not start
+     until he has stood clear of every doorway at least once. Tested by putting him
+     inside one deliberately, which is the situation the search is meant to avoid
+     and which I cannot promise it always will. */
+  console.log('\n13c. dropped inside a doorway, he still is not taken anywhere');
+  const grace = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 802);
+    const gy = H.surfaceY(30, 30);
+    for (let y = gy; y < gy + 8; y++) for (let x = 26; x <= 34; x++) {
+      for (let d = -3; d <= 3; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                            fill: ids.GRASS});
+    for (let x = 26; x <= 34; x++) for (let d = -3; d <= 3; d++) {
+      if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+    }
+    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    /* Travel once so the grace is set, then come back and stand in the doorway. */
+    await H.travel(lit.id);
+    const backP = H.portals().filter(p => p.lit)[0];
+    await H.travel(backP.id);
+    const graceOn = H.grace();
+    const parked = await H.standInFront(lit.id, 0.0, H.portalDwell() * 3, true);
+    return {graceOn, parked, inDoorway: H.inDoorway(), stillGrace: H.grace()};
+  });
+  check('the grace is set on arrival', grace.graceOn === true, JSON.stringify(grace));
+  check('standing inside a doorway he was placed in takes him nowhere, ' +
+        'however long he stands there',
+        grace.parked && grace.parked.travelled === false && grace.inDoorway === true,
+        JSON.stringify(grace));
+  note('a portal cannot move him unless he walked into it himself');
+
+  // ---- 14: a portal that came back from the save, used the way he uses it ----
+  /* The one path nothing covered. Every other travel test builds a portal and uses
+     it in the same page session; he builds one, the tablet saves it, he closes the
+     game and comes back tomorrow. Reload, then travel through the restored portal
+     with the real trigger. */
+  console.log('\n14. a portal restored from the save still works after a reload');
+  const reloaded = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    const slug = await H.createDistrict('Reload Home', 'meadow');
+    /* A fixed seed, because createDistrict picks a random one: the terrain in front
+       of the portal then varies run to run, and on some seeds there is genuinely
+       nowhere to stand two blocks out. That made this test fail on the seed rather
+       than on the code. */
+    H.loadThemeSeed('meadow', 803);
+    const gy = H.surfaceY(30, 30);
+    /* Tall enough that no hillside is left overhanging the approach. */
+    for (let y = gy; y < gy + 16; y++) for (let x = 24; x <= 36; x++) {
+      for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                            fill: ids.SAND});
+    for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
+      if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+    }
+    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    const saved = await H.saveNow();
+    return {slug, lit, saved, dest: lit.dest};
+  });
+  check('the portal lit and the district saved before reloading',
+        reloaded.lit.ok && reloaded.saved === true, JSON.stringify(reloaded));
+
+  await page.reload({waitUntil: 'load'});
+  await page.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
+                             {timeout: 60000});
+  const afterReload = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    const here = H.districts().current;
+    const lits = H.portals().filter(p => p.lit);
+    if (!lits.length) return {here, restored: 0};
+    const walked = await H.walkInto(lits[0].id, H.portalDwell() + 1.5);
+    return {here, restored: lits.length, dest: lits[0].dest, walked,
+            now: H.districts().current, storeError: H.storeError()};
+  });
+  check('the lit portal came back from the save',
+        afterReload.restored >= 1, JSON.stringify(afterReload));
+  check('and walking into it after a reload still takes him there',
+        afterReload.walked && afterReload.walked.travelled === true,
+        JSON.stringify(afterReload));
+  check('with no storage error along the way',
+        afterReload.storeError === null || afterReload.storeError === undefined,
+        String(afterReload.storeError));
+  note(`after a reload: ${afterReload.restored} lit portal restored, travel to ` +
+       `${afterReload.now}`);
+
   check('no page errors across the whole run', errs.length === 0, errs.slice(0, 3).join(' | '));
 
   await ctx.close();

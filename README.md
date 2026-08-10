@@ -156,7 +156,13 @@ sand to somewhere sandy, and the district you arrive in is named to suit. Anythi
 from 1&times;2 to 21&times;21 counts, corners optional, and a return portal is
 built on the other side so he can never be stranded &mdash; once, not once per
 visit: coming back to a district that already has a way home puts him out beside
-the portal that is already standing there.
+the portal that is already standing there, and any spare return portals the game
+built before that rule existed are put out on arrival (their obsidian frames stay,
+because the frames are his).
+
+A portal can only ever move him if he **walked into it himself**. Arriving somewhere
+sets a grace that lasts until he is standing clear of every doorway, so however he
+gets placed, he cannot be bounced straight back out again.
 
 To travel, **just walk into it.** A lit portal slows whoever steps into it to a
 crawl and holds them there while a ring fills, about eight tenths of a second
