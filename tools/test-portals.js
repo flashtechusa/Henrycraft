@@ -810,6 +810,49 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
   note(`dwell is ${rest.dwell.dwell}s: ${(rest.dwell.dwell * 0.5).toFixed(2)}s stays put, ` +
        `${(rest.dwell.dwell + 0.3).toFixed(2)}s travels`);
 
+  // ---- 12b: going back and forth must not litter ----------------------------
+  /* Every arrival used to build a fresh return portal, so a district he visits
+     often collected half a dozen identical portals to the same place. */
+  console.log('\n12b. ten trips back and forth leave one way home, not ten');
+  const litter = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    const homeSlug = await H.createDistrict('Litter Home', 'meadow');
+    const gy = H.surfaceY(30, 30);
+    for (let y = gy; y < gy + 8; y++) for (let x = 26; x <= 34; x++) {
+      for (let d = -3; d <= 3; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                            fill: ids.SNOW});
+    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    if (!lit.ok) return {error: 'would not light'};
+
+    const counts = [];
+    let hereId = lit.id;
+    for (let trip = 0; trip < 10; trip++) {
+      const went = await H.travel(hereId);
+      if (!went) return {error: 'travel failed on trip ' + trip, counts};
+      const where = H.districts().current;
+      const lits = H.portals().filter(p => p.lit);
+      counts.push({trip, at: where, lit: lits.length,
+                   toHome: lits.filter(p => p.dest === homeSlug).length,
+                   toAway: lits.filter(p => p.dest === lit.dest).length});
+      /* head back through whatever way out is here */
+      const backP = lits.find(p => p.dest === (where === homeSlug ? lit.dest : homeSlug));
+      if (!backP) return {error: 'no way back on trip ' + trip, counts};
+      hereId = backP.id;
+    }
+    return {counts, homeSlug, away: lit.dest,
+            finalHome: H.portals().filter(p => p.lit).length};
+  });
+  const worst = litter.counts ? Math.max(...litter.counts.map(c => c.lit)) : -1;
+  check(`ten round trips and no district ever holds more than one lit portal ` +
+        `(worst seen: ${worst})`,
+        !litter.error && worst === 1, JSON.stringify(litter.error || litter.counts.slice(-3)));
+  check('and there is always exactly one way back',
+        !litter.error && litter.counts.every(c => c.toHome + c.toAway === 1),
+        JSON.stringify(litter.error || litter.counts.slice(0, 3)));
+  note(`10 round trips: ${worst} lit portal per district throughout`);
+
   // ---- 13: storage failures must never be silent ---------------------------
   /* All three of these used to pass quietly and do the wrong thing. A device with
      no room left is the realistic case - a child who has been building for weeks -

@@ -3817,11 +3817,26 @@ function travelThrough(p){
        arrived inside his own way home. Placing him afterwards means
        standableColumn can see the portal blocks and refuses to put him in
        them. */
-    var centre=safeGroundNear(player.x,player.z,nearAnyDoorway)||
-               safeGroundNear(WX/2,WZ/2,nearAnyDoorway)||
-               safeGroundAnywhere(nearAnyDoorway);
-    var cx=centre?centre.x:Math.floor(WX/2), cz=centre?centre.z:Math.floor(WZ/2);
-    if(from) buildReturnPortal(from,fromTheme,cx,cz);
+    /* Is there already a way back to where he came from? Going back and forth used
+       to leave a fresh return portal behind on every single arrival, so a district
+       he visits often ends up with half a dozen identical portals to the same
+       place. If one is already standing and lit, that is the way home: come out
+       beside it rather than building another. */
+    var back=null;
+    for(var bi=0;bi<portals.length;bi++){
+      if(portals[bi].lit && portals[bi].dest===from){ back=portals[bi]; break; }
+    }
+    var cx,cz;
+    if(back){
+      var bc=portalCentre(back);
+      cx=Math.floor(bc.x); cz=Math.floor(bc.z);
+    } else {
+      var centre=safeGroundNear(player.x,player.z,nearAnyDoorway)||
+                 safeGroundNear(WX/2,WZ/2,nearAnyDoorway)||
+                 safeGroundAnywhere(nearAnyDoorway);
+      cx=centre?centre.x:Math.floor(WX/2); cz=centre?centre.z:Math.floor(WZ/2);
+      if(from) buildReturnPortal(from,fromTheme,cx,cz);
+    }
     /* Clear of the doorway as well as clear of the blocks: now that standing in
        front of a portal counts, being put down in front of the way home would send
        him straight back the moment he stopped to look around. */
