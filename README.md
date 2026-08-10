@@ -92,13 +92,27 @@ that same list before they are drawn, and written with `textContent`. No text fr
 another player can reach the screen, and a test asserts it by feeding the client
 a hostile name directly.
 
-**Eight characters, one per shirt colour.** Other players turn up as their own
-person &mdash; their own hair colour and length, skin tone, top and shoes &mdash;
-with their name over their head. The character follows from the shirt colour,
-which is the one thing about a player the server already validates and passes on,
-so no new field was added to the protocol and the coloured dot beside a name in
-the roster really is that person. Henry keeps the look he has always had, and a
-test asserts he is built from exactly the same 25 pieces and 22 colours as before.
+**Fourteen characters.** Eight anyones, plus six of the family: Pops, GiGi,
+Jonathan, Dad, Mommy and Christian. Everybody turns up as their own person
+&mdash; hair colour and length, bald heads, glasses, beards, skin tone, what they
+wear &mdash; with their name over their head.
+
+**Who are you?** in the pause menu picks one, by looking rather than reading: the
+portraits are drawn from the very same face and palette the body is built from, so
+a card and the person it promises cannot drift apart. Henry's own character is
+picked already, so for him it is one tap on the face he has always had. The choice
+sticks, and what he sees himself as is what the room sees &mdash; a test asserts
+exactly that, because for a while it was not true: the local player was always
+drawn as Henry while everybody else drew him as somebody else.
+
+The names of the family are the **server's** to give. A client sends a number; the
+server supplies the name from a fixed table. Nobody can arrive claiming to be
+Christian, or claiming Christian is called something else, and a number outside the
+list falls back rather than being honoured. There is still no free text anywhere in
+this protocol.
+
+No photographs are in this repository, and none ever were: the likenesses are a
+palette and a handful of flags.
 
 Nobody can affect anybody else. Positions are advisory: they move a mesh and are
 never fed into physics, so a remote player cannot push, trap or startle Henry.

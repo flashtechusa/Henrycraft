@@ -36,6 +36,27 @@ const NAME_SECOND = ['Fox','Otter','Badger','Robin','Hare','Owl','Bear','Wolf',
 const COLOURS = ['#e4d7bb','#c0392b','#2f7fd6','#4fc04f','#f2c231','#9b59b6',
                  '#e67e22','#1abc9c'];
 
+/* Which character somebody is playing as. 0-7 are the anonymous ones, whose name
+   comes from the word lists above; 8 upwards are the family, and their names live
+   here rather than being taken from the client.
+
+   That is the point of putting them here: a name that belongs to a real person -
+   a child among them - can only ever be spelled the way this table spells it. A
+   client cannot arrive claiming to be Christian, or claiming that Christian is
+   called something else. It sends a number; the server supplies the name. */
+const CHARACTER_NAMES = [
+  null, null, null, null, null, null, null, null,
+  'Pops', 'GiGi', 'Jonathan', 'Dad', 'Mommy', 'Christian',
+];
+function safeLook(v) {
+  return Number.isInteger(v) && v >= 0 && v < CHARACTER_NAMES.length ? v : 0;
+}
+/* The name that goes with a look: fixed for the family, from the word list for
+   everybody else. Never free text either way. */
+function nameForLook(look, raw) {
+  return CHARACTER_NAMES[look] || safeName(raw);
+}
+
 function safeName(raw) {
   if (typeof raw !== 'string') return 'Blue Fox';
   const parts = raw.split(' ');
@@ -155,7 +176,8 @@ export class District {
     const out = [];
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
-      if (a && a.id) out.push({id: a.id, name: a.name, colour: a.colour});
+      if (a && a.id) out.push({id: a.id, name: a.name, colour: a.colour,
+                               look: safeLook(a.look)});
     }
     return out;
   }
@@ -172,9 +194,10 @@ export class District {
     if (msg.type === 'join') {
       if (att.id) return;                       // already joined
       const id = 'p' + (this.nextId++) + '-' + Math.random().toString(36).slice(2, 7);
-      const name = safeName(msg.playerName);
+      const look = safeLook(msg.look);
+      const name = nameForLook(look, msg.playerName);
       const colour = safeColour(msg.colour);
-      ws.serializeAttachment({id, name, colour});
+      ws.serializeAttachment({id, name, colour, look});
 
       /* Whose copy wins.
 
@@ -215,7 +238,7 @@ export class District {
         players: this.roster().filter(p => p.id !== id),
         max: MAX_PLAYERS,
       }));
-      this.broadcast({type: 'joined', player: {id, name, colour}}, ws);
+      this.broadcast({type: 'joined', player: {id, name, colour, look}}, ws);
       return;
     }
 

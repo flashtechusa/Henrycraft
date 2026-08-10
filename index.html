@@ -397,6 +397,20 @@ body.touch #hint{display:none}
   border-radius:12px;padding:10px 14px;margin:6px 0 12px;
   word-break:break-all;user-select:all;-webkit-user-select:all
 }
+#whoGrid{
+  display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:6px 0 12px
+}
+.ccard{
+  background:rgba(11,20,32,.35);border:3px solid rgba(255,255,255,.22);
+  border-radius:12px;padding:6px 6px 4px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:2px
+}
+.ccard.on{border-color:var(--sun);background:rgba(242,194,49,.20)}
+.ccard canvas{
+  width:54px;height:68px;image-rendering:pixelated;
+  image-rendering:-moz-crisp-edges;image-rendering:crisp-edges
+}
+.ccard b{font-size:11px;font-weight:900;letter-spacing:.04em}
 #roster{display:flex;flex-direction:column;gap:6px;margin:4px 0 10px}
 .rosterRow{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
 .rosterRow .dot{
@@ -536,11 +550,21 @@ body.touch #hint{display:none}
     <div class="pickhead">Read this out to whoever wants to join</div>
     <div id="joinCode"></div>
     <button class="blockbtn" id="tCopy">🔗 Copy the link</button>
+    <button class="blockbtn" id="tWho">🙂 Who am I?</button>
     <div class="pickhead">Who is here</div>
     <div id="roster"></div>
     <small id="tStatus"></small>
     <button class="blockbtn go" id="tDone">Keep playing</button>
     <button class="blockbtn" id="tAlone">👤 Play alone again</button>
+  </div>
+</div>
+
+<div class="overlay hide" id="whoAmI">
+  <div class="card wide">
+    <h2>Who are you?</h2>
+    <div class="pickhead">Tap yourself. Everybody else sees you like this.</div>
+    <div id="whoGrid"></div>
+    <button class="blockbtn go" id="whoDone">That's me</button>
   </div>
 </div>
 
@@ -1744,7 +1768,8 @@ scene.add(ghost);
    Cached per look: eight 32x32 canvases is nothing, eight per avatar would not be. */
 var faceTexCache={};
 function faceTextureFor(L){
-  var k=L.skin+'|'+L.skinTop+'|'+L.brow+'|'+L.cheek+'|'+L.freckle;
+  var k=[L.skin,L.skinTop,L.brow,L.cheek,L.freckle,L.glasses||'',L.beard||'',
+         L.stubble||'',L.freckles===false?'0':'1'].join('|');
   if(!faceTexCache[k]) faceTexCache[k]=faceTexture(L);
   return faceTexCache[k];
 }
@@ -1762,14 +1787,37 @@ function faceTexture(L){
   c.fillStyle='#ffffff'; c.fillRect(10,15,1,1); c.fillRect(23,15,1,1);
   /* rosy cheeks */
   c.fillStyle=L.cheek; c.fillRect(2,19,5,4); c.fillRect(25,19,5,4);
-  /* freckles across the nose */
-  c.fillStyle=L.freckle;
-  [[11,20],[13,21],[9,22],[19,20],[21,21],[23,22],[15,19],[16,21],[14,18],[18,18]]
-    .forEach(function(q){ c.fillRect(q[0],q[1],1,1); });
+  /* freckles across the nose - Henry's, and anybody else who wants them */
+  if(L.freckles!==false){
+    c.fillStyle=L.freckle;
+    [[11,20],[13,21],[9,22],[19,20],[21,21],[23,22],[15,19],[16,21],[14,18],[18,18]]
+      .forEach(function(q){ c.fillRect(q[0],q[1],1,1); });
+  }
+  /* A beard covers the jaw and upper lip before the mouth goes on, so the grin
+     still shows through it. Stubble is the same shape drawn faintly. */
+  if(L.beard||L.stubble){
+    c.save();
+    if(L.stubble) c.globalAlpha=0.45;
+    c.fillStyle=L.beard||L.stubble;
+    c.fillRect(6,26,20,6);            /* chin and jaw */
+    c.fillRect(9,22,14,3);            /* moustache above the mouth */
+    c.fillRect(4,22,3,9); c.fillRect(25,22,3,9);   /* sideburns down to the jaw */
+    c.restore();
+  }
   /* big open grin */
   c.fillStyle='#a8503f'; c.fillRect(11,24,10,3);
   c.fillStyle='#ffffff'; c.fillRect(12,24,8,1);
   c.fillStyle='#a8503f'; c.fillRect(10,22,1,2); c.fillRect(21,22,1,2);
+  /* Glasses last, so they sit in front of everything - two lenses and a bridge,
+     which at this size is all a pair of glasses can be. */
+  if(L.glasses){
+    c.fillStyle=L.glasses;
+    c.fillRect(4,12,10,8); c.fillRect(18,12,10,8);   /* frames */
+    c.fillRect(14,15,4,2);                            /* bridge */
+    c.fillRect(2,14,2,2); c.fillRect(28,14,2,2);      /* arms */
+    c.fillStyle='rgba(255,255,255,0.20)';
+    c.fillRect(6,14,6,4); c.fillRect(20,14,6,4);      /* a hint of lens */
+  }
   var t=new THREE.CanvasTexture(cv);
   t.magFilter=THREE.NearestFilter; t.minFilter=THREE.NearestFilter; t.generateMipmaps=false;
   if(THREE.sRGBEncoding!==undefined) t.encoding=THREE.sRGBEncoding;
@@ -1856,8 +1904,61 @@ var LOOKS=[
   /* 7 long black, teal top */
   {shirt:0x1abc9c, stripe:0x0e6b59, collar:0xf4ecd9, shoe:0xf2c231,
    hairCol:0x120f0d, hairHi:0x241d18, skinNum:0x9c6742, long:true,
-   skin:'#9c6742', skinTop:'#8a5a39', brow:'#120f0d', cheek:'#98593f', freckle:'#875532'}
+   skin:'#9c6742', skinTop:'#8a5a39', brow:'#120f0d', cheek:'#98593f', freckle:'#875532'},
+
+  /* ---- the family ----
+     Built from photographs, and worth being honest about what that can mean at
+     this size: a head is sixteen pixels across, so what carries is hair colour and
+     length, a bald head, glasses, a beard, and the colour somebody actually wears.
+     Nobody's face is in here. The photographs are not in the repository either -
+     only these numbers and a first name. */
+
+  /* 8 Pops - bald, dark glasses, white goatee, red shirt */
+  {name:'Pops',
+   shirt:0xc0392b, stripe:0x7b241c, collar:0x2b2b30, shoe:0x2f3138,
+   hairCol:0xd8d8de, hairHi:0xe8e6e2, skinNum:0xe8c19a, shortsCol:0x2f3138, bald:true,
+   skin:'#e8c19a', skinTop:'#d8b18b', brow:'#cfc9c2', cheek:'#e0a288',
+   freckle:'#d8b18b', freckles:false, glasses:'#26262b', beard:'#e8e6e2'},
+
+  /* 9 GiGi - long auburn, black top */
+  {name:'GiGi',
+   shirt:0x2b2b30, stripe:0xe67e22, collar:0x45454c, shoe:0x2b2b30,
+   hairCol:0x7a2e22, hairHi:0x9b4030, skinNum:0xf0c8a4, shortsCol:0x2b2b30, long:true,
+   skin:'#f0c8a4', skinTop:'#e0b795', brow:'#5a2a1e', cheek:'#eda491',
+   freckle:'#dda87f', freckles:false},
+
+  /* 10 Jonathan - tall dark quiff, goatee, maroon shirt with a grey collar */
+  {name:'Jonathan',
+   shirt:0xa83232, stripe:0x8d2a2a, collar:0x6f7378, shoe:0x2b2b30,
+   hairCol:0x241a16, hairHi:0x3a2a22, skinNum:0xe9c1a0, shortsCol:0x3a3a40, quiff:true,
+   skin:'#e9c1a0', skinTop:'#d9b18f', brow:'#241a16', cheek:'#e39f89',
+   freckle:'#d3a781', freckles:false, beard:'#3a2a22'},
+
+  /* 11 Dad - short brown hair, ginger beard, salmon shirt, white shorts */
+  {name:'Dad',
+   shirt:0xe79a94, stripe:0xd4837c, collar:0xf0ece4, shoe:0xf0ece4,
+   hairCol:0x6b4a2f, hairHi:0x82603f, skinNum:0xeec9a6, shortsCol:0xf0ece4,
+   skin:'#eec9a6', skinTop:'#dfb994', brow:'#6b4a2f', cheek:'#e8a48f',
+   freckle:'#d8ab83', freckles:false, beard:'#8a5a2b'},
+
+  /* 12 Mommy - long blonde, yellow */
+  {name:'Mommy',
+   shirt:0xf5e06a, stripe:0xe8cf4e, collar:0xf9efa8, shoe:0xf0ece4,
+   hairCol:0xdcc07a, hairHi:0xf0daa0, skinNum:0xf3d2b0, long:true,
+   shortsCol:0xf5e06a,
+   skin:'#f3d2b0', skinTop:'#e4c29f', brow:'#c0a45f', cheek:'#f0aa96',
+   freckle:'#dfb187', freckles:false},
+
+  /* 13 Christian - curly fair hair, dinosaur shirt, gingham shorts */
+  {name:'Christian',
+   shirt:0xf4f1ea, stripe:0x4fc04f, collar:0x4fc04f, shoe:0xf4f1ea,
+   hairCol:0xb98a4e, hairHi:0xd0a468, skinNum:0xf6d8ba, shortsCol:0x7f9fd0,
+   skin:'#f6d8ba', skinTop:'#e8c8a8', brow:'#a87d45', cheek:'#f4a894',
+   freckle:'#dcb188'}
 ];
+/* Named characters take their name from here, and so does the server: nobody can
+   arrive claiming to be somebody they picked out of a list of real people. */
+function lookName(i){ return (LOOKS[i]&&LOOKS[i].name)||null; }
 function lookForColour(hex){
   var i=MP_COLOURS.indexOf(mpSafeColour(hex));
   return LOOKS[i>=0?i%LOOKS.length:0];
@@ -1869,7 +1970,11 @@ function buildAvatar(L,tagText){
   var shirtMat = new THREE.MeshLambertMaterial({color:srgb(SHIRT)});
   var hairMat  = new THREE.MeshLambertMaterial({color:srgb(HAIR)});
   var hairHi   = new THREE.MeshLambertMaterial({color:srgb(HAIR_HI)});
-  var shortsMat= new THREE.MeshLambertMaterial({map:(shortsTex||(shortsTex=shortsTexture()))});
+  /* A flat colour instead of Henry's patterned swim shorts, for anybody whose
+     legs are not in swim shorts. */
+  var shortsMat= L.shortsCol!==undefined
+    ? new THREE.MeshLambertMaterial({color:srgb(L.shortsCol)})
+    : new THREE.MeshLambertMaterial({map:(shortsTex||(shortsTex=shortsTexture()))});
   var shoeMat  = new THREE.MeshLambertMaterial({color:srgb(SHOE)});
   var redMat   = new THREE.MeshLambertMaterial({color:srgb(L.stripe)});
   var blueMat  = new THREE.MeshLambertMaterial({color:srgb(L.collar)});
@@ -1886,16 +1991,26 @@ function buildAvatar(L,tagText){
     [skinMat,skinMat,skinMat,skinMat,faceMat,skinMat]);
   head.position.y=1.28; g.add(head); parts.head=head;
 
-  var cap=box(0.455,0.13,0.455,hairMat);  cap.position.set(0,0.205,0);       head.add(cap);
-  /* Longer hair down the back on some characters, so they are told apart by
-     silhouette and not only by colour. */
-  var back=L.long?box(0.47,0.44,0.09,hairMat):box(0.455,0.26,0.07,hairMat);
-  back.position.set(0,L.long?-0.05:0.06,L.long?-0.222:-0.215);
-  head.add(back);
-  var sideL=box(0.065,0.16,0.44,hairMat); sideL.position.set(-0.215,0.13,0); head.add(sideL);
-  var sideR=box(0.065,0.16,0.44,hairMat); sideR.position.set( 0.215,0.13,0); head.add(sideR);
-  var fringe=box(0.40,0.085,0.085,hairHi);fringe.position.set(0,0.155,0.19); head.add(fringe);
-  var swoop=box(0.15,0.11,0.13,hairHi);   swoop.position.set(-0.075,0.28,0.10); head.add(swoop);
+  /* A bald head gets no hair at all - not a skin-coloured cap, which reads as a
+     swimming hat. The head texture already carries the skin. */
+  if(!L.bald){
+    var cap=box(0.455,0.13,0.455,hairMat);  cap.position.set(0,0.205,0);       head.add(cap);
+    /* Longer hair down the back on some characters, so they are told apart by
+       silhouette and not only by colour. */
+    var back=L.long?box(0.47,0.44,0.09,hairMat):box(0.455,0.26,0.07,hairMat);
+    back.position.set(0,L.long?-0.05:0.06,L.long?-0.222:-0.215);
+    head.add(back);
+    var sideL=box(0.065,0.16,0.44,hairMat); sideL.position.set(-0.215,0.13,0); head.add(sideL);
+    var sideR=box(0.065,0.16,0.44,hairMat); sideR.position.set( 0.215,0.13,0); head.add(sideR);
+    var fringe=box(0.40,0.085,0.085,hairHi);fringe.position.set(0,0.155,0.19); head.add(fringe);
+    if(L.quiff){
+      /* Swept up and back, which is most of what that haircut is from a distance. */
+      var qf=box(0.34,0.24,0.20,hairMat);  qf.position.set(0,0.34,0.09);  head.add(qf);
+      var qh=box(0.26,0.10,0.16,hairHi);   qh.position.set(0,0.45,0.05);  head.add(qh);
+    } else {
+      var swoop=box(0.15,0.11,0.13,hairHi); swoop.position.set(-0.075,0.28,0.10); head.add(swoop);
+    }
+  }
 
   /* cream sleeves, bare hands */
   parts.armL=limb(0.13,0.38,0.18,shirtMat,true); parts.armL.position.set(-0.275,1.04,0);
@@ -4578,21 +4693,85 @@ function mpSetStatus(s){ mp.status=s; mpPaintPanel(); }
 
 /* A name and shirt colour that stick, so he is the same player tomorrow. */
 var mpMe=null;
+/* Which of the eight you are. The colour is the character - it is what travels, so
+   choosing a character is choosing a colour - and it defaults to 0, which is Henry
+   himself: his game, his face, and nothing changes for him unless he picks. `chosen`
+   records whether anybody actually decided, so the picker can offer itself once
+   rather than every time. */
 function mpIdentity(){
   if(mpMe) return Promise.resolve(mpMe);
   return readJSON(ME_KEY).then(function(rec){
     if(rec && mpSafeName(rec.name)===rec.name){
-      mpMe={name:rec.name, colour:mpSafeColour(rec.colour)};
+      /* Records written before characters existed carry a randomly picked colour,
+         which would silently make him somebody else. Nobody is anybody but Henry
+         until they say so. */
+      mpMe={name:rec.name, chosen:!!rec.chosen,
+            look:rec.chosen?safeLookIndex(rec.look):0,
+            colour:rec.chosen?mpSafeColour(rec.colour):MP_COLOURS[0]};
+      applyLocalLook();
       return mpMe;
     }
-    var r=mpRandom(3);
+    var r=mpRandom(2);
     mpMe={name:MP_FIRST[r[0]%MP_FIRST.length]+' '+MP_SECOND[r[1]%MP_SECOND.length],
-          colour:MP_COLOURS[r[2]%MP_COLOURS.length]};
+          look:0, colour:MP_COLOURS[0], chosen:false};
+    applyLocalLook();
     return writeJSON(ME_KEY,mpMe).then(function(){ return mpMe; });
   }).catch(function(){
-    mpMe={name:'Blue Fox', colour:MP_COLOURS[0]};
+    mpMe={name:'Blue Fox', look:0, colour:MP_COLOURS[0], chosen:false};
     return mpMe;
   });
+}
+/* Apply a character chosen on an earlier day, at start-up, without writing
+   anything: your character is your character whether or not anybody else is
+   playing. Deliberately read-only - tools/test-offline.js counts the keys a solo
+   session writes, and this must not add one. */
+function applyStoredLook(){
+  return readJSON(ME_KEY).then(function(rec){
+    if(rec && rec.chosen){
+      mpMe={name:mpSafeName(rec.name), look:safeLookIndex(rec.look),
+            colour:mpSafeColour(rec.colour), chosen:true};
+      applyLocalLook();
+    }
+  }).catch(function(){});
+}
+/* Rebuild the body he walks around in so it is the character everybody else is
+   already drawing for him.
+
+   Without this, the local player is always Henry to himself and somebody else to
+   the room - which is exactly how it looked on two devices side by side. The tag
+   keeps saying HENRY while he is Henry, and takes his player name once he is
+   somebody else, so a name over a head means the same thing on every screen. */
+function safeLookIndex(v){
+  v=v|0;
+  return (v>=0&&v<LOOKS.length)?v:0;
+}
+function localLookIndex(){ return mpMe?safeLookIndex(mpMe.look):0; }
+/* The dot beside a name in the roster is the shirt that character wears. */
+function lookDot(i){
+  return '#'+('000000'+LOOKS[safeLookIndex(i)].shirt.toString(16)).slice(-6);
+}
+function applyLocalLook(){
+  var i=localLookIndex();
+  var tag=lookName(i)?lookName(i).toUpperCase()
+                     :((i===0||!mpMe)?'HENRY':mpSafeName(mpMe.name).toUpperCase());
+  if(henry && henry.parent) scene.remove(henry);
+  var b=buildAvatar(LOOKS[i%LOOKS.length],tag);
+  henry=b.group; hParts=b.parts;
+  scene.add(henry);
+}
+function chooseCharacter(i){
+  i=safeLookIndex(i);
+  if(!mpMe) mpMe={name:'Blue Fox', look:0, colour:MP_COLOURS[0], chosen:false};
+  mpMe.look=i;
+  mpMe.colour=MP_COLOURS[i%MP_COLOURS.length];
+  mpMe.chosen=true;
+  applyLocalLook();
+  /* Tell the room, if there is one: leaving and rejoining is how a colour change
+     reaches everybody, and it costs a reconnect rather than a protocol field. */
+  if(mp.wanted && mp.ws){
+    try{ mp.ws.close(4000,'changed character'); }catch(e){}
+  }
+  return writeJSON(ME_KEY,mpMe);
 }
 
 /* Portals stay a solo feature: the protocol carries blocks, not portal records,
@@ -4661,6 +4840,7 @@ function mpConnect(){
   ws.onopen=function(){
     mp.retry=0;
     mpSend({type:'join', playerName:mpMe.name, colour:mpMe.colour,
+            look:localLookIndex(),
             offer:{seed:seed, starSeed:starSeed, theme:theme.key,
                    edits:mpShareableEdits()}});
   };
@@ -4812,12 +4992,17 @@ function mpRemoteEdit(m){
 function mpAddPlayer(p){
   if(!p || typeof p.id!=='string' || mp.players[p.id]) return;
   if(p.id===mp.me) return;
-  var label=mpSafeName(p.name);
-  var look=lookForColour(p.colour);
+  /* A named character's label comes from the character, not from the wire: the
+     server sends the name it chose for that number, and this is the only spelling
+     the game will draw. Everybody else keeps a name from the word list. */
+  var idx=safeLookIndex(p.look);
+  var label=lookName(idx)||mpSafeName(p.name);
+  var look=LOOKS[idx];
   var built=buildAvatar(look, label.toUpperCase());
   built.group.visible=false;             /* until we know where they are */
   scene.add(built.group);
   mp.players[p.id]={id:p.id, label:label, colour:mpSafeColour(p.colour), look:look,
+                    lookIndex:idx,
                     group:built.group, parts:built.parts,
                     from:null, to:null, t:1, walk:0, speed:0};
 }
@@ -4931,18 +5116,21 @@ function mpPaintPanel(){
      identity becomes pixels, and it is why there is no path from what somebody
      else sends to what he reads. */
   while(host.firstChild) host.removeChild(host.firstChild);
-  var rows=[{label:(mpMe&&mpMe.name)||'You', colour:(mpMe&&mpMe.colour)||MP_COLOURS[0], me:true}];
+  var meIdx=localLookIndex();
+  var rows=[{label:lookName(meIdx)||((mpMe&&mpMe.name)||'You'), dot:lookDot(meIdx), me:true}];
   for(var id in mp.players){
-    rows.push({label:mp.players[id].label, colour:mp.players[id].colour, me:false});
+    rows.push({label:mp.players[id].label, dot:lookDot(mp.players[id].lookIndex), me:false});
   }
   rows.forEach(function(r){
     var row=document.createElement('div');
     row.className='rosterRow';
     var dot=document.createElement('span');
     dot.className='dot';
-    dot.style.background=mpSafeColour(r.colour);
+    dot.style.background=r.dot;
     var nm=document.createElement('span');
-    nm.textContent=mpSafeName(r.label)+(r.me?' (you)':'');
+    /* Only ever a name this build already knows: a character's own name, or one
+       from the word list. Nothing that arrived as text is drawn. */
+    nm.textContent=r.label+(r.me?' (you)':'');
     row.appendChild(dot); row.appendChild(nm);
     host.appendChild(row);
   });
@@ -4985,6 +5173,67 @@ function mpJoinByCode(raw){
 }
 
 
+/* A portrait of each character, drawn from the very same face texture and palette
+   the body is built from, so the card and the person cannot drift apart. He picks
+   by looking - there is nothing to read. */
+function paintCharacterCard(cv,i){
+  var L=LOOKS[i%LOOKS.length];
+  var W=54,H=68;
+  cv.width=W; cv.height=H;
+  var c=cv.getContext('2d');
+  c.clearRect(0,0,W,H);
+  c.imageSmoothingEnabled=false;
+  function fill(col,x,y,w,h){ c.fillStyle='#'+('000000'+col.toString(16)).slice(-6);
+                              c.fillRect(x,y,w,h); }
+  /* shoulders and top */
+  fill(L.shirt,9,44,36,20);
+  fill(L.stripe,9,50,36,4);
+  fill(L.collar,18,44,18,3);
+  /* head, using the real face */
+  var face=faceTextureFor(L).image;
+  c.drawImage(face,0,0,32,32,11,10,32,32);
+  /* Hair, and only if there is any: a card that gives Pops a full head of hair
+     while his body is bald is a card that is lying about who you are picking. */
+  if(!L.bald){
+    fill(L.hairCol,9,6,36,8);
+    fill(L.hairHi,13,4,28,3);
+    fill(L.hairCol,9,6,5,L.long?38:20);
+    fill(L.hairCol,40,6,5,L.long?38:20);
+    if(L.quiff){ fill(L.hairCol,14,0,26,7); fill(L.hairHi,17,0,20,3); }
+  }
+  return {w:W,h:H};
+}
+function buildCharacterGrid(){
+  var grid=el('whoGrid');
+  while(grid.firstChild) grid.removeChild(grid.firstChild);
+  var mine=localLookIndex();
+  for(var i=0;i<LOOKS.length;i++){
+    (function(idx){
+      var card=document.createElement('div');
+      card.className='ccard'+(idx===mine?' on':'');
+      var cv=document.createElement('canvas');
+      paintCharacterCard(cv,idx);
+      card.appendChild(cv);
+      /* Named characters say who they are. The anonymous ones stay unlabelled so
+         the family is easy to find among them. */
+      var who=idx===0?'Henry':lookName(idx);
+      if(who){ var b=document.createElement('b'); b.textContent=who; card.appendChild(b); }
+      card.addEventListener('click',function(){
+        chooseCharacter(idx).then(function(){
+          buildCharacterGrid();
+          mpPaintPanel();
+        });
+        tone(700,0.05,'sine',0.04);
+      });
+      grid.appendChild(card);
+    })(i);
+  }
+}
+function showWhoAmI(){
+  buildCharacterGrid();
+  el('whoAmI').classList.remove('hide');
+}
+
 /* ---- the buttons ----
    Turning sharing on is one press. Turning it off is a press inside the panel
    rather than the same button toggling straight back, so a mis-tap cannot end a
@@ -5000,6 +5249,16 @@ el('mTogether').addEventListener('click',function(){
   toggleMenu(false);
   if(!mp.wanted) mpStart(null);
   mpShowTogether();
+  /* First time anybody shares from this device, ask who they are. Henry's own
+     character is already selected, so for him it is one tap on the same face he
+     has always had. */
+  mpIdentity().then(function(me){
+    if(!me.chosen) showWhoAmI();
+  });
+});
+el('tWho').addEventListener('click',showWhoAmI);
+el('whoDone').addEventListener('click',function(){
+  el('whoAmI').classList.add('hide');
 });
 el('tDone').addEventListener('click',function(){
   el('together').classList.add('hide');
@@ -5146,6 +5405,7 @@ function boot(){
     enterDistrict(rec);
     buildDistrictList();
     ready=true;
+    applyStoredLook();
     mpDeepLink();
   });
   frame();
@@ -5493,7 +5753,7 @@ window.__henrycraft={
   tryLight:function(x,y,z){ return tryLightPortal(x,y,z); },
   /* Stand all eight characters in a row where the start-screen camera is already
      looking, so they can be seen rather than taken on trust. */
-  lineup:function(){
+  lineup:function(from,to){
     /* Flat, clear ground of its own: the spawn is usually on a hillside, and eight
        avatars planted at the player's own height end up buried in it. */
     var g=safeGroundAnywhere()||{x:Math.floor(WX/2),y:20,z:Math.floor(WZ/2)};
@@ -5510,16 +5770,18 @@ window.__henrycraft={
     var fx=player.x-camera.position.x, fz=player.z-camera.position.z;
     var fl=Math.hypot(fx,fz)||1; fx/=fl; fz/=fl;
     var px=-fz, pz=fx;
-    var out=[];
-    for(var i=0;i<LOOKS.length;i++){
-      var a=buildAvatar(LOOKS[i],'P'+(i+1));
-      var off=(i-(LOOKS.length-1)/2)*1.25;
+    var lo=from===undefined?0:from, hi=to===undefined?LOOKS.length-1:to;
+    var n=hi-lo+1, out=[];
+    for(var i=lo;i<=hi;i++){
+      var a=buildAvatar(LOOKS[i],(lookName(i)||('P'+(i+1))).toUpperCase());
+      var off=((i-lo)-(n-1)/2)*1.25;
       a.group.position.set(player.x-fx*3.0+px*off, y, player.z-fz*3.0+pz*off);
       a.group.rotation.y=Math.atan2(fx,fz)+Math.PI;
       scene.add(a.group);
-      out.push({i:i,shirt:LOOKS[i].shirt.toString(16),hair:LOOKS[i].hairCol.toString(16),
+      out.push({i:i,name:lookName(i),shirt:LOOKS[i].shirt.toString(16),
+                hair:LOOKS[i].hairCol.toString(16),
                 skin:LOOKS[i].skinNum.toString(16),shoe:LOOKS[i].shoe.toString(16),
-                long:!!LOOKS[i].long});
+                long:!!LOOKS[i].long,bald:!!LOOKS[i].bald,quiff:!!LOOKS[i].quiff});
     }
     for(var ci=0;ci<chunks.length;ci++) chunks[ci].dirty=true;
     rebuildAll();
@@ -5527,9 +5789,11 @@ window.__henrycraft={
   },
   looks:function(){
     return LOOKS.map(function(L){
-      return {shirt:L.shirt,hair:L.hairCol,hairHi:L.hairHi,skin:L.skinNum,
-              shoe:L.shoe,stripe:L.stripe,collar:L.collar,long:!!L.long,
-              face:[L.skin,L.skinTop,L.brow,L.cheek,L.freckle].join(',')};
+      return {name:L.name||null,shirt:L.shirt,hair:L.hairCol,hairHi:L.hairHi,
+              skin:L.skinNum,shoe:L.shoe,stripe:L.stripe,collar:L.collar,
+              long:!!L.long,bald:!!L.bald,quiff:!!L.quiff,
+              face:[L.skin,L.skinTop,L.brow,L.cheek,L.freckle,
+                    L.glasses||'',L.beard||''].join(',')};
     });
   },
   lookForColour:function(hex){
@@ -5537,6 +5801,22 @@ window.__henrycraft={
     return {shirt:L.shirt,hair:L.hairCol,skin:L.skinNum,long:!!L.long};
   },
   colours:function(){ return MP_COLOURS.slice(); },
+  /* Which character the local player is walking around as - the property that was
+     wrong: he was always Henry to himself and somebody else to the room. */
+  localLook:function(){
+    var i=localLookIndex();
+    return {index:i, shirt:LOOKS[i].shirt, hair:LOOKS[i].hairCol,
+            skin:LOOKS[i].skinNum, colour:mpMe?mpMe.colour:MP_COLOURS[0],
+            chosen:!!(mpMe&&mpMe.chosen)};
+  },
+  chooseCharacter:chooseCharacter,
+  cardPixels:function(i){
+    var cv=document.createElement('canvas');
+    paintCharacterCard(cv,i);
+    var d=cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data, out=0;
+    for(var k=3;k<d.length;k+=4) if(d[k]>200) out++;
+    return {w:cv.width,h:cv.height,opaque:out};
+  },
   /* Recreate the mess the old code left: a crowd of lit return portals to the same
      district, all close together. */
   packWithReturnPortals:function(destSlug,n){
@@ -5599,7 +5879,7 @@ window.__henrycraft={
         var p=mp.players[id];
         return {id:id, label:p.label, colour:p.colour, visible:p.group.visible,
                 shirt:p.look.shirt, hair:p.look.hairCol, skin:p.look.skinNum,
-                longHair:!!p.look.long,
+                longHair:!!p.look.long, lookIndex:p.lookIndex,
                 x:+p.group.position.x.toFixed(2), y:+p.group.position.y.toFixed(2),
                 z:+p.group.position.z.toFixed(2), yaw:p.yawNow||0};
       });

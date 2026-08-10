@@ -96,7 +96,7 @@ async function startWorker(port) {
 }
 
 /* A player that is not a browser: used where the test is about the server. */
-function rawClient(port, code, name, colour, offer) {
+function rawClient(port, code, name, colour, offer, look) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/district/${code}`);
     const got = [];
@@ -107,6 +107,9 @@ function rawClient(port, code, name, colour, offer) {
       clearTimeout(timer);
       const join = {type: 'join', playerName: name, colour};
       if (offer) join.offer = offer;
+      /* In the first join or not at all: the server ignores a second one, which is
+         correct and is how this test first fooled itself. */
+      if (look !== undefined) join.look = look;
       ws.send(JSON.stringify(join));
       resolve({
         ws, got,
@@ -505,38 +508,120 @@ function requireNode22() {
               longHaired: L.filter(l => l.long).length,
               henryShirt: L[0].shirt, henryHair: L[0].hair, henrySkin: L[0].skin,
               byColour: cols.map(c => H.lookForColour(c).shirt),
+              named: L.map(l => l.name).filter(Boolean),
               unknownColour: H.lookForColour('#not-a-colour').shirt};
     });
-    check(`there are ${looks.n} characters, one for each of the ${looks.colours} colours`,
-          looks.n === 8 && looks.colours === 8, JSON.stringify(looks));
+    check(`there are ${looks.n} characters: eight anyones and the family`,
+          looks.n === 14 && looks.colours === 8, JSON.stringify(looks));
     check('no two characters share a hair, skin, shirt and shoe combination',
           looks.distinct === looks.n, `${looks.distinct} distinct of ${looks.n}`);
     check(`each has its own face, drawn for its own skin (${looks.faces} of ${looks.n})`,
           looks.faces === looks.n, `${looks.faces} distinct faces`);
-    check(`three of them have long hair, so they differ in silhouette too ` +
+    check(`several have long hair, so they differ in silhouette too ` +
           `(${looks.longHaired})`,
-          looks.longHaired >= 2, String(looks.longHaired));
+          looks.longHaired >= 4, String(looks.longHaired));
     check('Henry is still the ginger one in the cream top',
           looks.henryShirt === 0xe4d7bb && looks.henryHair === 0xc9682f &&
           looks.henrySkin === 0xefc49c, JSON.stringify(looks));
     check('every colour maps to its own character, and an unknown colour falls back',
           new Set(looks.byColour).size === 8 && looks.unknownColour === 0xe4d7bb,
           JSON.stringify(looks.byColour.map(v => v.toString(16))));
+    check(`the family are all there and named (${looks.named.join(', ')})`,
+          looks.named.join(',') === 'Pops,GiGi,Jonathan,Dad,Mommy,Christian',
+          JSON.stringify(looks.named));
 
     /* End to end: the character another player is drawn as has to follow from the
        colour that actually came over the wire. */
     const seen = await A.evaluate(() => {
       const H = window.__henrycraft;
-      return H.mp.players().map(p => ({colour: p.colour, shirt: p.shirt,
-                                       hair: p.hair, expect: H.lookForColour(p.colour)}));
+      return H.mp.players().map(p => ({colour: p.colour, shirt: p.shirt, hair: p.hair,
+                                       lookIndex: p.lookIndex,
+                                       expect: H.looks()[p.lookIndex]}));
     });
-    check(`remote players are drawn as the character their colour names ` +
+    check(`remote players are drawn as the character they said they are ` +
           `(${seen.length} checked)`,
           seen.length > 0 && seen.every(p => p.shirt === p.expect.shirt &&
                                             p.hair === p.expect.hair),
           JSON.stringify(seen));
+
+    /* The names of real people are the server's to give, not the client's to
+       claim. A raw client asks to be character 8 while calling itself something
+       else entirely; the room must show it as Pops, and an out-of-range character
+       must fall back rather than be honoured. */
+    const impostor = await rawClient(wPort, c1, '<script>alert(1)</script>',
+                                     '#c0392b', null, 8);
+    await sleep(900);
+    const asSeen = await A.evaluate(() => window.__henrycraft.mp.players()
+                      .map(p => ({label: p.label, look: p.lookIndex})));
+    check('a client claiming a family name is shown the name the server chose',
+          asSeen.some(p => p.label === 'Pops') &&
+          !asSeen.some(p => /script|Definitely/.test(p.label)),
+          JSON.stringify(asSeen));
+    const outOfRange = await rawClient(wPort, c1, 'Blue Fox', '#2f7fd6', null, 999);
+    await sleep(700);
+    const fell = await A.evaluate(() => {
+      const H = window.__henrycraft, n = H.looks().length;
+      const all = H.mp.players();
+      return {ok: all.every(p => Number.isInteger(p.lookIndex) &&
+                                 p.lookIndex >= 0 && p.lookIndex < n),
+              seen: all.map(p => ({label: p.label, look: p.lookIndex}))};
+    });
+    check('a character number outside the list falls back instead of being honoured',
+          fell.ok, JSON.stringify(fell.seen));
+    impostor.close(); outOfRange.close();
     note(`characters: ${looks.n} distinct, ${looks.longHaired} long-haired, ` +
          `${looks.faces} faces drawn per skin tone`);
+
+    /* ---- the same person on every screen ----
+       The bug this is here for: the local player was always drawn as Henry, while
+       everybody else drew him as whatever his colour said. Two devices side by side
+       showed two different people, and moving "your Henry" moved somebody else's
+       character on their screen. What he sees himself as and what the room sees have
+       to be the same character. */
+    console.log('\nThe same character on every screen');
+    const aName = await A.evaluate(() => window.__henrycraft.mp.me().name);
+    const aLook = await A.evaluate(() => window.__henrycraft.localLook());
+    const bSawBefore = await B.evaluate(n => (window.__henrycraft.mp.players()
+                          .find(p => p.label === n) || {}).shirt, aName);
+    check('what he sees himself as is what the room sees him as',
+          aLook.shirt === bSawBefore,
+          JSON.stringify({heSees: aLook.shirt, roomSees: bSawBefore, name: aName}));
+
+    /* Pick a different character, and it has to travel. */
+    await A.evaluate(() => window.__henrycraft.chooseCharacter(3));
+    const picked = await A.evaluate(() => window.__henrycraft.localLook());
+    const travelled = await waitFor(B, ({n, shirt}) => {
+      const p = window.__henrycraft.mp.players().find(q => q.label === n);
+      return !!p && p.shirt === shirt;
+    }, {n: aName, shirt: picked.shirt}, 40000);
+    const bSawAfter = await B.evaluate(n => (window.__henrycraft.mp.players()
+                         .find(p => p.label === n) || {}).shirt, aName);
+    check('choosing a character changes the body he walks around in',
+          picked.index === 3 && picked.chosen === true, JSON.stringify(picked));
+    check('and the room is drawing him as that character too',
+          travelled && bSawAfter === picked.shirt,
+          JSON.stringify({heSees: picked.shirt, roomSees: bSawAfter}));
+
+    /* The picker itself: eight cards, each actually drawn. */
+    const cards = await A.evaluate(() => {
+      const H = window.__henrycraft;
+      const out = [];
+      for (let i = 0; i < H.looks().length; i++) out.push(H.cardPixels(i));
+      document.getElementById('tWho').click();
+      const open = !document.getElementById('whoAmI').classList.contains('hide');
+      const n = document.querySelectorAll('#whoGrid .ccard').length;
+      const marked = document.querySelectorAll('#whoGrid .ccard.on').length;
+      document.getElementById('whoDone').click();
+      return {out, open, n, marked};
+    });
+    check(`the picker shows ${cards.n} faces, with the current one marked`,
+          cards.open && cards.n === 14 && cards.marked === 1,
+          JSON.stringify({open: cards.open, n: cards.n, marked: cards.marked}));
+    check('every card is actually drawn, not an empty box',
+          cards.out.every(c => c.opaque > 900 && c.w === 54),
+          JSON.stringify(cards.out.map(c => c.opaque)));
+    note(`character choice travels: he picked ${picked.shirt.toString(16)} and the ` +
+         `room redrew him as ${bSawAfter && bSawAfter.toString(16)}`);
 
     // leaving the district leaves the session
     await A.evaluate(() => window.__henrycraft.goHome());
