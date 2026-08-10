@@ -2527,6 +2527,10 @@ function build(){
   if(!c) return;
   setBlock(c.x,c.y,c.z,selected);
   sfx('place');
+  /* Did that block just finish a portal? The flood behind this is capped at 729
+     cells and bails the moment it escapes, so asking on every placement costs
+     nothing worth measuring. */
+  maybePromptToLight(c.x,c.y,c.z);
 }
 
 /* Is there obsidian touching this block? Used to decide whether a failed light
@@ -2563,8 +2567,24 @@ var HINT_WORDS={
   partial:'Fill in every square inside',
   tooBig:'A bit smaller - 21 across at most',
   tooSmall:'A bit bigger - at least 1 by 2',
-  notObsidian:'The whole frame has to be obsidian'
+  notObsidian:'The whole frame has to be obsidian',
+  readyToLight:'It is finished! Light it with Flint & Steel'
 };
+
+/* Shown once per frame he finishes, and never again for that frame: a picture
+   that keeps reappearing turns into wallpaper. */
+var litPrompted={};
+function maybePromptToLight(x,y,z){
+  if(portalCells[keyOf(x,y,z)]) return;        /* already a live portal */
+  var r=analysePortal(x,y,z);
+  if(!r.ok) return;
+  var p=r.portal;
+  var key=p.plane+':'+p.fixed+':'+p.a0+':'+p.a1+':'+p.y0+':'+p.y1;
+  if(litPrompted[key]) return;
+  litPrompted[key]=1;
+  showHintPicture('readyToLight',HINT_WORDS.readyToLight);
+  sfx('star');
+}
 function portalHint(r){
   var why=HINT_WORDS[r.why]?r.why:'notRect';
   showHintPicture(why,HINT_WORDS[why]);
@@ -2669,7 +2689,11 @@ var HINT_PICS={
   /* lying on the ground instead of standing up */
   flat:       {bad:PIC_GOOD, badSquash:true, good:PIC_GOOD},
   /* not a rectangle */
-  notRect:    {bad:['.OO..','OffO.','OffOO','OfffO','.OOOO'], good:PIC_GOOD}
+  notRect:    {bad:['.OO..','OffO.','OffOO','OfffO','.OOOO'], good:PIC_GOOD},
+  /* Nothing is wrong with this one. It is finished and unlit, and he has no way
+     of knowing that the last step exists - he built a portal correctly and the
+     game said nothing at all. */
+  readyToLight:{single:PIC_GOOD, tool:FIRE}
 };
 
 /* One canvas, redrawn each time: seven pictures cached would cost more memory
@@ -2678,6 +2702,27 @@ function paintHintPicture(cv,why){
   var pic=HINT_PICS[why]||HINT_PICS.notRect;
   var c=cv.getContext('2d');
   var cell=22, gap=26;
+
+  /* One picture rather than a comparison: this frame is right, and what it needs
+     is the tool drawn beside it. No cross, because nothing is wrong. */
+  if(pic.single){
+    var rows=pic.single;
+    var gw=rows[0].length*cell, gh=rows.length*cell;
+    var tool=Math.round(cell*1.5);
+    cv.width=gw+34+tool+22; cv.height=gh+30;
+    c.clearRect(0,0,cv.width,cv.height);
+    drawBlockGrid(c,rows,10,24,cell,false);
+    c.save();
+    c.fillStyle='#f6f1e4';
+    c.font='bold 24px Trebuchet MS, Verdana, sans-serif';
+    c.textAlign='center'; c.textBaseline='middle';
+    c.fillText('▶',10+gw+17,24+gh/2);
+    c.restore();
+    c.imageSmoothingEnabled=false;
+    drawTileAt(c,DEFS[pic.tool].tiles[2],10+gw+34,24+gh/2-tool/2,tool);
+    drawBadge(c,true,10+gw/2,13,22);
+    return {w:cv.width,h:cv.height};
+  }
   var badRows=pic.bad, goodRows=pic.good;
   var badCell=Math.round(cell*(pic.badCell||1));
   var wBad=badRows[0].length*badCell, wGood=goodRows[0].length*cell;
@@ -2740,11 +2785,7 @@ function paintPortalRecipe(cv){
     if(steps[i].block!==null){
       drawTileAt(c,DEFS[steps[i].block].tiles[2],mid-14,34+5*cell+8,28);
     } else {
-      c.save();
-      c.font='26px Trebuchet MS, Verdana, sans-serif';
-      c.textAlign='center'; c.textBaseline='top';
-      c.fillText('🔥',mid,34+5*cell+6);
-      c.restore();
+      drawTileAt(c,DEFS[FIRE].tiles[2],mid-14,34+5*cell+8,28);
     }
     c.save();
     c.fillStyle='#f2c231';
@@ -5086,6 +5127,9 @@ window.__henrycraft={
   /* The whole light-it path including the hint, not just the analysis, so a test
      can check what actually appears on screen. */
   tryLight:function(x,y,z){ return tryLightPortal(x,y,z); },
+  /* The nudge that fires when a placed block finishes a frame. */
+  promptCheck:function(x,y,z){ return maybePromptToLight(x,y,z); },
+  forgetPrompts:function(){ litPrompted={}; },
   showIdeas:showIdeas,
   tiles:function(id){ return DEFS[id]?DEFS[id].tiles:null; },
 

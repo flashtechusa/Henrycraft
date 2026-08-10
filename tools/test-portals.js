@@ -235,8 +235,12 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
   const dist = Math.hypot(pics.cellAvg[0] - pics.atlasAvg[0],
                           pics.cellAvg[1] - pics.atlasAvg[1],
                           pics.cellAvg[2] - pics.atlasAvg[2]);
-  check(`all ${pics.reasons.length} reasons have a picture, and none is blank`,
-        pics.reasons.length === 7 &&
+  const MISSES = ['gap', 'notObsidian', 'partial', 'tooSmall', 'tooBig', 'flat', 'notRect'];
+  check(`all ${pics.reasons.length} pictures draw something, and every near miss ` +
+        `has one`,
+        pics.reasons.length === 8 &&
+        MISSES.every(w => pics.reasons.includes(w)) &&
+        pics.reasons.includes('readyToLight') &&
         pics.reasons.every(w => pics.ink[w] > 400 && pics.sizes[w][0] > 80),
         JSON.stringify(pics.ink));
   check(`the blocks in a picture come from the atlas, not from artwork ` +
@@ -247,6 +251,72 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         pics.reasons.every(w => typeof pics.words[w] === 'string' && pics.words[w].length > 8),
         JSON.stringify(pics.words));
   note('hint pictures: ' + pics.reasons.map(w => `${w} ${pics.sizes[w].join('x')}`).join(', '));
+
+  // ---- 2e: a finished frame says so ----------------------------------------
+  console.log('2e. finishing a frame prompts for the last step');
+  const nudge = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    const out = {};
+    H.loadThemeSeed('desert', 902);
+    H.forgetPrompts();
+
+    /* Exactly what he did: a thick obsidian frame with sand in the middle. The
+       last block of the filling goes in last, which is the moment the prompt
+       should appear. */
+    const z = 30;
+    for (let y = 20; y < 34; y++) for (let x = 4; x < 24; x++) for (let d = -2; d <= 2; d++) {
+      H.setBlock(x, y, z + d, ids.AIR);
+    }
+    for (let y = 22; y <= 29; y++) for (let x = 8; x <= 17; x++) H.setBlock(x, y, z, ids.OBSIDIAN);
+    for (let y = 24; y <= 26; y++) for (let x = 10; x <= 13; x++) H.setBlock(x, y, z, ids.SAND);
+
+    /* one cell still empty: not finished, so no prompt */
+    H.setBlock(13, 26, z, ids.AIR);
+    H.promptCheck(13, 26, z);
+    out.unfinished = H.hintPanel().on;
+
+    /* fill it, and the prompt is the whole point */
+    H.setBlock(13, 26, z, ids.SAND);
+    H.promptCheck(13, 26, z);
+    await new Promise(r => setTimeout(r, 60));
+    const shown = H.hintPanel();
+    out.finished = {on: shown.on, words: shown.words, w: shown.w};
+
+    /* it must not nag: same frame again says nothing */
+    document.getElementById('portalHelp').classList.remove('on');
+    H.setBlock(12, 25, z, ids.SAND);
+    H.promptCheck(12, 25, z);
+    out.repeat = H.hintPanel().on;
+
+    /* and once it is lit there is nothing left to prompt about */
+    H.forgetPrompts();
+    const lit = await H.light(11, 25, z);
+    document.getElementById('portalHelp').classList.remove('on');
+    H.promptCheck(11, 25, z);
+    out.afterLit = H.hintPanel().on;
+    out.lit = lit.ok;
+    out.destTheme = lit.destTheme;
+    return out;
+  });
+  check('a frame that is not finished yet prompts nothing', nudge.unfinished === false,
+        JSON.stringify(nudge));
+  check('finishing the filling says so, with the Flint & Steel picture',
+        nudge.finished.on && /Flint & Steel/.test(nudge.finished.words),
+        JSON.stringify(nudge.finished));
+  check('and it says it once, not on every block after that', nudge.repeat === false,
+        JSON.stringify(nudge));
+  check('nothing is prompted once the portal is already lit',
+        nudge.afterLit === false && nudge.lit === true, JSON.stringify(nudge));
+  check(`a sand-filled portal binds to the desert (${nudge.destTheme})`,
+        nudge.destTheme === 'desert', String(nudge.destTheme));
+  note(`finished-frame prompt: "${nudge.finished.words}"`);
+
+  // the wiring, not just the function: placing a block has to call it
+  const src = await page.evaluate(() => fetch(location.pathname).then(r => r.text()));
+  const buildFn = src.slice(src.indexOf('function build(){'), src.indexOf('function build(){') + 900);
+  check('placing a block actually runs that check',
+        /maybePromptToLight\(c\.x,c\.y,c\.z\)/.test(buildFn),
+        buildFn.slice(0, 200));
 
   // the panel appears on a real near miss, and leaves on its own
   const panel = await page.evaluate(async () => {
@@ -335,6 +405,9 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
       return {w, h, area: w * h, lit, sparks, quiet,
               rebuildsOnLight: H.renderStats().rebuilds - rebuildsBefore,
               glowTris: stats.glowTris,
+              triBefore: before.triangles, triAfter: after.triangles,
+              meshesBefore: beforeMeshes, meshesAfter: stats.sceneMeshes,
+              glowMeshesNow: stats.glowMeshes,
               callsBefore: before.calls, callsAfter: after.calls,
               callDelta: after.calls - before.calls,
               meshDelta: stats.sceneMeshes - beforeMeshes,
@@ -355,40 +428,44 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
   const S = big.small, B = big.huge;
   check(`441-block portal lights (${B.interior} interior blocks)`, B.lit.ok, JSON.stringify(B.lit));
 
-  /* The property that actually matters, and the reason the frame-rate bar was
-     dropped: an absolute fps figure under SwiftShader measures the software
-     rasteriser, not the portal. Draw calls do not. A portal 220 times the area
-     must cost the same number of them - anything else means per-block geometry.
-     The only legitimate growth is the extra chunk column a 21-wide portal
-     straddles, since chunks are meshed separately, so the allowance is 2 rather
-     than 0. Both readings come from the same fixed camera with the sparks gone;
-     see measure() for why that matters. */
+  /* Controls first: both readings have to have settled, and the rebuild counter
+     has to actually move when a portal changes - otherwise "0 rebuilds over 300
+     frames" below is true of a scene where nothing ever happened, which is the
+     state a broken frame helper put this test in once already. */
   check('both readings were taken with nothing still moving',
         S.quiet && B.quiet,
         `settled: 1x2 ${S.quiet}, 21x21 ${B.quiet}; gave up at ${JSON.stringify(big.why)}`);
-
-  /* Two controls, because both assertions below would pass on a scene where
-     nothing happened at all - which is exactly the state a broken frame helper
-     put this test in once already. If the probe cannot see the portal the draw
-     calls cannot grow, and if the rebuild counter never moves then zero rebuilds
-     over 300 frames proves nothing. */
-  check(`the portal's faces really are in the merged buffer ` +
-        `(${B.glowTris} glow triangles for ${B.area} blocks)`,
-        B.glowTris > B.area, `${B.glowTris} glow triangles across ${B.glowMeshes} meshes`);
-  check('and those meshes are drawn from the probe pose, so the comparison is not ' +
-        'zero against zero',
-        B.callDelta > 0 && S.callDelta > 0,
-        `deltas: 1x2 ${S.callDelta}, 21x21 ${B.callDelta}`);
-  check(`and the rebuild counter does move when the portal changes ` +
+  check(`the rebuild counter moves when the portal changes ` +
         `(${B.rebuildsOnLight} on ignition)`,
-        B.rebuildsOnLight > 0, `${B.rebuildsOnLight} rebuilds when lighting 441 blocks`);
-  check(`draw calls do not grow with area: ${S.area} blocks adds ${S.callDelta}, ` +
-        `${B.area} blocks adds ${B.callDelta}`,
-        B.callDelta - S.callDelta <= 2,
-        `1x2 delta ${S.callDelta}, 21x21 delta ${B.callDelta} ` +
-        `(${S.callsBefore}->${S.callsAfter} vs ${B.callsBefore}->${B.callsAfter})`);
-  check(`and the 441-block portal is nowhere near one call per block`,
+        B.rebuildsOnLight > 0, `${B.rebuildsOnLight} rebuilds when lighting ${B.area} blocks`);
+
+  /* What "cost does not scale with area" has to be measured on.
+
+     Comparing the draw-call delta of a 1x2 against a 21x21 looked like the direct
+     test and was not: each fixture carves its own clearance out of the hillside -
+     5x5x3 against 25x25x3 - so the two measurements sit in different worlds with
+     different chunk geometry, and their baselines differ by several calls before a
+     portal is even lit. The difference of those two differences came out +5, +6,
+     -3 and -9 across runs of unchanged code. An earlier version of this check
+     passed on that noise.
+     
+     The invariant itself involves no camera at all: portal geometry is merged into
+     the chunk mesh, so the number of meshes carrying it - and therefore the number
+     of draw calls it can possibly cost - is bounded by the chunks it touches, not
+     by its area. */
+  check(`merged meshes do not scale with area: 2 blocks in ${S.glowMeshes}, ` +
+        `${B.area} blocks in ${B.glowMeshes}`,
+        B.glowMeshes - S.glowMeshes <= 1 && B.glowMeshes <= 4,
+        `1x2 in ${S.glowMeshes} mesh(es), 21x21 in ${B.glowMeshes}`);
+  check(`and ${B.area} blocks of portal cost at most a handful of draw calls ` +
+        `(${B.callDelta})`,
+        B.callDelta <= 6, `21x21 added ${B.callDelta} calls ` +
+        `(${B.callsBefore}->${B.callsAfter})`);
+  check(`nowhere near one draw call per block`,
         B.callDelta < B.area / 20, `${B.callDelta} calls for ${B.area} blocks`);
+  check(`nor one merged mesh per block (${B.glowTris} triangles in ${B.glowMeshes})`,
+        B.glowTris >= B.area && B.glowMeshes <= 4,
+        `${B.glowTris} triangles across ${B.glowMeshes} meshes for ${B.area} blocks`);
 
   /* A naive version regenerating its 441 blocks every frame would still show two
      merged meshes while being unplayable, so the rebuild counter is checked
@@ -402,10 +479,13 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
   check('the interior is merged into chunk geometry, not one object per block',
         B.glowMeshes > 0 && B.glowMeshes <= 4 && B.meshDelta < B.area / 20,
         `${B.glowMeshes} glow chunk meshes, +${B.meshDelta} scene meshes for ${B.portalBlocks} blocks`);
-  note(`draw calls: 1x2 portal +${S.callDelta}, 21x21 portal +${B.callDelta} ` +
-       `(area x${(B.area / S.area).toFixed(0)}); ${B.portalBlocks} blocks and ` +
-       `${B.glowTris} triangles in ${B.glowMeshes} merged mesh(es); ` +
+  note(`${B.portalBlocks} blocks and ${B.glowTris} triangles in ${B.glowMeshes} ` +
+       `merged mesh(es), against ${S.glowMeshes} for a 1x2 - area x` +
+       `${(B.area / S.area).toFixed(0)}, meshes x${(B.glowMeshes / Math.max(1, S.glowMeshes)).toFixed(0)}; ` +
        `${big.rebuildsOver300} rebuilds over 300 static frames`);
+  note(`draw calls added: 1x2 ${S.callDelta}, 21x21 ${B.callDelta} - reported rather ` +
+       `than asserted on as a pair, since each fixture carves its own clearance ` +
+       `and the baselines differ`);
 
   // ---- 3: fill chooses the theme ------------------------------------------
   console.log('3. the filling chooses the destination theme');
