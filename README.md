@@ -136,11 +136,29 @@ background. A child is never shown an error dialog. When it comes back, the
 server's blocks arrive and anything built in the meantime is pushed up, so neither
 side loses work.
 
-**Portals stay a solo feature.** The protocol carries blocks, not portal records,
-so a lit portal is filtered out of what is shared in both directions: your portals
-work for you, and everyone else sees the obsidian frame with air inside. Better
-than a portal that leads nowhere. Going through one leaves the shared session,
-since a join code belongs to one district.
+**Portals rest while you are playing together.** They are a solo feature and the
+game now says so out loud instead of half-working. A join code belongs to one
+district, the protocol carries blocks rather than portal records, and travelling
+switches district — so during a shared session a portal would take one player
+somewhere the other is not and end the session on the way out. Three things
+happen instead:
+
+- Flint & Steel on a finished frame shows the "not while we are together" picture.
+  The frame is not lit and **no district is created**, so nobody ends up owning a
+  world the other cannot reach.
+- Walking into a portal that was already lit walks him straight through it. No
+  countdown ring appears — a ring that fills up and then refuses is a worse answer
+  than never starting one — and the same picture appears as he steps in.
+- End the session and everything works exactly as before, including that portal.
+
+This is deliberate, and it replaced a version that looked like it worked: each
+player lit their own copy of the same frame, got a different destination, and one
+re-share later there were five near-identical districts. Sections 12c and 12d of
+`tools/test-portals.js` cover both halves, including that the block is what stops
+it — with the guard removed, the test shows the player leaving the session
+mid-walk. Properly shared portals would need portal records in the protocol,
+destinations named by join code rather than by a local slug, and travel that moves
+both players from one code to the other; that work has not been done.
 
 ### Deploying the server
 
@@ -174,7 +192,11 @@ character number, and the symptom is subtle rather than obvious: every player ge
 drawn from a guess, and the guess used to be character 0 &mdash; which is Henry, so
 a room of four looked like four Henrys. The game now falls back to the shirt colour
 instead, keeps people distinct, and says *"the sync server needs updating"* in the
-Playing-together panel. **Redeploy after any change under `server/`.**
+Playing-together panel. Since that message was easy to read past, the panel also
+carries a red banner naming the fix (`npx wrangler deploy` in `server/`) whenever an
+old server is detected. If somebody appears as a stranger with a stranger's name
+&mdash; *Silver Otter* instead of *Dad* &mdash; that banner is the whole answer.
+**Redeploy after any change under `server/`.**
 
 ## What's in a district
 

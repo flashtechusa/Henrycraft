@@ -412,6 +412,10 @@ body.touch #hint{display:none}
 }
 .ccard b{font-size:11px;font-weight:900;letter-spacing:.04em}
 #peopleChip{cursor:pointer;font:inherit}
+#staleWarn{
+  background:rgba(232,69,60,.22);border:3px solid #e8453c;border-radius:12px;
+  padding:8px 10px;margin:0 0 10px;font-size:13px;font-weight:800;line-height:1.35
+}
 #roster{display:flex;flex-direction:column;gap:6px;margin:4px 0 10px}
 .rosterRow{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
 .rosterRow .dot{
@@ -550,6 +554,9 @@ body.touch #hint{display:none}
 <div class="overlay hide" id="together">
   <div class="card wide">
     <h2>Playing together</h2>
+    <div id="staleWarn" class="hide">⚠️ The sync server is out of date &mdash;
+      everybody is being drawn from a guess. Run <b>npx wrangler deploy</b> in
+      <b>server/</b>.</div>
     <div class="pickhead">Read this out to whoever wants to join</div>
     <div id="joinCode"></div>
     <button class="blockbtn" id="tCopy">🔗 Copy the link</button>
@@ -2743,6 +2750,14 @@ var lastHint=null;
 function tryLightPortal(x,y,z){
   if(portalCells[keyOf(x,y,z)]) return true;          /* already lit */
   var r=analysePortal(x,y,z);
+  if(r.ok && mp.wanted){
+    /* Not while sharing. A portal lit here binds to a district only this player
+       has, so the other one sees a frame full of air, and lighting it themselves
+       builds a second, different world. Better to say the frame is fine and the
+       timing is wrong than to hand them two worlds that look like one. */
+    showHintPicture('notWhileTogether',HINT_WORDS.notWhileTogether);
+    return true;
+  }
   if(r.ok){ lastHint=null; ignitePortal(r.portal); return true; }
   if(r.why==='litFrame'||r.why==='empty') return false;
   if(!touchesObsidian(x,y,z)) return false;           /* not an attempt */
@@ -2764,7 +2779,8 @@ var HINT_WORDS={
   tooBig:'A bit smaller - 21 across at most',
   tooSmall:'A bit bigger - at least 1 by 2',
   notObsidian:'The whole frame has to be obsidian',
-  readyToLight:'It is finished! Light it with Flint & Steel'
+  readyToLight:'It is finished! Light it with Flint & Steel',
+  notWhileTogether:'Portals only work when you are playing alone'
 };
 
 /* Shown once per frame he finishes, and never again for that frame: a picture
@@ -2889,7 +2905,11 @@ var HINT_PICS={
   /* Nothing is wrong with this one. It is finished and unlit, and he has no way
      of knowing that the last step exists - he built a portal correctly and the
      game said nothing at all. */
-  readyToLight:{single:PIC_GOOD, tool:FIRE}
+  readyToLight:{single:PIC_GOOD, tool:FIRE},
+  /* Portals and playing together do not compose yet, and leaving them half-working
+     was worse than either: one player could use a portal the other could not, and
+     travelling ended the shared session without saying so. */
+  notWhileTogether:{single:PIC_GOOD, tool:FIRE, crossAll:true}
 };
 
 /* One canvas, redrawn each time: seven pictures cached would cost more memory
@@ -2916,7 +2936,12 @@ function paintHintPicture(cv,why){
     c.restore();
     c.imageSmoothingEnabled=false;
     drawTileAt(c,DEFS[pic.tool].tiles[2],10+gw+34,24+gh/2-tool/2,tool);
-    drawBadge(c,true,10+gw/2,13,22);
+    if(pic.crossAll){
+      drawCross(c,10,24,gw);
+      drawBadge(c,false,10+gw/2,13,22);
+    } else {
+      drawBadge(c,true,10+gw/2,13,22);
+    }
     return {w:cv.width,h:cv.height};
   }
   var badRows=pic.bad, goodRows=pic.good;
@@ -3619,7 +3644,7 @@ var portalTint={};                  /* "x,y,z" -> [r,g,b], read by buildChunk */
 var portalCells={};                 /* "x,y,z" -> portal, for fast lookup */
 var portalFrame={};                 /* "x,y,z" -> [portal,...], frame blocks */
 var portalFrames=0;
-var dwell=0, dwellPortal=null, travelling=false;
+var dwell=0, dwellPortal=null, travelling=false, toldWhyNoTravel=false;
 /* Set on arrival, cleared the first time he is standing in no doorway at all.
    While it is set, no dwell accumulates - so however he ends up placed, a portal
    cannot take him anywhere he did not walk into himself. Without it, an arrival
@@ -4115,7 +4140,18 @@ function updatePortals(dt){
     return;
   }
   if(arrivalGrace) return;     /* he was put here; he did not walk in */
-  if(dwellPortal!==p){ dwellPortal=p; dwell=0; }
+  if(dwellPortal!==p){ dwellPortal=p; dwell=0; toldWhyNoTravel=false; }
+  if(mp.wanted){
+    /* Going through would take him somewhere the others are not, and would quietly
+       end the shared session. No ring and no countdown, because a countdown that
+       never finishes is the cruellest way to say no: the picture appears as he
+       steps in, once per doorway, and he can walk on through the frame. */
+    if(!toldWhyNoTravel){
+      toldWhyNoTravel=true;
+      showHintPicture('notWhileTogether',HINT_WORDS.notWhileTogether);
+    }
+    return;
+  }
   dwell+=dt;
   showPortalRing(dwell/PORTAL_DWELL);
   if(dwell>=PORTAL_DWELL){ travelThrough(p); }
@@ -5165,6 +5201,8 @@ function mpPaintPanel(){
   if(code) code.textContent=mp.code||'';
   var st=document.getElementById('tStatus');
   if(st) st.textContent=mpStatusLine();
+  var warn=document.getElementById('staleWarn');
+  if(warn) warn.classList.toggle('hide',!mp.stale);
   var host=document.getElementById('roster');
   if(!host) return;
   /* Built with createElement and textContent, never innerHTML, and every name

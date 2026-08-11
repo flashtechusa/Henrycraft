@@ -279,11 +279,15 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
                           pics.cellAvg[1] - pics.atlasAvg[1],
                           pics.cellAvg[2] - pics.atlasAvg[2]);
   const MISSES = ['gap', 'notObsidian', 'partial', 'tooSmall', 'tooBig', 'flat', 'notRect'];
-  check(`all ${pics.reasons.length} pictures draw something, and every near miss ` +
-        `has one`,
-        pics.reasons.length === 8 &&
-        MISSES.every(w => pics.reasons.includes(w)) &&
-        pics.reasons.includes('readyToLight') &&
+  /* Every reason a portal can refuse him needs a picture: the seven near misses,
+     the finished-frame nudge, and "not while we are playing together". Counted
+     against that list rather than a number, so adding a reason without a picture
+     fails here instead of quietly showing him nothing. */
+  const NEEDED = MISSES.concat(['readyToLight', 'notWhileTogether']);
+  check(`all ${pics.reasons.length} pictures draw something, and every reason a ` +
+        `portal can refuse him has one`,
+        NEEDED.every(w => pics.reasons.includes(w)) &&
+        pics.reasons.length === NEEDED.length &&
         pics.reasons.every(w => pics.ink[w] > 400 && pics.sizes[w][0] > 80),
         JSON.stringify(pics.ink));
   check(`the blocks in a picture come from the atlas, not from artwork ` +
@@ -852,6 +856,114 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         !litter.error && litter.counts.every(c => c.toHome + c.toAway === 1),
         JSON.stringify(litter.error || litter.counts.slice(0, 3)));
   note(`10 round trips: ${worst} lit portal per district throughout`);
+
+  // ---- 12c: portals and playing together do not mix, and say so -------------
+  /* What went wrong on a real evening: they built portals while sharing a district.
+     A portal binds to a district only the player who lit it has, so the other saw a
+     frame full of air; lighting it themselves built a second, different world; and
+     travelling ended the shared session without a word, after which re-sharing made
+     a new world every time. Half-working was worse than either answer. */
+  console.log('\n12c. portals hold off while playing together, and say why');
+  const together = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 806);
+    const gy = H.surfaceY(30, 30);
+    for (let y = gy; y < gy + 8; y++) for (let x = 26; x <= 34; x++) {
+      for (let d = -3; d <= 3; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                            fill: ids.SAND});
+    const districtsBefore = H.districts().list.length;
+
+    /* Pretend a session is on, without a server: mp.start sets the flag and then
+       fails to connect, which is exactly the state on a tablet mid-session. */
+    H.mp.start('ZZZZZZ');
+    const litWhileSharing = H.tryLight(b.probe.x, b.probe.y, b.probe.z);
+    await new Promise(r => setTimeout(r, 120));
+    const panel = H.hintPanel();
+    const out = {
+      handled: litWhileSharing,
+      lit: H.portals().filter(p => p.lit).length,
+      districtsMade: H.districts().list.length - districtsBefore,
+      words: panel.words, shown: panel.on,
+    };
+    H.mp.stop();
+    /* And with sharing off it lights as usual - the frame was never the problem. */
+    const after = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    out.litAfter = after.ok;
+    return out;
+  });
+  check('lighting a portal while sharing does not light it', together.lit === 0,
+        JSON.stringify(together));
+  check('and builds no district for one player to have and the other not',
+        together.districtsMade === 0, `${together.districtsMade} districts appeared`);
+  check('it says why, with a picture, rather than doing nothing',
+        together.shown && /playing alone/i.test(together.words), JSON.stringify(together));
+  check('and the same frame lights fine once sharing is off',
+        together.litAfter === true, JSON.stringify(together));
+  note(`while sharing, lighting a portal says: "${together.words}"`);
+
+  /* The other half of the same problem, and the one he actually hit: a portal lit
+     alone, then a session started, then walked into. Travelling would take him
+     somewhere the others are not and end the session without saying so. He has to
+     be able to walk through the frame - it is a doorway, not a wall - and he has to
+     be told why nothing happened. */
+  console.log('\n12d. an already-lit portal does not take him away mid-session');
+  const midSession = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 795);
+    const gy = H.surfaceY(30, 30);
+    for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
+      for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                            fill: ids.SAND});
+    for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
+      if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+    }
+    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    if (!lit.ok) return {error: 'would not light', lit};
+    const here = H.districts().current;
+
+    H.mp.start('ZZZZZZ');                    /* sharing on, mid-build, as on a tablet */
+    /* 12c left its own picture on screen and it lingers for five seconds. Clear it
+       by hand first, or "it says why" passes without this section drawing anything. */
+    const help = document.getElementById('portalHelp');
+    help.classList.remove('on');
+    document.getElementById('portalHelpWords').textContent = '';
+    const walked = await H.walkInto(lit.id, H.portalDwell() + 1.5, true);
+    const panel = H.hintPanel();
+    const out = {
+      walked, here, stillHere: H.districts().current === here,
+      shown: panel.on, words: panel.words,
+      ringOn: document.getElementById('portalRing').classList.contains('on'),
+    };
+    H.mp.stop();
+    /* Alone again, the very same portal still works. */
+    const alone = await H.walkInto(lit.id, H.portalDwell() + 1.5);
+    out.travelsAlone = alone.travelled;
+    return out;
+  });
+  check('he can still walk through the frame while sharing - it is a doorway, not a wall',
+        midSession.walked && midSession.walked.reached === true &&
+        midSession.walked.through === true, JSON.stringify(midSession.walked));
+  check('but it does not take him anywhere, and does not end the session behind his back',
+        midSession.walked && midSession.walked.travelled === false &&
+        midSession.stillHere === true, JSON.stringify(midSession));
+  /* No countdown ring at all: a ring that fills up and then refuses is a worse
+     answer than never starting one. maxDwell staying at 0 is the proof - the ring
+     is only ever drawn from the dwell timer. */
+  check('and no countdown ring fills up only to refuse him',
+        midSession.walked && midSession.walked.maxDwell === 0 &&
+        midSession.ringOn === false, JSON.stringify(midSession));
+  check('it says why, in a picture, while he is standing in it',
+        midSession.shown === true && /playing alone/i.test(midSession.words || ''),
+        JSON.stringify(midSession));
+  check('and the same portal takes him through again once he is playing alone',
+        midSession.travelsAlone === true, JSON.stringify(midSession));
+  note(`mid-session walk-through: reached ${midSession.walked && midSession.walked.reached}, ` +
+       `dwell never started (max ${midSession.walked && midSession.walked.maxDwell}), ` +
+       `travelled ${midSession.walked && midSession.walked.travelled}`);
 
   // ---- 13: storage failures must never be silent ---------------------------
   /* All three of these used to pass quietly and do the wrong thing. A device with
