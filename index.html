@@ -5111,8 +5111,6 @@ function mpMoved(m){
    mesh transforms, which is what makes a remote player unable to shove Henry. */
 function mpUpdate(dt){
   if(!mp.wanted) return;
-  var id, p;
-
   mp.clock+=dt;
   if(mp.clock>=MP_SEND){
     mp.clock=0;
@@ -5131,8 +5129,17 @@ function mpUpdate(dt){
     }
   }
 
-  for(id in mp.players){
-    p=mp.players[id];
+  mpStepAvatars(dt);
+}
+
+/* Drawing only, and split out from the sending half so a test can drive it with a
+   fixed dt. The test that used to prove remote players glide slept for 400ms and
+   then sampled six frames: on a machine drawing one frame a second that samples
+   after the glide has finished and reads six identical numbers, so it passed by
+   luck rather than because anything glided. */
+function mpStepAvatars(dt){
+  for(var id in mp.players){
+    var p=mp.players[id];
     if(!p.to) continue;
     p.t=Math.min(1,p.t+dt/MP_SEND);
     var a=p.from||p.to, b=p.to, k=p.t;
@@ -6009,6 +6016,22 @@ window.__henrycraft={
                 x:+p.group.position.x.toFixed(2), y:+p.group.position.y.toFixed(2),
                 z:+p.group.position.z.toFixed(2), yaw:p.yawNow||0};
       });
+    },
+    /* Feed one player a new position and step only the drawing half of the update,
+       by a dt this side chooses. Nothing here depends on how fast frames happen to
+       be arriving, which is what made the old timing-based version of this test
+       report six identical numbers on a slow machine and pass anyway. */
+    glideProbe:function(id,to,dt,steps){
+      var p=mp.players[id];
+      if(!p) return null;
+      var was=+p.group.position.x.toFixed(3);
+      mpMoved({id:id, x:to.x, y:to.y, z:to.z, yaw:0});
+      var seen=[];
+      for(var i=0;i<steps;i++){
+        mpStepAvatars(dt);
+        seen.push(+p.group.position.x.toFixed(3));
+      }
+      return {from:was, seen:seen, target:to.x};
     },
     rosterText:function(){
       var host=document.getElementById('roster');

@@ -388,6 +388,16 @@ mid-session and reconnecting without losing a block, and a hostile name fed
 straight into the client to prove it never reaches the screen. It needs
 `npm ci` in `server/` first.
 
+Two of those checks used to be timing-dependent and went red on a loaded CI runner
+while passing on a quiet laptop, which is worse than either failing or passing
+honestly. Both are now driven by state rather than by the clock: the eight-player
+cap waits for eight welcomes instead of counting 120ms after the last connection,
+and *"a remote player is interpolated rather than teleported"* drives the drawing
+half of the avatar update with a dt the test chooses (`mp.glideProbe`) instead of
+sleeping 400ms and sampling six animation frames &mdash; on a page drawing one frame
+a second, that sampled after the glide had finished and read six identical numbers.
+The wire is now a separate check of its own.
+
 The game exposes `window.__henrycraft` purely for that harness — read-only
 accessors plus a couple of helpers for setting up a scenario. Nothing in the game
 reads it, so deleting it changes no behaviour; it only blinds the tests.

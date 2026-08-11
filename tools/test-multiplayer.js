@@ -129,6 +129,22 @@ function rawClient(port, code, name, colour, offer, look) {
   });
 }
 
+/* Wait for raw clients to be welcomed rather than sleeping a fixed amount and
+   hoping. Counting straight after a 120ms sleep is how "eight players fill a
+   district" came back as 7 admitted on a loaded CI runner: the eighth welcome was
+   in flight, not refused. */
+async function welcomedAll(clients, ms) {
+  const until = Date.now() + (ms || 15000);
+  for (;;) {
+    const n = clients.filter(c => c.welcome()).length;
+    if (n === clients.length || Date.now() > until) return n;
+    await sleep(100);
+  }
+}
+async function welcomed(client, ms) {
+  return (await welcomedAll([client], ms)) === 1 ? client.welcome() : null;
+}
+
 /* Short codes, as the game now makes them. The long slug-plus-ten form is still
    accepted by the server, and `codeLong` covers that. */
 function code() {
@@ -252,21 +268,36 @@ function requireNode22() {
     check('each client can see the other player', rosterA.players.length === 1,
           JSON.stringify(rosterA));
 
+    /* Two separate claims, and they used to be muddled into one timing-dependent
+       check that slept 400ms and then sampled six animation frames. On a runner
+       drawing one frame a second that samples after the glide has finished, reads
+       six identical numbers, and passed only because a frame happened to land in
+       the gap. So: the wire is tested by waiting for the position to arrive, and
+       the gliding is tested by driving the interpolation with a chosen dt. */
     await B.evaluate(() => window.__henrycraft.movePlayer(40, 22, 40));
-    await sleep(400);
-    const glide = await A.evaluate(async () => {
-      const H = window.__henrycraft;
-      const seen = [];
-      for (let i = 0; i < 6; i++) {
-        seen.push(H.mp.players()[0] ? H.mp.players()[0].x : null);
-        await new Promise(r => requestAnimationFrame(r));
-      }
-      return seen;
+    const moveArrived = await waitFor(A, () => {
+      const p = window.__henrycraft.mp.players()[0];
+      return !!p && Math.abs(p.x - 40) < 0.2 && Math.abs(p.z - 40) < 0.2;
     });
-    const moved = glide.filter(v => v !== null);
+    check('a move made on one screen arrives on the other', moveArrived,
+          JSON.stringify(await A.evaluate(() => window.__henrycraft.mp.players())));
+
+    const glide = await A.evaluate(() => {
+      const H = window.__henrycraft, p = H.mp.players()[0];
+      if (!p) return null;
+      /* Back to a known spot first, then glide 10 blocks with a dt well under the
+         0.1s send interval, so a body that glides has to show its working. */
+      H.mp.glideProbe(p.id, {x: 30, y: 22, z: 40}, 1, 1);
+      return H.mp.glideProbe(p.id, {x: 40, y: 22, z: 40}, 0.02, 6);
+    });
+    const steps = glide ? glide.seen : [];
     check('a remote player is interpolated rather than teleported',
-          moved.length >= 2 && new Set(moved).size > 1,
+          glide && glide.from === 30 &&
+          new Set(steps).size >= 5 &&                       /* every step distinct */
+          steps.every((v, i) => i === 0 || v >= steps[i - 1]) &&   /* and monotonic */
+          steps[0] < 34 && Math.abs(steps[steps.length - 1] - 40) < 0.01,
           JSON.stringify(glide));
+    note(`a 10-block step is drawn over ${steps.length} frames: ${steps.join(' → ')}`);
 
     // and they cannot touch Henry
     const shove = await A.evaluate(async () => {
@@ -323,8 +354,7 @@ function requireNode22() {
           `${cSees.players} others`);
 
     const d = await rawClient(wPort, c1, 'Gold Owl', '#f2c231');
-    await sleep(600);
-    const dw = d.welcome();
+    const dw = await welcomed(d);
     const dEdits = dw ? Object.keys(dw.edits || {}).length : -1;
     const dPlayers = dw ? dw.players.length : -1;
     check('a fourth client is handed the accumulated block map and roster on joining',
@@ -346,7 +376,7 @@ function requireNode22() {
                                  i === 0 ? {seed: 5, starSeed: 5, theme: 'meadow', edits: {}} : null));
       await sleep(120);
     }
-    const inside = crowd.filter(c => c.welcome()).length;
+    const inside = await welcomedAll(crowd);
     const ninth = await newPlayer('ninth');
     await ninth.evaluate(c => window.__henrycraft.mp.join(c), c2);
     const refused = await waitFor(ninth, () => window.__henrycraft.mp.status() === 'full');
@@ -402,8 +432,7 @@ function requireNode22() {
           `own block is now ${stillMine}, wanted ${mine.id}`);
     // and the server still holds both, which is what a later joiner would get
     const audit = await rawClient(wPort, c1, 'Lime Crab', '#4fc04f');
-    await sleep(600);
-    const aw = audit.welcome() || {edits: {}};
+    const aw = (await welcomed(audit)) || {edits: {}};
     const has = k => Object.prototype.hasOwnProperty.call(aw.edits, k);
     const wantKeys = [[spot, 'A before B joined'], [spot2, 'B after adopting'],
                       [mine, 'A just before the drop'], [theirs, 'B during the drop']];
