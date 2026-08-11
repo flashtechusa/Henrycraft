@@ -554,9 +554,7 @@ body.touch #hint{display:none}
 <div class="overlay hide" id="together">
   <div class="card wide">
     <h2>Playing together</h2>
-    <div id="staleWarn" class="hide">⚠️ The sync server is out of date &mdash;
-      everybody is being drawn from a guess. Run <b>npx wrangler deploy</b> in
-      <b>server/</b>.</div>
+    <div id="staleWarn" class="hide"></div>
     <div class="pickhead">Read this out to whoever wants to join</div>
     <div id="joinCode"></div>
     <button class="blockbtn" id="tCopy">🔗 Copy the link</button>
@@ -4901,7 +4899,10 @@ function mpEndpoint(code){
 
 var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
         retry:0, timer:null, clock:0, last:null, queue:[], applying:false,
-        accepted:false, pending:null, calls:0, ever:false, stale:false,
+        accepted:false, pending:null, calls:0, ever:false,
+        /* stale is derived, never latched - see mpRefreshStale. staleWho says which
+           thing is old: 'server', 'client', or null when nothing is. */
+        stale:false, staleWho:null,
         /* Portals across a shared session. `portalsShared` is what the server told
            us it can do; `switching` and `arriving` mark the one arrival that keeps
            the session rather than ending it; `pendingReturn` is a way home waiting
@@ -5041,6 +5042,7 @@ function mpStop(quiet){
   mp.pending=null;
   mp.ever=false;
   mp.stale=false;
+  mp.staleWho=null;
   mp.portalsShared=false;
   mp.arriving=false;
   mp.pendingReturn=null;
@@ -5149,13 +5151,18 @@ function mpMessage(raw){
 
 function mpWelcome(w){
   mp.me=w.you||null;
+  /* Whether this server can share portals at all, asked by seeing whether it sent
+     the field. An older Worker does not, and the game then holds portals back rather
+     than letting two players walk into different worlds - see tryLightPortal.
+
+     Read before anybody is added to the room, because mpRefreshStale needs it to
+     tell an old server apart from an old client. Setting it afterwards had the first
+     welcome of a session blaming the server for a stale phone. */
+  mp.portalsShared=Array.isArray(w.portals);
   mpClearPlayers();
   (w.players||[]).forEach(mpAddPlayer);
   mp.ever=true;
-  /* Whether this server can share portals at all, asked by seeing whether it sent
-     the field. An older Worker does not, and the game then holds portals back rather
-     than letting two players walk into different worlds - see tryLightPortal. */
-  mp.portalsShared=Array.isArray(w.portals);
+  mpRefreshStale();
   mpSettleWorld(w).then(function(settled){
     if(!settled) return;               /* he is being asked whose copy wins */
     mpPortalsIn(w.portals);
@@ -5476,25 +5483,46 @@ function mpAddPlayer(p){
   var told=Number.isInteger(p.look);
   var idx=told?safeLookIndex(p.look):mpColourIndex(p.colour);
   var label=(told&&lookName(idx))||mpSafeName(p.name);
-  if(!told) mp.stale=true;
   var look=LOOKS[idx];
   var built=buildAvatar(look, label.toUpperCase());
   built.group.visible=false;             /* until we know where they are */
   scene.add(built.group);
   mp.players[p.id]={id:p.id, label:label, colour:mpSafeColour(p.colour), look:look,
-                    lookIndex:idx,
+                    lookIndex:idx, guessed:!told,
                     group:built.group, parts:built.parts,
                     from:null, to:null, t:1, walk:0, speed:0};
+  mpRefreshStale();
+}
+
+/* Is anything actually out of date, and what?
+
+   Worked out from who is in the room now, rather than latched the first time
+   somebody arrives without a character number. Latching it was wrong twice over: a
+   phone that joined for ten seconds on a stale tab left the warning up for the rest
+   of the evening, and travelling through a portal carried it into the next world.
+
+   It also has to say which thing is old. A current server always sends a character
+   number, and advertises that by supporting shared portals - so if the server is
+   current and somebody still arrived without one, it is their game that needs
+   reloading, not the server that needs redeploying. Sending him to the command line
+   to redeploy something already deployed is worse than saying nothing at all. */
+function mpRefreshStale(){
+  var guessed=false;
+  for(var id in mp.players) if(mp.players[id].guessed) guessed=true;
+  mp.staleWho=guessed?(mp.portalsShared?'client':'server'):null;
+  mp.stale=!!mp.staleWho;
 }
 function mpRemovePlayer(id){
   var p=mp.players[id];
   if(!p) return;
   scene.remove(p.group);
   delete mp.players[id];
+  mpRefreshStale();          /* they took their old game home with them */
 }
 function mpClearPlayers(){
   for(var id in mp.players) mpRemovePlayer(id);
   mp.players={};
+  mpRefreshStale();
 }
 function mpMoved(m){
   var p=mp.players[m.id];
@@ -5577,9 +5605,13 @@ function mpPaintToggle(){
 function mpStatusLine(){
   if(mp.status==='sharing'){
     var n=Object.keys(mp.players).length;
-    if(mp.stale){
+    if(mp.staleWho==='server'){
       return 'Playing with '+n+', but the sync server needs updating - everyone '+
              'is being drawn from a guess';
+    }
+    if(mp.staleWho==='client'){
+      return 'Playing with '+n+', but somebody\'s game is out of date, so they are '+
+             'being drawn from a guess - ask them to reload it';
     }
     return n?('Playing with '+n+(n===1?' other person':' other people')):'Waiting for someone to join';
   }
@@ -5611,7 +5643,18 @@ function mpPaintPanel(){
   var st=document.getElementById('tStatus');
   if(st) st.textContent=mpStatusLine();
   var warn=document.getElementById('staleWarn');
-  if(warn) warn.classList.toggle('hide',!mp.stale);
+  if(warn){
+    warn.classList.toggle('hide',!mp.staleWho);
+    /* Named the fix rather than the symptom, and the right fix for which thing is
+       old. Built with textContent, like everything else in this panel. */
+    if(mp.staleWho==='server'){
+      warn.textContent='⚠️ The sync server is out of date — everybody is being '+
+        'drawn from a guess. Run "npx wrangler deploy" in the server folder.';
+    } else if(mp.staleWho==='client'){
+      warn.textContent='⚠️ Somebody here is running an out-of-date copy of the '+
+        'game, so they are being drawn from a guess. Ask them to reload it.';
+    }
+  }
   var host=document.getElementById('roster');
   if(!host) return;
   /* Built with createElement and textContent, never innerHTML, and every name
@@ -6398,6 +6441,8 @@ window.__henrycraft={
     me:function(){ return mpMe?{name:mpMe.name,colour:mpMe.colour}:null; },
     calls:function(){ return mp.calls; },
     stale:function(){ return mp.stale; },
+    /* Which thing is out of date: 'server', 'client', or null. */
+    staleWho:function(){ return mp.staleWho; },
     /* Whether the room can agree on where a portal goes. False against an older
        server, and then portals hold off rather than splitting the party. */
     portalsShared:function(){ return mp.portalsShared; },

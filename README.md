@@ -238,12 +238,21 @@ Plain `ok` is an older Worker that drops the
 character number, and the symptom is subtle rather than obvious: every player gets
 drawn from a guess, and the guess used to be character 0 &mdash; which is Henry, so
 a room of four looked like four Henrys. The game now falls back to the shirt colour
-instead, keeps people distinct, and says *"the sync server needs updating"* in the
-Playing-together panel. Since that message was easy to read past, the panel also
-carries a red banner naming the fix (`npx wrangler deploy` in `server/`) whenever an
-old server is detected. If somebody appears as a stranger with a stranger's name
+instead, keeps people distinct, and says so in the Playing-together panel with a red
+banner naming the fix. If somebody appears as a stranger with a stranger's name
 &mdash; *Silver Otter* instead of *Dad* &mdash; that banner is the whole answer.
 **Redeploy after any change under `server/`.**
+
+The banner distinguishes two cases, and getting that wrong wasted a trip to the
+command line. A current server always sends a character number and advertises it by
+supporting shared portals &mdash; so if the server is current and somebody still
+arrives without one, it is **their game** that is out of date and reloading it is the
+fix. Only a server that never mentions portals is told to redeploy.
+
+It is also recomputed from who is in the room, never latched. One stale phone tab
+joining for ten seconds used to leave the banner up for the rest of the evening,
+reading *"Playing with 0, but somebody's game is out of date"* &mdash; and pointing at
+a server that was already deployed.
 
 ## What's in a district
 

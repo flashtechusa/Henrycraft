@@ -717,16 +717,56 @@ function requireNode22() {
       await new Promise(r => setTimeout(r, 200));
       const them = H.mp.players().filter(p => /old/.test(p.id));
       return {them: them.map(p => ({label: p.label, look: p.lookIndex, shirt: p.shirt})),
-              stale: H.mp.stale(), line: H.mp.statusLine()};
+              stale: H.mp.stale(), who: H.mp.staleWho(), line: H.mp.statusLine()};
     });
     check('two players with no character number are not both drawn as Henry',
           old.them.length === 2 && old.them[0].look !== old.them[1].look &&
           old.them.every(p => p.label !== 'Henry'),
           JSON.stringify(old.them));
-    check('and it says the server needs updating rather than saying nothing',
-          old.stale === true && /needs updating/.test(old.line),
-          JSON.stringify({stale: old.stale, line: old.line}));
-    note(`an old server reads as: "${old.line}"`);
+    /* This worker is a current one, so a player arriving without a character number
+       is running an out-of-date *game*. Saying "the sync server needs updating" here
+       sent me to redeploy a server that was already deployed - the warning has to name
+       the thing that is actually old. */
+    check('and it blames the out-of-date game, not the server that is up to date',
+          old.stale === true && old.who === 'client' &&
+          /reload/i.test(old.line) && !/wrangler/i.test(old.line),
+          JSON.stringify({stale: old.stale, who: old.who, line: old.line}));
+    note(`a stale player reads as: "${old.line}"`);
+
+    /* The other half: a server that never mentions portals is the older Worker, and
+       then it really is the server that needs redeploying. */
+    const oldSrv = await A.evaluate(async () => {
+      const H = window.__henrycraft;
+      /* A welcome with no portals field at all - exactly what the older Worker sends. */
+      H.mp.feed({type: 'welcome', you: 'meX', adopted: false, seed: H.districts().seed,
+                 starSeed: H.districts().seed, theme: H.districts().theme,
+                 edits: {}, players: []});
+      H.mp.feed({type: 'joined', player: {id: 'srv1', name: 'Gold Owl', colour: '#4fc04f'}});
+      await new Promise(r => setTimeout(r, 250));
+      return {who: H.mp.staleWho(), line: H.mp.statusLine(),
+              shared: H.mp.portalsShared(),
+              banner: document.getElementById('staleWarn').textContent};
+    });
+    check('a server that cannot share portals is named as the thing to redeploy',
+          oldSrv.who === 'server' && oldSrv.shared === false &&
+          /wrangler deploy/.test(oldSrv.banner),
+          JSON.stringify(oldSrv));
+    note(`an old server reads as: "${oldSrv.line}"`);
+
+    /* And it un-latches. One stale phone joining for ten seconds used to leave the
+       red banner up for the rest of the evening, telling him to fix something that
+       was not broken. */
+    const cleared = await A.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.mp.feed({type: 'left', id: 'srv1'});
+      await new Promise(r => setTimeout(r, 150));
+      return {who: H.mp.staleWho(), stale: H.mp.stale(),
+              hidden: document.getElementById('staleWarn').classList.contains('hide'),
+              line: H.mp.statusLine()};
+    });
+    check('and the warning goes away when the out-of-date player does',
+          cleared.who === null && cleared.stale === false && cleared.hidden === true,
+          JSON.stringify(cleared));
 
     /* How many people are here, where he can see it without opening anything. */
     const chip = await A.evaluate(() => {
