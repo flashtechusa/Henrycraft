@@ -2750,11 +2750,20 @@ var lastHint=null;
 function tryLightPortal(x,y,z){
   if(portalCells[keyOf(x,y,z)]) return true;          /* already lit */
   var r=analysePortal(x,y,z);
+  if(r.ok && mp.wanted && mp.portalsShared){
+    /* Playing together, and the server can agree on a destination: ask it. Both
+       players' frames light bound to the same place, whichever of them strikes the
+       flint - see mpPortalIn. */
+    lastHint=null;
+    mpRequestPortal(r.portal);
+    return true;
+  }
   if(r.ok && mp.wanted){
-    /* Not while sharing. A portal lit here binds to a district only this player
-       has, so the other one sees a frame full of air, and lighting it themselves
-       builds a second, different world. Better to say the frame is fine and the
-       timing is wrong than to hand them two worlds that look like one. */
+    /* Playing together with a server that cannot share portals. A portal lit here
+       would bind to a district only this player has, so the other one sees a frame
+       full of air, and lighting it themselves builds a second, different world.
+       Better to say the frame is fine and the timing is wrong than to hand them two
+       worlds that look like one. Deploying the current server removes this case. */
     showHintPicture('notWhileTogether',HINT_WORDS.notWhileTogether);
     return true;
   }
@@ -2780,7 +2789,10 @@ var HINT_WORDS={
   tooSmall:'A bit bigger - at least 1 by 2',
   notObsidian:'The whole frame has to be obsidian',
   readyToLight:'It is finished! Light it with Flint & Steel',
-  notWhileTogether:'Portals only work when you are playing alone'
+  /* Two reasons a doorway cannot take everybody, one picture. The words are for
+     whoever is reading over his shoulder, so they say what to do about it. */
+  notWhileTogether:'Not yet - the sync server needs updating (see Playing together)',
+  portalMadeAlone:'Made on its own - break the frame and light it again together'
 };
 
 /* Shown once per frame he finishes, and never again for that frame: a picture
@@ -2906,10 +2918,11 @@ var HINT_PICS={
      of knowing that the last step exists - he built a portal correctly and the
      game said nothing at all. */
   readyToLight:{single:PIC_GOOD, tool:FIRE},
-  /* Portals and playing together do not compose yet, and leaving them half-working
+  /* This doorway cannot take everybody, so it takes nobody. Leaving it half-working
      was worse than either: one player could use a portal the other could not, and
      travelling ended the shared session without saying so. */
-  notWhileTogether:{single:PIC_GOOD, tool:FIRE, crossAll:true}
+  notWhileTogether:{single:PIC_GOOD, tool:FIRE, crossAll:true},
+  portalMadeAlone:{single:PIC_GOOD, tool:FIRE, crossAll:true}
 };
 
 /* One canvas, redrawn each time: seven pictures cached would cost more memory
@@ -3816,32 +3829,48 @@ function createDistrictRecord(name,themeKey){
 
 function litPortalAt(x,y,z){ return portalCells[keyOf(x,y,z)]||null; }
 
+/* Which theme a filling means, and a random one if the filling is not on the list.
+   Split out because a shared portal needs the answer before it has a destination:
+   the theme goes up with the request and comes back in everybody's record, so both
+   players get the same world rather than each rolling their own dice. */
+function themeWanted(p){
+  var themeKey=themeForFill(p.fill);
+  if(themeKey) return {theme:themeKey, random:false};
+  return {theme:THEMES[(Math.random()*THEMES.length)|0].key, random:true};
+}
+
 /* Turn a validated frame into a lit portal. */
 function ignitePortal(p){
-  var themeKey=themeForFill(p.fill);
-  var random=false;
-  if(!themeKey){
-    themeKey=THEMES[(Math.random()*THEMES.length)|0].key;
-    random=true;
-  }
+  var want=themeWanted(p);
+  var themeKey=want.theme, random=want.random;
   return bindDestination(themeKey).then(function(slug){
-    p.dest=slug; p.destTheme=themeKey; p.lit=true;
-    p.id='pt'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-    portals.push(p);
-    portalInterior(p).forEach(function(c){ setBlock(c.x,c.y,c.z,PORTAL); });
-    reindexPortals();
-    /* Particles scale with the opening, not with block count: a 21x21 portal
-       emitting per-block sparks would sink the frame rate on the tablet. */
-    var area=p.w*p.h;
-    var mid=portalCentre(p);
-    burst(new THREE.Vector3(mid.x,mid.y,mid.z),
-          themeByKey(themeKey).skyMid, clamp(8+Math.round(area/10),8,30));
-    sfx('portal');
-    var dn=districtName(slug);
-    toast((random?'🎲 ':'🌀 ')+'Portal to '+dn,2200);
-    scheduleSave(); doSave();
+    p.dest=slug; p.destTheme=themeKey;
+    lightItUp(p,themeKey,districtName(slug),random);
     return p;
   });
+}
+
+/* The visible half of lighting a portal, with the destination already decided.
+   Shared portals arrive here having been told their destination by the server;
+   solo ones having looked it up locally. */
+function lightItUp(p,themeKey,label,random,quiet){
+  p.lit=true;
+  p.id='pt'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  portals.push(p);
+  portalInterior(p).forEach(function(c){ setBlock(c.x,c.y,c.z,PORTAL); });
+  reindexPortals();
+  /* Particles scale with the opening, not with block count: a 21x21 portal
+     emitting per-block sparks would sink the frame rate on the tablet. */
+  var area=p.w*p.h;
+  var mid=portalCentre(p);
+  burst(new THREE.Vector3(mid.x,mid.y,mid.z),
+        themeByKey(themeKey).skyMid, clamp(8+Math.round(area/10),8,30));
+  sfx('portal');
+  /* Quiet when a whole set arrives at once on joining a room: five toasts stacked up
+     is noise, and nobody lit anything just now. */
+  if(!quiet) toast((random?'🎲 ':'🌀 ')+'Portal to '+label,2200);
+  scheduleSave(); doSave();
+  return p;
 }
 
 function districtName(slug){
@@ -3877,7 +3906,7 @@ function reindexPortals(){
 
 /* Breaking any frame block puts the portal out and clears the opening back to
    air. It can be lit again. */
-function extinguishPortal(p,quiet){
+function extinguishPortal(p,quiet,fromRoom){
   if(!p.lit) return;
   p.lit=false;
   portalInterior(p).forEach(function(c){
@@ -3887,6 +3916,12 @@ function extinguishPortal(p,quiet){
   reindexPortals();
   if(dwellPortal===p){ dwellPortal=null; dwell=0; }
   if(!quiet) toast('🌀 The portal went out',1500);
+  /* Tell the others, or one of them keeps standing in front of a doorway this
+     device has already put out. `fromRoom` is set when the news came from them in
+     the first place, so it does not bounce back and forth. */
+  if(!fromRoom && p.code && mp.wanted && mp.portalsShared){
+    mpSend({type:'portalOut', key:portalFrameKey(p)});
+  }
   scheduleSave();
 }
 
@@ -3950,7 +3985,7 @@ function safeGroundNear(cx,cz,avoid){
 /* Build a small return portal on open ground, already lit and bound back. Always
    RETURN_W x RETURN_H whatever he walked through, because a 21x21 return portal
    might not fit where he lands - and it must always fit. */
-function buildReturnPortal(destSlug,destTheme,nearX,nearZ){
+function buildReturnPortal(destSlug,destTheme,nearX,nearZ,room){
   /* Needs a clear box for the frame: RETURN_W+2 wide, RETURN_H+2 tall. */
   var spot=null;
   for(var r=2;r<=24 && !spot;r++){
@@ -3979,7 +4014,10 @@ function buildReturnPortal(destSlug,destTheme,nearX,nearZ){
          y0:spot.y, y1:spot.y+RETURN_H-1, fill:OBSIDIAN,
          w:RETURN_W, h:RETURN_H, dest:destSlug, destTheme:destTheme, lit:true,
          id:'pt'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
-         isReturn:true};
+         isReturn:true,
+         code:room?room.code:null,
+         destSeed:room?room.seed:undefined,
+         destStarSeed:room?room.starSeed:undefined};
   /* frame first, then the opening */
   portalRing(p).forEach(function(c){ setBlock(c.x,c.y,c.z,OBSIDIAN); });
   portalInterior(p).forEach(function(c){ setBlock(c.x,c.y,c.z,PORTAL); });
@@ -3988,11 +4026,65 @@ function buildReturnPortal(destSlug,destTheme,nearX,nearZ){
   return p;
 }
 
+/* Does this portal lead back where he just came from? Two ways of being the same
+   place: a local slug when playing alone, and a join code when playing together.
+   The code is the one that means the same thing on both devices, so when there is
+   one it wins. */
+function leadsBack(q,fromSlug,fromRoom){
+  if(!q.lit) return false;
+  if(fromRoom&&fromRoom.code) return q.code===fromRoom.code;
+  return !q.code && q.dest===fromSlug;
+}
+
+/* The local copy of a district identified by a join code rather than by a slug.
+
+   Found by code, and only by code. This is the line that stops a second visit from
+   minting a second world - going through the same portal twice used to leave him
+   with a row of near-identical districts, because nothing tied the place he arrived
+   at to the place he had already been. */
+function districtForRoom(p){
+  var entry=null;
+  for(var i=0;i<districtIndex.list.length;i++){
+    if(districtIndex.list[i].code===p.code){ entry=districtIndex.list[i]; break; }
+  }
+  if(entry) return readJSON(districtKey(entry.slug));
+  var themeKey=p.destTheme||'meadow';
+  var rec=freshDistrict(nameForRoom(p.code,themeKey),themeKey);
+  /* The seed comes from the portal, not from a dice roll here: it is what makes the
+     hills the same shape on both screens. */
+  rec.seed=(p.destSeed>>>0);
+  rec.starSeed=(p.destStarSeed===undefined?p.destSeed:p.destStarSeed)>>>0;
+  rec.code=p.code;
+  return writeJSON(districtKey(rec.slug),rec).then(function(ok){
+    if(!ok) return null;
+    districtIndex.list.push({slug:rec.slug,name:rec.name,theme:rec.theme,code:rec.code,
+                             created:rec.created,lastPlayed:rec.lastPlayed});
+    return writeJSON(INDEX_KEY,districtIndex).then(function(ok2){ return ok2?rec:null; });
+  });
+}
+
+/* A name both players will land on. randomDistrictName rolls dice, which would have
+   the same shared place called Little Creek on one screen and Bright Valley on the
+   other. Hashing the join code instead means the world has one name. */
+function nameForRoom(code,themeKey){
+  var w=THEME_WORDS[themeKey];
+  var A=w?w.a:NAME_FIRST, B=w?w.b:NAME_SECOND;
+  var h=0;
+  for(var i=0;i<String(code).length;i++) h=(h*31+String(code).charCodeAt(i))>>>0;
+  return A[h%A.length]+' '+B[(h>>>5)%B.length];
+}
+
 function travelThrough(p){
-  if(travelling||!p.lit||!p.dest) return Promise.resolve(false);
+  if(travelling||!p.lit||(!p.dest&&!p.code)) return Promise.resolve(false);
   travelling=true;
-  var from=current?current.slug:null;
+  var fromSlug=current?current.slug:null;
   var fromTheme=theme.key;
+  /* Who we are leaving, said in a way the other side can understand. A slug means
+     nothing on anybody else's device; this is what the way home is bound to. */
+  var fromRoom=(p.code&&current&&current.code)
+    ? {code:current.code, seed:seed>>>0, starSeed:starSeed>>>0, theme:theme.key}
+    : null;
+  var carry=!!(p.code&&mp.wanted&&mp.portalsShared);
   sfx('travel');
   return saveCurrent().then(function(saved){
     /* Going anywhere means leaving this district behind, so if it could not be
@@ -4003,7 +4095,7 @@ function travelThrough(p){
       toast('⚠️ Could not save - staying here for now',4000);
       return null;
     }
-    return readJSON(districtKey(p.dest));
+    return p.code?districtForRoom(p):readJSON(districtKey(p.dest));
   }).then(function(rec){
     if(rec===null && !travelling) return false;   /* the save failed above */
     if(!rec){
@@ -4011,9 +4103,18 @@ function travelThrough(p){
          if the index still lists it, the place exists and something went wrong
          reading it, so the portal stays lit and he can try again. Putting it out
          would throw away a binding over a hiccup. */
-      var listed=districtIndex.list.some(function(d){ return d.slug===p.dest; });
+      var listed=p.code
+        ? districtIndex.list.some(function(d){ return d.code===p.code; })
+        : districtIndex.list.some(function(d){ return d.slug===p.dest; });
       travelling=false; dwell=0;
       if(listed){
+        toast('⚠️ Could not open that place - try again',3200);
+        return false;
+      }
+      /* A shared portal's destination is a place on the server, not a local record,
+         so a record we could not write is a storage problem rather than a district
+         that has been deleted. The portal stays lit either way. */
+      if(p.code){
         toast('⚠️ Could not open that place - try again',3200);
         return false;
       }
@@ -4021,64 +4122,92 @@ function travelThrough(p){
       toast('🌀 That place is gone - light it again',2400);
       return false;
     }
+    /* Carrying the session through is the one arrival that does not end it. */
+    mp.switching=carry;
     enterDistrict(rec);
-    /* Return portal first, then decide where he stands.
-
-       The other order looks more natural and is wrong: the portal's footprint is
-       four columns across, so building it "two blocks away" from where he was
-       just placed could still cover the very column he was standing in, and he
-       arrived inside his own way home. Placing him afterwards means
-       standableColumn can see the portal blocks and refuses to put him in
-       them. */
-    /* Is there already a way back to where he came from? Going back and forth used
-       to leave a fresh return portal behind on every single arrival, so a district
-       he visits often ends up with half a dozen identical portals to the same
-       place. If one is already standing and lit, that is the way home: come out
-       beside it rather than building another. */
-    var back=null;
-    for(var bi=0;bi<portals.length;bi++){
-      if(portals[bi].lit && portals[bi].dest===from){ back=portals[bi]; break; }
-    }
-    /* Tidy up after the old behaviour. Worlds built before duplicates were stopped
-       hold a crowd of identical return portals, and every lit one now carries an
-       exclusion zone that arrival has to dodge. Only the ones the game built itself
-       are put out, never one he lit - and putting one out leaves its obsidian frame
-       exactly where it is, because the frame is his. */
-    if(back){
-      var spare=portals.filter(function(q){
-        return q!==back && q.lit && q.isReturn && q.dest===from;
-      });
-      spare.forEach(function(q){ extinguishPortal(q,true); });
-      if(spare.length) toast('Tidied up '+spare.length+' spare portal'+
-                             (spare.length>1?'s':''),2600);
-    }
-    var cx,cz;
-    if(back){
-      var bc=portalCentre(back);
-      cx=Math.floor(bc.x); cz=Math.floor(bc.z);
-    } else {
-      var centre=safeGroundNear(player.x,player.z,nearAnyDoorway)||
-                 safeGroundNear(WX/2,WZ/2,nearAnyDoorway)||
-                 safeGroundAnywhere(nearAnyDoorway);
-      cx=centre?centre.x:Math.floor(WX/2); cz=centre?centre.z:Math.floor(WZ/2);
-      if(from) buildReturnPortal(from,fromTheme,cx,cz);
-    }
-    /* Clear of the doorway as well as clear of the blocks: now that standing in
-       front of a portal counts, being put down in front of the way home would send
-       him straight back the moment he stopped to look around. */
-    var spot=safeGroundNear(cx,cz,nearAnyDoorway)||
-             safeGroundAnywhere(nearAnyDoorway)||
-             safeGroundAnywhere();
-    if(spot){ player.x=spot.x+0.5; player.y=spot.y+0.05; player.z=spot.z+0.5;
-              player.vx=player.vy=player.vz=0; }
-    else findSpawn();          /* only if the district has no dry land at all */
-    dwell=0; dwellPortal=null; travelling=false;
-    arrivalGrace=true;
-    buildDistrictList();
-    scheduleSave(); doSave();
-    toast('🌀 '+districtName(p.dest),2000);
+    mp.switching=false;
+    arriveFrom(fromSlug,fromTheme,fromRoom,carry);
+    toast('🌀 '+(rec.name||districtName(rec.slug)),2000);
+    /* And now move the session to where he is standing, so the others arrive in
+       this world rather than being left behind in the last one. */
+    if(carry) mpSwitchRoom(p.code);
     return true;
-  }).catch(function(){ travelling=false; return false; });
+  }).catch(function(){ travelling=false; mp.switching=false; return false; });
+}
+
+/* Everything that happens the moment he lands: a way home, somewhere safe to stand,
+   and the arrival grace that stops the doorway he came out of from sending him
+   straight back. Shared by travelling alone and travelling together, because
+   arriving is arriving. */
+function arriveFrom(fromSlug,fromTheme,fromRoom,shared){
+  /* Return portal first, then decide where he stands.
+
+     The other order looks more natural and is wrong: the portal's footprint is
+     four columns across, so building it "two blocks away" from where he was
+     just placed could still cover the very column he was standing in, and he
+     arrived inside his own way home. Placing him afterwards means
+     standableColumn can see the portal blocks and refuses to put him in
+     them. */
+  /* Is there already a way back to where he came from? Going back and forth used
+     to leave a fresh return portal behind on every single arrival, so a district
+     he visits often ends up with half a dozen identical portals to the same
+     place. If one is already standing and lit, that is the way home: come out
+     beside it rather than building another. */
+  var back=null;
+  for(var bi=0;bi<portals.length;bi++){
+    if(leadsBack(portals[bi],fromSlug,fromRoom)){ back=portals[bi]; break; }
+  }
+  /* Tidy up after the old behaviour. Worlds built before duplicates were stopped
+     hold a crowd of identical return portals, and every lit one now carries an
+     exclusion zone that arrival has to dodge. Only the ones the game built itself
+     are put out, never one he lit - and putting one out leaves its obsidian frame
+     exactly where it is, because the frame is his. */
+  if(back){
+    var spare=portals.filter(function(q){
+      return q!==back && q.lit && q.isReturn && leadsBack(q,fromSlug,fromRoom);
+    });
+    spare.forEach(function(q){ extinguishPortal(q,true); });
+    if(spare.length) toast('Tidied up '+spare.length+' spare portal'+
+                           (spare.length>1?'s':''),2600);
+  }
+  var cx,cz;
+  if(back){
+    var bc=portalCentre(back);
+    cx=Math.floor(bc.x); cz=Math.floor(bc.z);
+  } else {
+    /* Where the way home goes. Alone, it goes near him. Together, it goes near the
+       middle of the world - the same place on both devices, because both are
+       looking at the same seed and the same blocks. Two players arriving a few
+       seconds apart then build the identical frame, which the server recognises as
+       one portal instead of two, and neither of them ends up with a way home the
+       other cannot see. */
+    var anchorX=shared?WX/2:player.x, anchorZ=shared?WZ/2:player.z;
+    var centre=safeGroundNear(anchorX,anchorZ,nearAnyDoorway)||
+               safeGroundNear(WX/2,WZ/2,nearAnyDoorway)||
+               safeGroundAnywhere(nearAnyDoorway);
+    cx=centre?centre.x:Math.floor(WX/2); cz=centre?centre.z:Math.floor(WZ/2);
+    if(fromSlug||fromRoom){
+      var made=buildReturnPortal(fromSlug,fromTheme,cx,cz,fromRoom);
+      /* Register it with the room once we are connected there: the server decides
+         whether this is the way home or a duplicate of one already standing. */
+      if(made&&shared&&fromRoom){
+        mp.pendingReturn={frame:portalFrameOf(made), dest:fromRoom};
+      }
+    }
+  }
+  /* Clear of the doorway as well as clear of the blocks: now that standing in
+     front of a portal counts, being put down in front of the way home would send
+     him straight back the moment he stopped to look around. */
+  var spot=safeGroundNear(cx,cz,nearAnyDoorway)||
+           safeGroundAnywhere(nearAnyDoorway)||
+           safeGroundAnywhere();
+  if(spot){ player.x=spot.x+0.5; player.y=spot.y+0.05; player.z=spot.z+0.5;
+            player.vx=player.vy=player.vz=0; }
+  else findSpawn();          /* only if the district has no dry land at all */
+  dwell=0; dwellPortal=null; travelling=false;
+  arrivalGrace=true;
+  buildDistrictList();
+  scheduleSave(); doSave();
 }
 
 /* Standing still in an opening for PORTAL_DWELL seconds. Not instant, because he
@@ -4141,14 +4270,21 @@ function updatePortals(dt){
   }
   if(arrivalGrace) return;     /* he was put here; he did not walk in */
   if(dwellPortal!==p){ dwellPortal=p; dwell=0; toldWhyNoTravel=false; }
-  if(mp.wanted){
-    /* Going through would take him somewhere the others are not, and would quietly
-       end the shared session. No ring and no countdown, because a countdown that
-       never finishes is the cruellest way to say no: the picture appears as he
-       steps in, once per doorway, and he can walk on through the frame. */
+  if(mp.wanted && !(mp.portalsShared && p.code)){
+    /* Playing together, and this doorway cannot take everybody. Either the server is
+       too old to agree on a destination, or this portal leads somewhere only this
+       device knows about - which normally gets fixed by mpAdoptLocalPortals the
+       moment a session starts, so by the time he is standing here it means that
+       failed. Going through would take him where the others are not and quietly end
+       the session.
+
+       No ring and no countdown, because a countdown that never finishes is the
+       cruellest way to say no: the picture appears as he steps in, once per doorway,
+       and he can walk on through the frame. */
     if(!toldWhyNoTravel){
       toldWhyNoTravel=true;
-      showHintPicture('notWhileTogether',HINT_WORDS.notWhileTogether);
+      var why=mp.portalsShared?'portalMadeAlone':'notWhileTogether';
+      showHintPicture(why,HINT_WORDS[why]);
     }
     return;
   }
@@ -4176,11 +4312,16 @@ function animatePortals(dt){
 }
 
 /* ---- serialisation ---- */
+/* `code`, `destSeed` and `destStarSeed` are what make a portal shareable: the
+   destination as a join code and the two numbers a world is generated from, rather
+   than a slug that only means something on this device. They are saved so a portal
+   built together still leads to the shared place tomorrow. */
 function portalsToSave(){
   return portals.filter(function(p){ return p.lit; }).map(function(p){
     return {id:p.id,plane:p.plane,fixed:p.fixed,a0:p.a0,a1:p.a1,y0:p.y0,y1:p.y1,
             fill:p.fill,dest:p.dest,destTheme:p.destTheme,lit:true,
-            isReturn:!!p.isReturn};
+            isReturn:!!p.isReturn,
+            code:p.code||null,destSeed:p.destSeed,destStarSeed:p.destStarSeed};
   });
 }
 function portalsFromSave(list){
@@ -4189,11 +4330,22 @@ function portalsFromSave(list){
     if(!r||typeof r.a0!=='number') return;
     var p={id:r.id,plane:r.plane==='z'?'z':'x',fixed:r.fixed,a0:r.a0,a1:r.a1,
            y0:r.y0,y1:r.y1,fill:r.fill,dest:r.dest,destTheme:r.destTheme,
-           lit:!!r.lit,isReturn:!!r.isReturn};
+           lit:!!r.lit,isReturn:!!r.isReturn,
+           code:r.code||null,destSeed:r.destSeed,destStarSeed:r.destStarSeed};
     p.w=p.a1-p.a0+1; p.h=p.y1-p.y0+1;
     portals.push(p);
   });
   reindexPortals();
+}
+/* The frame's position is its name, on both sides of the wire. Two clients
+   describing the same frame produce the same string, which is what lets the server
+   answer the same question the same way twice. */
+function portalFrameKey(p){
+  return p.plane+':'+p.fixed+':'+p.a0+':'+p.a1+':'+p.y0+':'+p.y1;
+}
+function portalFrameOf(p){
+  return {plane:p.plane, fixed:p.fixed, a0:p.a0, a1:p.a1, y0:p.y0, y1:p.y1,
+          fill:p.fill};
 }
 
 /* ---------------- ?fps=1 ----------------
@@ -4470,7 +4622,13 @@ document.addEventListener('visibilitychange',function(){ if(document.hidden){ sa
 /* Build the live world from a district record. */
 function enterDistrict(rec){
   /* A join code belongs to one district, so arriving anywhere new leaves any
-     shared session behind rather than carrying it into the wrong world. */
+     shared session behind rather than carrying it into the wrong world.
+
+     The single exception is walking through a shared portal, which is the one way
+     of arriving somewhere that the others are coming to as well. mpStopForSwitch
+     stands down while mp.switching is set, and mpTravelTo is the only thing that
+     sets it - so the rule still lives here, in the one place every arrival passes
+     through, rather than being reimplemented by each caller. */
   mpStopForSwitch();
   current={slug:rec.slug,name:rec.name,theme:rec.theme,created:rec.created,
            code:rec.code||null};
@@ -4743,7 +4901,12 @@ function mpEndpoint(code){
 
 var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
         retry:0, timer:null, clock:0, last:null, queue:[], applying:false,
-        accepted:false, pending:null, calls:0, ever:false, stale:false};
+        accepted:false, pending:null, calls:0, ever:false, stale:false,
+        /* Portals across a shared session. `portalsShared` is what the server told
+           us it can do; `switching` and `arriving` mark the one arrival that keeps
+           the session rather than ending it; `pendingReturn` is a way home waiting
+           to be registered with the room he has just walked into. */
+        portalsShared:false, switching:false, arriving:false, pendingReturn:null};
 
 function mpOn(){ return mp.wanted; }
 function mpSetStatus(s){ mp.status=s; mpPaintPanel(); }
@@ -4878,13 +5041,53 @@ function mpStop(quiet){
   mp.pending=null;
   mp.ever=false;
   mp.stale=false;
+  mp.portalsShared=false;
+  mp.arriving=false;
+  mp.pendingReturn=null;
   mpSetStatus('off');
   mpPaintToggle();
   if(!quiet) toast('👤 Playing alone',1800);
 }
+
+/* ---- through a portal, together ----
+
+   Move the session from one district's code to another's without ever being off.
+   mp.wanted stays true the whole way through, so nothing on screen tells a child he
+   has been disconnected; the socket simply closes and reopens on the new code, and
+   whoever follows him through lands in the same room.
+
+   The old socket's handlers are detached before it is closed. Leaving them attached
+   meant its onclose fired after mp.code had already changed and queued a reconnect
+   to the wrong place. */
+function mpSwitchRoom(code){
+  if(!mp.wanted) return;
+  mp.code=code;
+  mp.accepted=false;             /* a different district; adopt whatever is there */
+  mp.pending=null;
+  mp.arriving=true;
+  mp.queue.length=0;
+  mp.last=null;
+  mpClearPlayers();
+  if(mp.timer){ clearTimeout(mp.timer); mp.timer=null; }
+  if(mp.ws){
+    var old=mp.ws;
+    mp.ws=null;
+    old.onclose=null; old.onmessage=null; old.onerror=null; old.onopen=null;
+    try{ old.send(JSON.stringify({type:'leave'})); }catch(e){}
+    try{ old.close(1000,'through a portal'); }catch(e){}
+  }
+  if(current && current.code!==code){ current.code=code; scheduleSave(); }
+  mp.retry=0;
+  mpSetStatus('connecting');
+  mpConnect();
+  mpPaintToggle();
+}
 /* A join code belongs to one district, so going anywhere else - switching,
-   travelling through a portal, going home - leaves the shared session. */
+   travelling through a portal, going home - leaves the shared session. Walking
+   through a portal together is the exception: mpTravelTo sets mp.switching and
+   moves the session to the destination's code instead of ending it. */
 function mpStopForSwitch(){
+  if(mp.switching) return;
   if(mp.wanted) mpStop(true);
 }
 
@@ -4938,6 +5141,8 @@ function mpMessage(raw){
   if(m.type==='left'){ mpRemovePlayer(m.id); mpPaintPanel(); return; }
   if(m.type==='moved'){ mpMoved(m); return; }
   if(m.type==='edited'){ mpRemoteEdit(m); return; }
+  if(m.type==='portal'){ mpPortalIn(m.portal); return; }
+  if(m.type==='portalOut'){ mpPortalOut(m.key); return; }
   /* Everything else is dropped. Nothing unrecognised is echoed, stored or shown,
      so an unknown message cannot become a way to put text on screen. */
 }
@@ -4947,22 +5152,57 @@ function mpWelcome(w){
   mpClearPlayers();
   (w.players||[]).forEach(mpAddPlayer);
   mp.ever=true;
+  /* Whether this server can share portals at all, asked by seeing whether it sent
+     the field. An older Worker does not, and the game then holds portals back rather
+     than letting two players walk into different worlds - see tryLightPortal. */
+  mp.portalsShared=Array.isArray(w.portals);
+  mpSettleWorld(w).then(function(settled){
+    if(!settled) return;               /* he is being asked whose copy wins */
+    mpPortalsIn(w.portals);
+    mpFlushPendingReturn();
+    /* Everything already standing here becomes something they can walk through
+       together. Idempotent: a portal that already has a code is left alone, so a
+       reconnect does not repeat the work. */
+    mpAdoptLocalPortals();
+  });
+}
+
+/* Which blocks we are playing with, now that the room has spoken. Resolves true once
+   the world is settled, false while he is still being asked about it. */
+function mpSettleWorld(w){
+  if(mp.arriving){
+    /* He walked through a portal into this room. It is the same district everybody
+       else is walking into - not a rival copy of his own - so there is nothing to
+       ask and no dialog to put in front of him. */
+    mp.arriving=false;
+    mp.accepted=true;
+    if(!w.adopted && (w.seed>>>0)!==(seed>>>0)){
+      /* The room turns out to hold a different world from this device's copy of the
+         same code. Everybody has to be in one world, so the room's wins - and the
+         local copy is kept beside it rather than thrown away. */
+      mp.pending=w;
+      return mpAdoptServerCopy();
+    }
+    if(!w.adopted) mpResync(w);
+    mpSetStatus('sharing');
+    mpPaintPanel();
+    return Promise.resolve(true);
+  }
   if(w.adopted){
     /* The server had never seen this district, so ours is now the shared one. */
     mp.accepted=true;
     mpSetStatus('sharing');
     mpPaintPanel();
     toast('🌍 Sharing this district',2400);
-    return;
+    return Promise.resolve(true);
   }
-  if(mp.joining){ /* handled below, then announced by mpJoinedCleanly */ }
   if(mp.accepted){
     /* A reconnect. Both sides may have moved on, so take the server's blocks and
        push up anything of ours it has not got. Neither side loses work. */
     mpResync(w);
     mpSetStatus('sharing');
     mpPaintPanel();
-    return;
+    return Promise.resolve(true);
   }
   /* First time in, and the server already has a copy of this district.
 
@@ -4973,12 +5213,12 @@ function mpWelcome(w){
      joining feel complicated. Take the shared copy and say so. */
   if(Object.keys(edits).length===0){
     mp.pending=w;
-    mpAdoptServerCopy().then(function(){ mpJoinedCleanly(); });
-    return;
+    return mpAdoptServerCopy().then(function(){ mpJoinedCleanly(); return true; });
   }
   mp.pending=w;
   mpSetStatus('choose');
   mpShowServerCopy(w);
+  return Promise.resolve(false);
 }
 
 function mpResync(w){
@@ -5018,6 +5258,9 @@ function mpAdoptServerCopy(){
     rebuildAll();
     placeStars(null); spawnAnimals(); spawnFish(); recountFire();
     portals=[]; reindexPortals();
+    /* The room's portals go back on straight away, or a district that was adopted
+       comes up with no way out of it. */
+    mpPortalsIn(w.portals);
     findSpawn();
     mp.accepted=true;
     mpSetStatus('sharing');
@@ -5042,6 +5285,165 @@ function mpDuplicateLocal(){
     toast('Your own copy is saved as "'+mineName+'"',3600);
     return true;
   });
+}
+
+/* ---- portals across a shared session ----
+
+   A portal is the only thing in this game that takes somebody from one district to
+   another, so it is the only thing that has to be agreed rather than merely copied.
+   The frame's position is the question and the server gives one answer, which is
+   what stops two players lighting the same doorway and walking into two different
+   worlds - the thing that actually happened on the evening this was written for.
+
+   PORTAL blocks themselves are still never shared; they are a local consequence of
+   a record, and each device fills in its own opening. */
+function mpRequestPortal(p){
+  var want=themeWanted(p);
+  if(!mpSend({type:'portal', frame:portalFrameOf(p), theme:want.theme})){
+    /* Not connected this instant. Nothing has been lit and nothing is lost: the
+       frame is still standing and striking it again in a moment works. */
+    toast('🌀 Waiting for the others - try again in a moment',2600);
+    return false;
+  }
+  toast('🔥 Lighting it…',900);
+  return true;
+}
+/* Never trust the wire, even though the server validates too: a record read from a
+   socket decides where a child is taken. */
+function mpSafePortal(rec){
+  if(!rec||typeof rec!=='object') return null;
+  if(rec.plane!=='x'&&rec.plane!=='z') return null;
+  var f={plane:rec.plane, fixed:rec.fixed|0, a0:rec.a0|0, a1:rec.a1|0,
+         y0:rec.y0|0, y1:rec.y1|0, fill:rec.fill|0, isReturn:!!rec.isReturn};
+  if(!Number.isInteger(rec.fixed)||!Number.isInteger(rec.a0)||!Number.isInteger(rec.a1)||
+     !Number.isInteger(rec.y0)||!Number.isInteger(rec.y1)) return null;
+  f.w=f.a1-f.a0+1; f.h=f.y1-f.y0+1;
+  if(f.w<1||f.h<1||f.w>PORTAL_MAX||f.h>PORTAL_MAX) return null;
+  if(!DEFS[f.fill]) return null;
+  var d=rec.dest;
+  if(!d||typeof d.code!=='string'||!MP_CODE_RE.test(d.code)) return null;
+  if(!Number.isInteger(d.seed)||!Number.isInteger(d.starSeed)) return null;
+  if(!themeByKey(d.theme)||themeByKey(d.theme).key!==d.theme) return null;
+  f.dest={code:d.code, seed:d.seed>>>0, starSeed:d.starSeed>>>0, theme:d.theme};
+  return f;
+}
+function litPortalWithKey(key){
+  for(var i=0;i<portals.length;i++){
+    if(portals[i].lit && portalFrameKey(portals[i])===key) return portals[i];
+  }
+  return null;
+}
+/* One record from the room, lit here. */
+function mpPortalIn(rec,quiet){
+  var f=mpSafePortal(rec);
+  if(!f) return null;
+  var have=litPortalWithKey(portalFrameKey(f));
+  if(have){
+    /* Already lit on this device. Take the room's destination anyway: if the two
+       ever disagree, the room is right and this device is wrong. */
+    have.code=f.dest.code; have.destSeed=f.dest.seed;
+    have.destStarSeed=f.dest.starSeed; have.destTheme=f.dest.theme;
+    have.dest=null;
+    reindexPortals();
+    return have;
+  }
+  var p={plane:f.plane, fixed:f.fixed, a0:f.a0, a1:f.a1, y0:f.y0, y1:f.y1,
+         fill:f.fill, w:f.w, h:f.h, isReturn:f.isReturn, dest:null,
+         code:f.dest.code, destSeed:f.dest.seed, destStarSeed:f.dest.starSeed,
+         destTheme:f.dest.theme};
+  /* The obsidian is an ordinary block edit and travels on its own, but it can arrive
+     after this record does. Filling in whatever is still missing means the doorway
+     never appears as a sheet of portal floating in mid-air. Applied as if it came
+     from the room, so it is not sent straight back out again. */
+  mp.applying=true;
+  portalRing(p).forEach(function(c){
+    if(getBlock(c.x,c.y,c.z)===AIR) setBlock(c.x,c.y,c.z,OBSIDIAN);
+  });
+  mp.applying=false;
+  lightItUp(p,f.dest.theme,nameForRoom(f.dest.code,f.dest.theme),false,quiet);
+  return p;
+}
+/* The whole set, as handed over in a welcome. */
+function mpPortalsIn(list){
+  if(!Array.isArray(list)) return;
+  var seen={};
+  list.forEach(function(rec){
+    var f=mpSafePortal(rec);
+    if(!f) return;
+    seen[portalFrameKey(f)]=f;
+    mpPortalIn(rec,true);
+  });
+  /* A way home this device built that the room does not know about, while the room
+     does know about another one leading to the same place, is a duplicate: two
+     players arriving seconds apart each built one. The room's copy wins and this one
+     is put out - quietly, and leaving its obsidian standing, as ever. Only portals
+     the game built itself are ever touched. */
+  var byCode={};
+  for(var k in seen) if(seen[k].isReturn) byCode[seen[k].dest.code]=k;
+  portals.filter(function(q){
+    return q.lit&&q.isReturn&&q.code&&byCode[q.code]&&
+           portalFrameKey(q)!==byCode[q.code];
+  }).forEach(function(q){ extinguishPortal(q,true,true); });
+}
+function mpPortalOut(key){
+  var p=litPortalWithKey(String(key||''));
+  if(p) extinguishPortal(p,true,true);
+}
+/* Portals he built on his own, offered to the room.
+
+   Without this, every portal already standing in his worlds - and there are a lot of
+   them - would refuse to work the moment anybody joined him, because it leads to a
+   district that only exists on his tablet. He asked to be able to go to all the
+   worlds together, and most of the worlds were made alone.
+
+   So the destination district is given a join code of its own, and the portal is
+   registered as leading there. Whoever arrives first offers their copy of that world;
+   if that is him, everything he ever built there is what everybody walks into, and if
+   it is somebody else, his blocks go up when he follows - the same resync that a
+   reconnect uses, so nothing of his is lost either way. */
+function mpAdoptLocalPortals(){
+  if(!mp.wanted||!mp.portalsShared) return Promise.resolve(0);
+  var mine=portals.filter(function(p){ return p.lit&&!p.code&&p.dest; });
+  if(!mine.length) return Promise.resolve(0);
+  var done=0;
+  return mine.reduce(function(chain,p){
+    return chain.then(function(){
+      if(!mp.wanted||!mp.portalsShared) return;
+      return roomIdentityFor(p.dest).then(function(room){
+        if(!room) return;              /* unreadable or unwritable; leave it alone */
+        if(mpSend({type:'portal', frame:portalFrameOf(p), dest:room,
+                   isReturn:!!p.isReturn})) done++;
+      });
+    });
+  },Promise.resolve()).then(function(){ return done; });
+}
+/* A local district, named in a way another device can find: its code, minted and
+   written down the first time anybody needs to talk about it. */
+function roomIdentityFor(slug){
+  return readJSON(districtKey(slug)).then(function(rec){
+    if(!rec) return null;
+    if(rec.code) return {code:rec.code, seed:rec.seed>>>0,
+                         starSeed:(rec.starSeed===undefined?rec.seed:rec.starSeed)>>>0,
+                         theme:rec.theme};
+    rec.code=makeJoinCode();
+    return writeJSON(districtKey(slug),rec).then(function(ok){
+      if(!ok) return null;             /* no code that is not written down */
+      districtIndex.list.forEach(function(d){ if(d.slug===slug) d.code=rec.code; });
+      return writeJSON(INDEX_KEY,districtIndex).then(function(){
+        return {code:rec.code, seed:rec.seed>>>0,
+                starSeed:(rec.starSeed===undefined?rec.seed:rec.starSeed)>>>0,
+                theme:rec.theme};
+      });
+    });
+  }).catch(function(){ return null; });
+}
+
+/* The way home he built on arriving, offered to the room now that we are in it. */
+function mpFlushPendingReturn(){
+  var pend=mp.pendingReturn;
+  mp.pendingReturn=null;
+  if(!pend||!mp.portalsShared) return;
+  mpSend({type:'portal', frame:pend.frame, dest:pend.dest, isReturn:true});
 }
 
 /* ---- remote edits ---- */
@@ -5577,8 +5979,11 @@ window.__henrycraft={
   themes:function(){ return THEMES.map(function(t){ return JSON.parse(JSON.stringify(t)); }); },
   districts:function(){
     return {current:current?current.slug:null,
+            code:current?(current.code||null):null,
+            seed:seed>>>0, theme:theme.key,
             list:districtIndex.list.map(function(d){
-              return {slug:d.slug,name:d.name,theme:d.theme,lastPlayed:d.lastPlayed};
+              return {slug:d.slug,name:d.name,theme:d.theme,code:d.code||null,
+                      lastPlayed:d.lastPlayed};
             })};
   },
   createDistrict:createDistrict,
@@ -5592,7 +5997,8 @@ window.__henrycraft={
     return portals.map(function(p){
       return {id:p.id,plane:p.plane,fixed:p.fixed,a0:p.a0,a1:p.a1,y0:p.y0,y1:p.y1,
               w:p.w,h:p.h,fill:p.fill,dest:p.dest,destTheme:p.destTheme,
-              lit:!!p.lit,isReturn:!!p.isReturn};
+              lit:!!p.lit,isReturn:!!p.isReturn,
+              code:p.code||null,destSeed:p.destSeed,key:portalFrameKey(p)};
     });
   },
   /* Build a frame and fill it, then report what analysePortal makes of it.
@@ -5992,6 +6398,9 @@ window.__henrycraft={
     me:function(){ return mpMe?{name:mpMe.name,colour:mpMe.colour}:null; },
     calls:function(){ return mp.calls; },
     stale:function(){ return mp.stale; },
+    /* Whether the room can agree on where a portal goes. False against an older
+       server, and then portals hold off rather than splitting the party. */
+    portalsShared:function(){ return mp.portalsShared; },
     queued:function(){ return mp.queue.length; },
     endpoint:mpEndpoint,
     tidy:mpTidyCode,

@@ -752,6 +752,391 @@ function requireNode22() {
     check('going somewhere else leaves the shared session behind',
           !afterHome.on && afterHome.players === 0, JSON.stringify(afterHome));
 
+    /* ---- travelling together ------------------------------------------------
+
+       The reason this whole protocol change exists. He and his dad built portals in
+       a shared world and got: a portal one of them could use and the other could
+       not; a second world when the other one lit the same frame; separate places
+       after coming back; and a fresh duplicate district on every re-share. Every
+       check below is one of those, turned round.
+
+       Fresh pages, because the ones above have been dropped, refused and sent home,
+       and this needs two clients in a known state. */
+    console.log('\nWalking through a portal together');
+    for (const label of ['A', 'B', 'link', 'ninth']) {
+      const pg = pages.find(p => p.label === label);
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+    const cT = code();
+    const T1 = await newPlayer('T1');
+    const T2 = await newPlayer('T2');
+
+    /* T1 shares a world with a portal frame standing in it, finished but unlit. */
+    const frame = await T1.evaluate(async c => {
+      const H = window.__henrycraft, ids = H.ids;
+      H.loadThemeSeed('meadow', 4242);
+      const gy = H.surfaceY(30, 30);
+      for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
+        for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+      }
+      const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                              fill: ids.SAND});
+      for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
+        if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+      }
+      H.mp.start(c);
+      return {probe: b.probe, gy};
+    }, cT);
+    await waitFor(T1, () => window.__henrycraft.mp.status() === 'sharing');
+    await T2.evaluate(c => window.__henrycraft.mp.join(c), cT);
+    await waitFor(T2, () => window.__henrycraft.mp.status() === 'sharing');
+    const bothIn = await T1.evaluate(() => window.__henrycraft.mp.players().length);
+    check('two players sharing a world, with a portal frame standing in it',
+          bothIn === 1, `T1 sees ${bothIn} others`);
+    const canShare = await T1.evaluate(() => window.__henrycraft.mp.portalsShared());
+    check('the room says it can agree on where a portal goes', canShare === true,
+          `portalsShared: ${canShare}`);
+
+    /* T1 strikes the flint. The destination is minted once, by the server. */
+    const homeCodes = await Promise.all([T1, T2].map(p => p.evaluate(() =>
+      window.__henrycraft.districts().code)));
+    const districtsBefore = await Promise.all([T1, T2].map(p => p.evaluate(() =>
+      window.__henrycraft.districts().list.length)));
+    await T1.evaluate(f => window.__henrycraft.tryLight(f.probe.x, f.probe.y, f.probe.z),
+                      frame);
+    const litOn = await Promise.all([T1, T2].map(p => waitFor(p, () =>
+      window.__henrycraft.portals().some(q => q.lit && q.code))));
+    check('one player lights it and it lights for both of them',
+          litOn[0] && litOn[1], JSON.stringify(litOn));
+    const seenBy = await Promise.all([T1, T2].map(p => p.evaluate(() => {
+      const q = window.__henrycraft.portals().filter(x => x.lit)[0] || {};
+      return {code: q.code, seed: q.destSeed, theme: q.destTheme, key: q.key};
+    })));
+    check('and both are bound to the same place, by code and by seed',
+          !!seenBy[0].code && seenBy[0].code === seenBy[1].code &&
+          seenBy[0].seed === seenBy[1].seed && seenBy[0].theme === seenBy[1].theme,
+          JSON.stringify(seenBy));
+    /* The bug in its purest form: the other player lighting the same frame used to
+       mint a second world. It must be answered with the one that already exists. */
+    await T2.evaluate(f => window.__henrycraft.tryLight(f.probe.x, f.probe.y, f.probe.z),
+                      frame);
+    await sleep(400);
+    const afterSecond = await Promise.all([T1, T2].map(p => p.evaluate(() => {
+      const lit = window.__henrycraft.portals().filter(q => q.lit);
+      return {lit: lit.length, codes: lit.map(q => q.code),
+              districts: window.__henrycraft.districts().list.length};
+    })));
+    check('the other player striking the same frame does not make a second world',
+          afterSecond[0].codes[0] === seenBy[0].code &&
+          afterSecond[1].codes[0] === seenBy[0].code &&
+          afterSecond[0].lit === 1 && afterSecond[1].lit === 1,
+          JSON.stringify(afterSecond));
+    check('and lighting it built no district on either device yet',
+          afterSecond[0].districts === districtsBefore[0] &&
+          afterSecond[1].districts === districtsBefore[1],
+          JSON.stringify({afterSecond, districtsBefore}));
+    note(`both screens show one portal to ${seenBy[0].code} (${seenBy[0].theme})`);
+
+    /* Both walk through, one after the other, as they would. */
+    const goThrough = p => p.evaluate(() => {
+      const H = window.__henrycraft;
+      const q = H.portals().filter(x => x.lit)[0];
+      return H.travel(q.id);
+    });
+    const wentT1 = await goThrough(T1);
+    await waitFor(T1, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
+    await waitFor(T1, () => window.__henrycraft.mp.status() === 'sharing');
+    const wentT2 = await goThrough(T2);
+    await waitFor(T2, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
+    await waitFor(T2, () => window.__henrycraft.mp.status() === 'sharing');
+    await sleep(1200);
+    const landed = await Promise.all([T1, T2].map(p => p.evaluate(() => {
+      const H = window.__henrycraft, d = H.districts();
+      return {code: d.code, seed: d.seed, theme: d.theme, slug: d.current,
+              room: H.mp.code(), on: H.mp.on(), status: H.mp.status(),
+              others: H.mp.players().length,
+              districts: d.list.length,
+              back: H.portals().filter(q => q.lit && q.isReturn)
+                     .map(q => ({code: q.code, key: q.key})),
+              lit: H.portals().filter(q => q.lit).length};
+    })));
+    check('both of them travelled', wentT1 === true && wentT2 === true,
+          JSON.stringify({wentT1, wentT2}));
+    check('they arrive in the same world - same code, same seed, same theme',
+          landed[0].code === seenBy[0].code && landed[1].code === seenBy[0].code &&
+          landed[0].seed === landed[1].seed && landed[0].seed === seenBy[0].seed &&
+          landed[0].theme === landed[1].theme,
+          JSON.stringify(landed.map(a => ({code: a.code, seed: a.seed, theme: a.theme}))));
+    check('and they are still playing together, in that world',
+          landed[0].on && landed[1].on &&
+          landed[0].status === 'sharing' && landed[1].status === 'sharing' &&
+          landed[0].others === 1 && landed[1].others === 1,
+          JSON.stringify(landed.map(a => ({on: a.on, status: a.status, others: a.others}))));
+    check('with one way home between them, not one each',
+          landed[0].back.length === 1 && landed[1].back.length === 1 &&
+          landed[0].back[0].key === landed[1].back[0].key &&
+          landed[0].back[0].code === homeCodes[0],
+          JSON.stringify(landed.map(a => a.back)));
+    note(`both arrived in ${landed[0].slug} (${landed[0].code}), ` +
+         `one way home at ${landed[0].back[0] && landed[0].back[0].key}`);
+
+    /* An edit made in the new world has to reach the other player, or they are in
+       two copies of it rather than in it together. */
+    const there = await T1.evaluate(() => {
+      const H = window.__henrycraft, y = H.surfaceY(20, 44) + 1;
+      H.setBlock(20, y, 44, H.ids.DIAMOND);
+      return {x: 20, y: y, z: 44, id: H.ids.DIAMOND};
+    });
+    const sawThere = await waitFor(T2, s =>
+      window.__henrycraft.getBlock(s.x, s.y, s.z) === s.id, there);
+    check('a block placed in the new world arrives at the other player', sawThere,
+          'T2 sees ' + await T2.evaluate(s => window.__henrycraft.getBlock(s.x, s.y, s.z), there));
+
+    /* And home again, together. */
+    const backHome = p => p.evaluate(() => {
+      const H = window.__henrycraft;
+      const q = H.portals().filter(x => x.lit && x.isReturn)[0];
+      return H.travel(q.id);
+    });
+    await backHome(T1);
+    await backHome(T2);
+    await waitFor(T1, c => window.__henrycraft.mp.code() === c, homeCodes[0]);
+    await waitFor(T2, c => window.__henrycraft.mp.code() === c, homeCodes[0]);
+    await sleep(1200);
+    const home = await Promise.all([T1, T2].map(p => p.evaluate(() => {
+      const H = window.__henrycraft, d = H.districts();
+      return {code: d.code, slug: d.current, room: H.mp.code(),
+              others: H.mp.players().length, status: H.mp.status(),
+              districts: d.list.length};
+    })));
+    check('coming back puts them in the same place, still together',
+          home[0].code === homeCodes[0] && home[1].code === homeCodes[0] &&
+          home[0].others === 1 && home[1].others === 1,
+          JSON.stringify(home));
+    /* The duplicate-worlds bug: three round trips must not leave a row of
+       near-identical districts behind. */
+    for (let trip = 0; trip < 2; trip++) {
+      await goThrough(T1); await goThrough(T2);
+      await waitFor(T1, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
+      await waitFor(T2, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
+      await sleep(500);
+      await backHome(T1); await backHome(T2);
+      await waitFor(T1, c => window.__henrycraft.mp.code() === c, homeCodes[0]);
+      await waitFor(T2, c => window.__henrycraft.mp.code() === c, homeCodes[0]);
+      await sleep(500);
+    }
+    const later = await Promise.all([T1, T2].map(p => p.evaluate(() => {
+      const d = window.__henrycraft.districts();
+      return {districts: d.list.length, code: d.code,
+              names: d.list.map(x => x.name),
+              others: window.__henrycraft.mp.players().length};
+    })));
+    check('three round trips later there is still one world at each end',
+          later[0].districts === home[0].districts &&
+          later[1].districts === home[1].districts,
+          JSON.stringify(later.map(a => ({districts: a.districts, names: a.names}))));
+    check('and they are still in the same one, together',
+          later[0].code === homeCodes[0] && later[1].code === homeCodes[0] &&
+          later[0].others === 1 && later[1].others === 1, JSON.stringify(later));
+    note(`after three round trips: ${later[0].districts} districts on T1, ` +
+         `${later[1].districts} on T2 (${later[0].names.join(', ')})`);
+
+    /* What the server is actually holding, read straight out of it rather than
+       inferred from the clients: one portal at each end and no more. Two players
+       walking through within a second of each other both build a way home before
+       either has heard from the room, so this is where a duplicate would show up. */
+    await Promise.all([goThrough(T1), goThrough(T2)]);
+    await waitFor(T1, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
+    await waitFor(T2, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
+    await sleep(1500);
+    const together = await Promise.all([T1, T2].map(p => p.evaluate(() => {
+      const H = window.__henrycraft, d = H.districts();
+      return {code: d.code, others: H.mp.players().length,
+              lit: H.portals().filter(q => q.lit).length,
+              keys: H.portals().filter(q => q.lit).map(q => q.key)};
+    })));
+    check('travelling at the same moment still lands them in one world together',
+          together[0].code === seenBy[0].code && together[1].code === seenBy[0].code &&
+          together[0].others === 1 && together[1].others === 1,
+          JSON.stringify(together));
+    check('and neither of them ends up with a way home the other cannot see',
+          together[0].lit === 1 && together[1].lit === 1 &&
+          together[0].keys[0] === together[1].keys[0],
+          JSON.stringify(together));
+
+    const roomA = await rawClient(wPort, homeCodes[0], 'Red Fox', '#c0392b');
+    const roomB = await rawClient(wPort, seenBy[0].code, 'Blue Fox', '#2f7fd6');
+    const [wA, wB] = [await welcomed(roomA), await welcomed(roomB)];
+    const pA = (wA && wA.portals) || [], pB = (wB && wB.portals) || [];
+    check('the server holds exactly one portal at each end, not one per trip',
+          pA.length === 1 && pB.length === 1,
+          `home has ${pA.length}, the new world has ${pB.length}`);
+    check('the one at home leads to the new world, and the one there leads home',
+          pA[0] && pA[0].dest.code === seenBy[0].code &&
+          pB[0] && pB[0].dest.code === homeCodes[0] && pB[0].isReturn === true,
+          JSON.stringify({out: pA[0] && pA[0].dest, back: pB[0] && pB[0].dest}));
+    note(`server state: 1 portal in ${homeCodes[0]} -> ${pA[0] && pA[0].dest.code}, ` +
+         `1 in ${seenBy[0].code} -> ${pB[0] && pB[0].dest.code}`);
+    roomA.close(); roomB.close();
+
+    /* Both strike the flint in the same instant, before either has heard anything.
+       This is the race the server exists to settle, and it cannot be reached through
+       two browsers: the second client's frame is already lit by then, so its game
+       never asks again. Two raw sockets ask at once instead.
+
+       Without the server reusing the record, both get a destination of their own and
+       the two of them walk into different worlds - which is what happened. */
+    const rc = code();
+    const r1 = await rawClient(wPort, rc, 'Red Fox', '#c0392b',
+                               {seed: 7, starSeed: 7, theme: 'meadow', edits: {}});
+    const r2 = await rawClient(wPort, rc, 'Blue Fox', '#2f7fd6');
+    await welcomedAll([r1, r2]);
+    const sameFrame = {plane: 'x', fixed: 30, a0: 29, a1: 30, y0: 12, y1: 14, fill: 3};
+    r1.send({type: 'portal', frame: sameFrame, theme: 'snowy'});
+    r2.send({type: 'portal', frame: sameFrame, theme: 'desert'});
+    await sleep(900);
+    const answers = r1.seen('portal').concat(r2.seen('portal'))
+                      .map(m => m.portal && m.portal.dest && m.portal.dest.code);
+    const audit2 = await rawClient(wPort, rc, 'Gold Owl', '#f2c231');
+    const wAudit = await welcomed(audit2);
+    const held = (wAudit && wAudit.portals) || [];
+    check('two players lighting the same frame at once get one destination, not two',
+          answers.length >= 2 && new Set(answers).size === 1 && !!answers[0],
+          JSON.stringify(answers));
+    check('and the district is left holding one portal',
+          held.length === 1 && held[0].dest.code === answers[0],
+          JSON.stringify(held.map(h => h.dest && h.dest.code)));
+    const distinct = [...new Set(answers)];
+    note(`a simultaneous strike was answered ${answers.length} times, with ` +
+         `${distinct.length} destination${distinct.length === 1 ? '' : 's'}: ` +
+         distinct.join(', '));
+    r1.close(); r2.close(); audit2.close();
+
+    /* And it all still works alone. He plays on his own most of the day, and a
+       portal built with his dad in the evening must not stop working in the morning -
+       including after the page has been closed and reopened, which is when the
+       destination has to be recovered from the save rather than from the room. */
+    const alone = await T1.evaluate(() => {
+      window.__henrycraft.mp.stop();
+      return window.__henrycraft.districts().list.length;
+    });
+    await sleep(400);
+    await T1.reload({waitUntil: 'load', timeout: 120000});
+    await T1.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
+                             {timeout: 150000});
+    const soloTrip = await T1.evaluate(async () => {
+      const H = window.__henrycraft;
+      const back = H.portals().filter(q => q.lit && q.isReturn)[0];
+      if (!back) return {error: 'no way home survived the reload',
+                         portals: H.portals()};
+      const went = await H.travel(back.id);
+      const d = H.districts();
+      return {went, code: d.code, districts: d.list.length, on: H.mp.on(),
+              wanted: back.code};
+    });
+    check('a portal built together still works when he is playing alone, ' +
+          'even after a reload',
+          soloTrip.went === true && soloTrip.code === homeCodes[0] &&
+          soloTrip.on === false,
+          JSON.stringify(soloTrip));
+    check('and going through it alone does not mint yet another world',
+          soloTrip.districts === alone, `${alone} before, ${soloTrip.districts} after`);
+    note(`alone after a reload: walked home to ${soloTrip.code} ` +
+         `with ${soloTrip.districts} districts, no session`);
+
+    /* The case that covers everything he has already built.
+
+       Most of his portals were lit on his own, months of building behind them, and
+       they lead to districts that exist on one tablet. Starting a session used to
+       leave every one of them refusing to work. They should instead become places the
+       two of them can walk into - with what he built there still in them. */
+    console.log('\nWorlds he built alone become places they can both go');
+    for (const label of ['T1', 'T2']) {
+      const pg = pages.find(p => p.label === label);
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+    const cS = code();
+    const S1 = await newPlayer('S1');
+    const S2 = await newPlayer('S2');
+    /* Alone: build a frame, light it, walk through, build something recognisable,
+       come back. Exactly what an evening on his own leaves behind. */
+    const solo = await S1.evaluate(async () => {
+      const H = window.__henrycraft, ids = H.ids;
+      H.loadThemeSeed('meadow', 909);
+      const gy = H.surfaceY(30, 30);
+      for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
+        for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+      }
+      const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                              fill: ids.SNOW});
+      for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
+        if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+      }
+      const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+      const home = H.districts().current;
+      await H.travel(lit.id);
+      /* A tower of diamond, which is the sort of thing he leaves lying about, and
+         which the other player must be able to see when they arrive. */
+      const ty = H.surfaceY(18, 46) + 1;
+      for (let i = 0; i < 4; i++) H.setBlock(18, ty + i, 46, ids.DIAMOND);
+      const built = H.districts().current;
+      const back = H.portals().filter(q => q.lit && q.isReturn)[0];
+      await H.travel(back.id);
+      return {home, built, tower: {x: 18, y: ty, z: 46, id: ids.DIAMOND},
+              atHome: H.districts().current, portalId: lit.id,
+              districts: H.districts().list.length};
+    });
+    check('a portal lit alone, a world built through it, and back home again',
+          solo.atHome === solo.home && solo.built !== solo.home,
+          JSON.stringify(solo));
+
+    /* Now somebody joins him. */
+    await S1.evaluate(c => window.__henrycraft.mp.start(c), cS);
+    await waitFor(S1, () => window.__henrycraft.mp.status() === 'sharing');
+    const adopted = await waitFor(S1, () =>
+      window.__henrycraft.portals().some(q => q.lit && q.code), null, 25000);
+    check('his portal is offered to the room as soon as anybody can join him',
+          adopted, JSON.stringify(await S1.evaluate(() => window.__henrycraft.portals())));
+    await S2.evaluate(c => window.__henrycraft.mp.join(c), cS);
+    await waitFor(S2, () => window.__henrycraft.mp.status() === 'sharing');
+    const sharedPortal = await waitFor(S2, () =>
+      window.__henrycraft.portals().some(q => q.lit && q.code), null, 25000);
+    check('and the other player sees it standing there, lit',
+          sharedPortal, JSON.stringify(await S2.evaluate(() => window.__henrycraft.portals())));
+
+    /* Both walk through. The world on the far side is his - the diamond has to be
+       there when the other player arrives. */
+    const walk = p => p.evaluate(() => {
+      const H = window.__henrycraft;
+      const q = H.portals().filter(x => x.lit && x.code && !x.isReturn)[0];
+      return q ? H.travel(q.id) : false;
+    });
+    await walk(S1);
+    await sleep(1500);
+    await walk(S2);
+    await sleep(2500);
+    const inHis = await Promise.all([S1, S2].map(p => p.evaluate(t => {
+      const H = window.__henrycraft, d = H.districts();
+      return {code: d.code, slug: d.current, others: H.mp.players().length,
+              tower: [0, 1, 2, 3].map(i => H.getBlock(t.x, t.y + i, t.z)),
+              status: H.mp.status()};
+    }, solo.tower)));
+    /* Naming the district explicitly, not just checking that the two of them agree:
+       if neither of them travelled at all they would agree perfectly, standing side
+       by side at home, and this check would pass having proved nothing. */
+    check('they both end up in the world he built alone, together',
+          inHis[0].slug === solo.built && inHis[0].code &&
+          inHis[0].code === inHis[1].code &&
+          inHis[0].others === 1 && inHis[1].others === 1,
+          JSON.stringify({wanted: solo.built,
+                          got: inHis.map(x => ({slug: x.slug, code: x.code,
+                                                others: x.others}))}));
+    check('and what he built there is still standing, on both screens',
+          inHis.every(x => x.tower.every(b => b === solo.tower.id)),
+          JSON.stringify(inHis.map(x => x.tower)));
+    note(`a world built alone (${inHis[0].slug}) became room ${inHis[0].code}, ` +
+         `with his diamond tower intact on both screens`);
+
     /* ---- the state the game is actually in until the worker is deployed ----
        Pressing the button with nothing listening must not produce an error, a
        dialog, or a game that stops working. This is also the tunnel case, and the

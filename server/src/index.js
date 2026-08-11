@@ -19,6 +19,8 @@
 const MAX_PLAYERS = 8;
 const MAX_MSG_BYTES = 4096;      // a move is ~60 bytes; an edit ~50
 const EDIT_CAP = 200000;         // a district is 64x40x64, so this is generous
+const PORTAL_CAP = 64;           // per district; more than anyone will build
+const PORTAL_MAX_SIDE = 21;      // matches PORTAL_MAX in the game
 const PERSIST_DEBOUNCE_MS = 1000;
 
 /* Join codes look like green-meadow-K7Q4XM2P9T: a district's slug plus ten
@@ -76,6 +78,57 @@ function safeColour(raw) {
 }
 function num(v) { return typeof v === 'number' && Number.isFinite(v) ? v : null; }
 
+/* ---------------- portals ----------------
+
+   A portal is the only thing in this game that moves somebody from one district
+   to another, which makes it the only thing that has to be agreed on rather than
+   merely copied. Two players who light the same frame must end up bound to the
+   same place, or they walk through the same doorway into different worlds - which
+   is exactly what happened before this existed.
+
+   So the destination is minted here, once, by whoever asks first, and everybody
+   else is told the answer. The frame's own position is the identity: two clients
+   lighting the same frame ask the same question and get the same record back,
+   whether they ask a millisecond or a week apart. */
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no lookalikes: same list the game uses
+function mintCode() {
+  const r = crypto.getRandomValues(new Uint8Array(6));
+  let s = '';
+  for (let i = 0; i < 6; i++) s += CODE_CHARS[r[i] % CODE_CHARS.length];
+  return s;
+}
+function int(v) { return Number.isInteger(v) ? v : null; }
+/* The frame, as the game describes one: a plane, the coordinate it sits at, and
+   the rectangle of its opening. Everything is bounds-checked, because this is
+   stored and handed to other clients. */
+function safeFrame(f) {
+  if (!f || typeof f !== 'object') return null;
+  if (f.plane !== 'x' && f.plane !== 'z') return null;
+  const fixed = int(f.fixed), a0 = int(f.a0), a1 = int(f.a1);
+  const y0 = int(f.y0), y1 = int(f.y1), fill = int(f.fill);
+  if (fixed === null || a0 === null || a1 === null || y0 === null || y1 === null) return null;
+  if (fill === null || fill < 0 || fill > 255) return null;
+  for (const v of [fixed, a0, a1, y0, y1]) if (v < -1024 || v > 1024) return null;
+  const w = a1 - a0 + 1, h = y1 - y0 + 1;
+  if (w < 1 || h < 1 || w > PORTAL_MAX_SIDE || h > PORTAL_MAX_SIDE) return null;
+  return {plane: f.plane, fixed, a0, a1, y0, y1, fill, w, h};
+}
+function frameKey(f) {
+  return f.plane + ':' + f.fixed + ':' + f.a0 + ':' + f.a1 + ':' + f.y0 + ':' + f.y1;
+}
+/* A destination a client asked for by name, used only for return portals - the way
+   back has to lead to the district they actually came from, and only they know
+   which that was. Validated exactly as hard as a minted one. */
+function safeDest(d) {
+  if (!d || typeof d !== 'object') return null;
+  if (typeof d.code !== 'string' || !CODE_RE.test(d.code)) return null;
+  const seed = int(d.seed), starSeed = int(d.starSeed);
+  if (seed === null || starSeed === null) return null;
+  if (seed < 0 || starSeed < 0 || seed > 0xffffffff || starSeed > 0xffffffff) return null;
+  if (typeof d.theme !== 'string' || !/^[a-z]{1,16}$/.test(d.theme)) return null;
+  return {code: d.code, seed, starSeed, theme: d.theme};
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -86,7 +139,7 @@ export default {
          an older one drops the character number, and every player is drawn as
          character 0 - which is Henry, so a room of four looks like four Henrys.
          `curl https://sync.henrysgame.com/health` tells you which one is deployed. */
-      return new Response('ok look=1 characters=' + CHARACTER_NAMES.length,
+      return new Response('ok look=1 characters=' + CHARACTER_NAMES.length + ' portals=1',
                           {headers: {'content-type': 'text/plain'}});
     }
 
@@ -114,6 +167,7 @@ export class District {
     this.env = env;
     this.edits = null;         // Map<"x,y,z", blockId>, loaded lazily
     this.meta = null;          // {seed, starSeed, theme}
+    this.portals = null;       // Map<frameKey, {…frame, dest:{code,seed,starSeed,theme}}>
     this.persistTimer = null;
     this.nextId = 1;
   }
@@ -122,12 +176,14 @@ export class District {
     if (this.edits) return;
     await this.ctx.blockConcurrencyWhile(async () => {
       if (this.edits) return;
-      const [meta, edits] = await Promise.all([
+      const [meta, edits, portals] = await Promise.all([
         this.ctx.storage.get('meta'),
         this.ctx.storage.get('edits'),
+        this.ctx.storage.get('portals'),
       ]);
       this.meta = meta || null;
       this.edits = new Map(Object.entries(edits || {}));
+      this.portals = new Map(Object.entries(portals || {}));
     });
   }
 
@@ -147,6 +203,7 @@ export class District {
     if (!this.edits) return;
     await this.ctx.storage.put('edits', Object.fromEntries(this.edits));
     if (this.meta) await this.ctx.storage.put('meta', this.meta);
+    await this.ctx.storage.put('portals', Object.fromEntries(this.portals));
   }
 
   async fetch(request) {
@@ -245,6 +302,11 @@ export class District {
         starSeed: this.meta.starSeed,
         theme: this.meta.theme,
         edits: Object.fromEntries(this.edits),
+        /* Always an array, even when empty. The game uses its presence to tell a
+           server that can share portals from one that cannot: an older Worker sends
+           no such field, and the game then holds portals back rather than letting
+           two players walk into different worlds. */
+        portals: [...this.portals.values()],
         players: this.roster().filter(p => p.id !== id),
         max: MAX_PLAYERS,
       }));
@@ -272,6 +334,55 @@ export class District {
       this.edits.set(k, b);                     // last write wins, as specified
       this.schedulePersist();
       this.broadcast({type: 'edited', x, y, z, block: b, by: att.id}, ws);
+      return;
+    }
+
+    /* Light a portal. The frame is the question; the destination is the answer, and
+       there is only ever one answer per frame.
+
+       Two clients lighting the same frame at the same moment both land here, and
+       the second one finds the record already made and is told about it - so they
+       cannot end up bound to different districts. Which is the whole reason this
+       message exists rather than each client deciding for itself. */
+    if (msg.type === 'portal') {
+      const frame = safeFrame(msg.frame);
+      if (!frame) return;
+      const key = frameKey(frame);
+      let rec = this.portals.get(key);
+      if (!rec) {
+        if (this.portals.size >= PORTAL_CAP) return;
+        /* A destination the client named is a way back to where it came from, and
+           only it knows where that was. Anything else is minted here. */
+        const asked = safeDest(msg.dest);
+        rec = Object.assign({key}, frame, {
+          isReturn: !!msg.isReturn,
+          dest: asked || {
+            code: mintCode(),
+            seed: Math.floor(Math.random() * 0xffffffff),
+            starSeed: Math.floor(Math.random() * 0xffffffff),
+            theme: typeof msg.theme === 'string' && /^[a-z]{1,16}$/.test(msg.theme)
+                   ? msg.theme : 'meadow',
+          },
+        });
+        this.portals.set(key, rec);
+        this.schedulePersist();
+      }
+      /* To everybody, the asker included: the asker is waiting to be told what it
+         is bound to, and everybody else has a frame to light. */
+      const out = JSON.stringify({type: 'portal', portal: rec});
+      for (const peer of this.ctx.getWebSockets()) {
+        try { peer.send(out); } catch (e) {}
+      }
+      return;
+    }
+
+    /* A frame broken, or a duplicate return portal tidied away. Without this one
+       player sees a lit portal the other does not. */
+    if (msg.type === 'portalOut') {
+      if (typeof msg.key !== 'string' || !this.portals.has(msg.key)) return;
+      this.portals.delete(msg.key);
+      this.schedulePersist();
+      this.broadcast({type: 'portalOut', key: msg.key}, ws);
       return;
     }
 

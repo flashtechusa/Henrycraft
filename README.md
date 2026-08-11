@@ -136,29 +136,67 @@ background. A child is never shown an error dialog. When it comes back, the
 server's blocks arrive and anything built in the meantime is pushed up, so neither
 side loses work.
 
-**Portals rest while you are playing together.** They are a solo feature and the
-game now says so out loud instead of half-working. A join code belongs to one
-district, the protocol carries blocks rather than portal records, and travelling
-switches district — so during a shared session a portal would take one player
-somewhere the other is not and end the session on the way out. Three things
-happen instead:
+### Travelling together
 
-- Flint & Steel on a finished frame shows the "not while we are together" picture.
-  The frame is not lit and **no district is created**, so nobody ends up owning a
-  world the other cannot reach.
-- Walking into a portal that was already lit walks him straight through it. No
-  countdown ring appears — a ring that fills up and then refuses is a worse answer
-  than never starting one — and the same picture appears as he steps in.
-- End the session and everything works exactly as before, including that portal.
+Walking through a portal takes everybody who follows you to the same place. This is
+the part that took two attempts to get right, so it is worth saying how it works.
 
-This is deliberate, and it replaced a version that looked like it worked: each
-player lit their own copy of the same frame, got a different destination, and one
-re-share later there were five near-identical districts. Sections 12c and 12d of
-`tools/test-portals.js` cover both halves, including that the block is what stops
-it — with the guard removed, the test shows the player leaving the session
-mid-walk. Properly shared portals would need portal records in the protocol,
-destinations named by join code rather than by a local slug, and travel that moves
-both players from one code to the other; that work has not been done.
+**A portal's destination is agreed, not decided.** Lighting a frame during a shared
+session asks the server where it goes; the server mints the answer once — a join
+code, a seed, a star seed and a theme — stores it against the frame's position, and
+tells everybody. The frame's position is its identity, so two players striking the
+same frame at the same instant ask the same question and get the same answer. That
+one rule is what stopped the original bug: each client used to invent its own
+destination, so the same doorway led two people into two different worlds.
+
+**Travelling moves the session rather than ending it.** Going through switches the
+socket from the district's code to the destination's, so the room follows him. Every
+other way of arriving somewhere — the district picker, Go home, a new world — still
+leaves the session, and that rule still lives in the one place every arrival passes
+through (`enterDistrict`), with the portal case marked by a flag rather than
+reimplemented.
+
+**A destination is found by its code, never by its name.** Going through the same
+portal twice used to mint a second world each time, because nothing tied where he
+arrived to where he had already been: *Quiet Hill, Quiet Hill 2, Quiet Hill 3*. The
+local district record now carries the room's code and is looked up by it.
+
+**One way home, not one each.** The return portal is built at a spot derived from the
+world itself rather than from where the player happens to be standing, so two players
+arriving seconds apart build the identical frame — which the server recognises as one
+portal. If they do diverge, the room's copy wins and the other is put out quietly,
+leaving its obsidian standing.
+
+**Worlds built alone become places you can both go.** Most of his portals were lit on
+his own and lead to districts that exist on one tablet. Starting a session gives each
+of those districts a join code and offers the portals to the room, so an evening's
+building becomes somewhere to visit together — with what he built still in it. If
+somebody else gets there first with an empty copy, his blocks go up when he follows,
+by the same resync a reconnect uses. Nothing is merged and nothing is lost.
+
+**When a doorway cannot take everybody it takes nobody**, and says why with a picture
+of the frame crossed out. That happens if the sync server is older than this feature,
+or if a portal could not be offered to the room (no storage left to write its code).
+Walking into it walks him straight through the frame — no countdown ring appears,
+because a ring that fills up and then refuses is a worse answer than never starting
+one. Playing alone, that same portal works normally.
+
+Covered end to end in `tools/test-multiplayer.js` against the real Worker: two
+players lighting one frame, both travelling, arriving in one world with one way home,
+a block placed there reaching the other player, four round trips leaving one district
+at each end, travelling in the same instant, a simultaneous strike from two raw
+sockets getting one destination, a world built alone becoming a shared room with its
+diamond tower intact on both screens, and a portal built together still working alone
+after a reload. Each of the four load-bearing rules above was checked by breaking it
+on purpose: removing the session carry ends the session mid-walk, removing the
+lookup-by-code reproduces *Quiet Hill 2* and *Quiet Hill 3* exactly, removing the
+server's record reuse hands out two destinations, and removing the adoption leaves his
+own portal invisible to the other player.
+
+One path has no end-to-end test: the "made on its own" picture, which needs a
+portals-capable server *and* a portal that could not be registered with it. The
+picture itself is checked (section 2d of `tools/test-portals.js`), and its sibling
+case — an out-of-date server — is covered in full by 12c and 12d.
 
 ### Deploying the server
 
@@ -187,7 +225,16 @@ exactly that.
 curl https://sync.henrysgame.com/health
 ```
 
-`ok look=1 characters=14` is current. Plain `ok` is an older Worker that drops the
+`ok look=1 characters=14 portals=1` is current. Anything shorter is an older Worker,
+and each missing marker costs a feature:
+
+| `/health` says | what is missing | what you see |
+| --- | --- | --- |
+| `ok look=1 characters=14 portals=1` | nothing | everything works |
+| `ok look=1 characters=14` | `portals=1` | portals refuse during shared play, with a picture saying why |
+| `ok` | both | strangers with strangers' names, and no shared portals |
+
+Plain `ok` is an older Worker that drops the
 character number, and the symptom is subtle rather than obvious: every player gets
 drawn from a guess, and the guess used to be character 0 &mdash; which is Henry, so
 a room of four looked like four Henrys. The game now falls back to the shirt colour
@@ -384,9 +431,9 @@ against a clamped clock would report 20 fps on a device actually managing 5.
 is the one that gets deployed &mdash; and drives real browser pages against it: two
 clients exchanging edits, a third and fourth arriving to find everything already
 built, eight filling a district and a ninth being turned away, a client dropping
-mid-session and reconnecting without losing a block, and a hostile name fed
-straight into the client to prove it never reaches the screen. It needs
-`npm ci` in `server/` first.
+mid-session and reconnecting without losing a block, a hostile name fed
+straight into the client to prove it never reaches the screen, and the whole of
+[travelling together](#travelling-together). It needs `npm ci` in `server/` first.
 
 Two of those checks used to be timing-dependent and went red on a loaded CI runner
 while passing on a quiet laptop, which is worse than either failing or passing

@@ -283,7 +283,8 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
      the finished-frame nudge, and "not while we are playing together". Counted
      against that list rather than a number, so adding a reason without a picture
      fails here instead of quietly showing him nothing. */
-  const NEEDED = MISSES.concat(['readyToLight', 'notWhileTogether']);
+  const NEEDED = MISSES.concat(['readyToLight', 'notWhileTogether',
+                                'portalMadeAlone']);
   check(`all ${pics.reasons.length} pictures draw something, and every reason a ` +
         `portal can refuse him has one`,
         NEEDED.every(w => pics.reasons.includes(w)) &&
@@ -878,11 +879,15 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
     /* Pretend a session is on, without a server: mp.start sets the flag and then
        fails to connect, which is exactly the state on a tablet mid-session. */
     H.mp.start('ZZZZZZ');
+    /* Nothing is listening, so nothing has said it can agree on where a portal
+       leads. That - not the fact that a session is on - is what holds portals back:
+       against the deployed server this same frame lights for everybody. */
+    const canShare = H.mp.portalsShared();
     const litWhileSharing = H.tryLight(b.probe.x, b.probe.y, b.probe.z);
     await new Promise(r => setTimeout(r, 120));
     const panel = H.hintPanel();
     const out = {
-      handled: litWhileSharing,
+      handled: litWhileSharing, canShare: canShare,
       lit: H.portals().filter(p => p.lit).length,
       districtsMade: H.districts().list.length - districtsBefore,
       words: panel.words, shown: panel.on,
@@ -893,12 +898,15 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
     out.litAfter = after.ok;
     return out;
   });
-  check('lighting a portal while sharing does not light it', together.lit === 0,
+  check('a room that cannot agree on a destination says so', together.canShare === false,
+        `portalsShared: ${together.canShare}`);
+  check('and lighting a portal there does not light it', together.lit === 0,
         JSON.stringify(together));
   check('and builds no district for one player to have and the other not',
         together.districtsMade === 0, `${together.districtsMade} districts appeared`);
   check('it says why, with a picture, rather than doing nothing',
-        together.shown && /playing alone/i.test(together.words), JSON.stringify(together));
+        together.shown && /server needs updating/i.test(together.words),
+        JSON.stringify(together));
   check('and the same frame lights fine once sharing is off',
         together.litAfter === true, JSON.stringify(together));
   note(`while sharing, lighting a portal says: "${together.words}"`);
@@ -957,7 +965,7 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         midSession.walked && midSession.walked.maxDwell === 0 &&
         midSession.ringOn === false, JSON.stringify(midSession));
   check('it says why, in a picture, while he is standing in it',
-        midSession.shown === true && /playing alone/i.test(midSession.words || ''),
+        midSession.shown === true && /server needs updating/i.test(midSession.words || ''),
         JSON.stringify(midSession));
   check('and the same portal takes him through again once he is playing alone',
         midSession.travelsAlone === true, JSON.stringify(midSession));
