@@ -4041,10 +4041,7 @@ function leadsBack(q,fromSlug,fromRoom){
    with a row of near-identical districts, because nothing tied the place he arrived
    at to the place he had already been. */
 function districtForRoom(p){
-  var entry=null;
-  for(var i=0;i<districtIndex.list.length;i++){
-    if(districtIndex.list[i].code===p.code){ entry=districtIndex.list[i]; break; }
-  }
+  var entry=districtWithCode(p.code);
   if(entry) return readJSON(districtKey(entry.slug));
   var themeKey=p.destTheme||'meadow';
   var rec=freshDistrict(nameForRoom(p.code,themeKey),themeKey);
@@ -4102,7 +4099,7 @@ function travelThrough(p){
          reading it, so the portal stays lit and he can try again. Putting it out
          would throw away a binding over a hiccup. */
       var listed=p.code
-        ? districtIndex.list.some(function(d){ return d.code===p.code; })
+        ? !!districtWithCode(p.code)
         : districtIndex.list.some(function(d){ return d.slug===p.dest; });
       travelling=false; dwell=0;
       if(listed){
@@ -4573,6 +4570,9 @@ function snapshot(){
     stars:stars.map(function(s){ return s.done?1:0; }),
     sel:selected,
     code:current&&current.code?current.code:null,
+    /* Codes this district used to be known by, so a portal bound to an old one still
+       finds it after the code was shortened. */
+    codes:current&&current.codes&&current.codes.length?current.codes.slice():null,
     v:2,                       /* 2 adds portals; v1 records simply have none */
     portals:portalsToSave(),
     created:current&&current.created?current.created:null,
@@ -4594,6 +4594,7 @@ function saveCurrent(){
   });
   entry=entry||{slug:rec.slug};
   entry.name=rec.name; entry.theme=rec.theme; entry.code=rec.code||null;
+  entry.codes=rec.codes||null;
   entry.created=rec.created; entry.lastPlayed=rec.lastPlayed;
   districtIndex.list.unshift(entry);
   districtIndex.current=rec.slug;
@@ -4629,7 +4630,7 @@ function enterDistrict(rec){
      through, rather than being reimplemented by each caller. */
   mpStopForSwitch();
   current={slug:rec.slug,name:rec.name,theme:rec.theme,created:rec.created,
-           code:rec.code||null};
+           code:rec.code||null,codes:rec.codes||null};
   seed=rec.seed>>>0;
   starSeed=(typeof rec.starSeed==='number')?rec.starSeed>>>0:seed;
   edits=rec.edits||{};
@@ -4866,7 +4867,11 @@ function makeJoinCode(){
    a name a child recognises instead of the code itself. */
 function mpCodeWords(code){
   var parts=String(code).split('-');
-  if(parts.length<2) return 'Shared District';   /* a short code has no words in it */
+  /* A short code has no words in it, so the name is made from the code itself -
+     the same way a portal's destination is named, and by the same hash, so the place
+     is called the same thing on every device. Better than six copies of "Shared
+     District" filling up the picker. */
+  if(parts.length<2) return nameForRoom(code,'meadow');
   parts.pop();
   var words=parts.filter(function(p){ return /[a-z]/.test(p); }).map(function(p){
     return p.charAt(0).toUpperCase()+p.slice(1);
@@ -4882,6 +4887,33 @@ function mpTidyCode(raw){
   /* A short code has no dashes at all, so it is simply upper-cased. */
   if(i<1) return s.toUpperCase();
   return s.slice(0,i).toLowerCase()+'-'+s.slice(i+1).toUpperCase();
+}
+/* Long codes were the first design and the server still accepts them, but nobody
+   should have to read "little-spring-mine-K4TRUYSC6J" down a telephone to a
+   grandparent. A district still carrying one is given a six-character code the next
+   time it is shared.
+
+   The old code is kept as an alias rather than thrown away. Portals bound to it -
+   and by now some are - still find this district, so shortening a code cannot orphan
+   a way home. The room on the server under the old code is simply left behind; his
+   local copy becomes the shared one again on the next join, so nothing is lost. */
+function isShortCode(c){ return /^[A-Z0-9]{6}$/.test(String(c||'')); }
+function shortenIfLong(){
+  if(!current||!current.code||isShortCode(current.code)) return;
+  var old=current.code;
+  current.codes=(current.codes||[]).concat([old]);
+  current.code=makeJoinCode();
+  scheduleSave(); doSave();
+}
+/* Any district known by this code, including by an old one it used to use. */
+function districtWithCode(code){
+  var hit=null;
+  districtIndex.list.forEach(function(d){
+    if(hit) return;
+    if(d.code===code) hit=d;
+    else if(d.codes&&d.codes.indexOf(code)>=0) hit=d;
+  });
+  return hit;
 }
 function mpEndpoint(code){
   var host=MP_HOST, scheme='wss';
@@ -4903,6 +4935,10 @@ var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
         /* stale is derived, never latched - see mpRefreshStale. staleWho says which
            thing is old: 'server', 'client', or null when nothing is. */
         stale:false, staleWho:null,
+        /* reunion: this district already carried this code, so we are coming back to
+           our own room rather than meeting a rival copy of it. pongs counts answers
+           to a ping, which is how a half-open socket is spotted after a sleep. */
+        reunion:false, pongs:0,
         /* Portals across a shared session. `portalsShared` is what the server told
            us it can do; `switching` and `arriving` mark the one arrival that keeps
            the session rather than ending it; `pendingReturn` is a way home waiting
@@ -5017,7 +5053,15 @@ function mpSend(o){
 function mpStart(code){
   if(!current) return;
   mp.wanted=true;
+  if(!code) shortenIfLong();
   mp.code=code||current.code||makeJoinCode();
+  /* Have we been in this room before? A district that already carried this code is
+     the shared district, not a rival copy of it - so there is nothing to ask about
+     and nothing to duplicate. Getting this wrong is what filled his picker with six
+     copies of "Little Spring Mine (mine)": once a shared district has been adopted,
+     the room's blocks are in the local save, so every rejoin looked like a client
+     turning up with a world of its own to protect. */
+  mp.reunion=!!(current.code&&current.code===mp.code);
   mp.retry=0;
   if(!current.code || current.code!==mp.code){
     current.code=mp.code;
@@ -5043,6 +5087,7 @@ function mpStop(quiet){
   mp.ever=false;
   mp.stale=false;
   mp.staleWho=null;
+  mp.reunion=false;
   mp.portalsShared=false;
   mp.arriving=false;
   mp.pendingReturn=null;
@@ -5124,6 +5169,60 @@ function mpRetry(){
   var wait=Math.min(15000, 1000*Math.pow(2,Math.min(mp.retry++,4)));
   mp.timer=setTimeout(function(){ mp.timer=null; mpConnect(); },wait);
 }
+
+/* Back from a locked screen, a switched tab, or a walk out of wifi range.
+
+   Putting a phone down closes the socket, and a phone that is asleep does not run
+   timers - so the patient exponential retry above was still sitting on a fifteen
+   second wait when he picked it up, and sometimes had not been scheduled at all.
+   From his side that looked like being kicked out of the game for putting the phone
+   on the table.
+
+   Waking up throws the wait away and connects now. Nothing here can start a session
+   that was not already wanted, so it costs a solo game nothing. */
+function mpWakeUp(){
+  if(!mp.wanted) return;
+  if(mp.ws && mp.ws.readyState===1){ mpProbe(); return; }
+  if(mp.ws) mpDropSocket();      /* stuck half-closed; see below */
+  if(mp.timer){ clearTimeout(mp.timer); mp.timer=null; }
+  mp.retry=0;
+  mpConnect();
+}
+/* Let go of a socket that is no longer usable but has not told us so.
+
+   A close handshake the far side never completes leaves it in CLOSING for ever, and
+   onclose - the only thing that starts a reconnect - never fires. The server is fixed
+   not to do that, but an older one deployed somewhere still would, and a phone that
+   silently stops receiving is not something to leave to good manners. */
+function mpDropSocket(){
+  var dead=mp.ws;
+  if(!dead) return;
+  mp.ws=null;
+  dead.onclose=null; dead.onmessage=null; dead.onerror=null; dead.onopen=null;
+  try{ dead.close(); }catch(e){}
+  mpClearPlayers();
+  if(mp.wanted) mpSetStatus('reconnecting');
+}
+/* A socket that survived a sleep can be half-open: readyState still says OPEN, and
+   nothing will ever arrive on it again. Waiting for the browser to notice can take
+   minutes. Poke it instead, and if nothing answers, close it so the reconnect path
+   above can do its job. */
+function mpProbe(){
+  if(!mp.wanted||!mp.ws||mp.ws.readyState!==1) return;
+  var was=mp.pongs, sock=mp.ws;
+  if(!mpSend({type:'ping'})) return;
+  setTimeout(function(){
+    if(mp.wanted&&mp.ws===sock&&mp.pongs===was){
+      try{ sock.close(4002,'no answer after waking'); }catch(e){}
+    }
+  },4000);
+}
+document.addEventListener('visibilitychange',function(){
+  if(!document.hidden) mpWakeUp();
+});
+window.addEventListener('focus',mpWakeUp);
+window.addEventListener('online',mpWakeUp);
+window.addEventListener('pageshow',mpWakeUp);
 function mpFull(){
   mp.wanted=false;
   if(mp.timer){ clearTimeout(mp.timer); mp.timer=null; }
@@ -5141,6 +5240,7 @@ function mpMessage(raw){
   if(m.type==='welcome'){ mpWelcome(m); return; }
   if(m.type==='joined'){ mpAddPlayer(m.player); mpPaintPanel(); return; }
   if(m.type==='left'){ mpRemovePlayer(m.id); mpPaintPanel(); return; }
+  if(m.type==='pong'){ mp.pongs++; return; }
   if(m.type==='moved'){ mpMoved(m); return; }
   if(m.type==='edited'){ mpRemoteEdit(m); return; }
   if(m.type==='portal'){ mpPortalIn(m.portal); return; }
@@ -5203,9 +5303,13 @@ function mpSettleWorld(w){
     toast('🌍 Sharing this district',2400);
     return Promise.resolve(true);
   }
-  if(mp.accepted){
-    /* A reconnect. Both sides may have moved on, so take the server's blocks and
-       push up anything of ours it has not got. Neither side loses work. */
+  if(mp.accepted||mp.reunion){
+    /* A reconnect, or coming back to a district we have shared under this code
+       before. Both sides may have moved on, so take the server's blocks and push up
+       anything of ours it has not got. Neither side loses work, and - unlike the
+       branch below - nothing is duplicated, because this is not somebody else's
+       district arriving to compete with ours. It is ours. */
+    mp.accepted=true;
     mpResync(w);
     mpSetStatus('sharing');
     mpPaintPanel();
@@ -5544,6 +5648,11 @@ function mpUpdate(dt){
   mp.clock+=dt;
   if(mp.clock>=MP_SEND){
     mp.clock=0;
+    /* Ten times a second, notice a socket that has stopped being open while we still
+       believe we are playing together. onclose is meant to tell us and usually does,
+       but a half-closed socket never gets one - and waiting for one is how somebody
+       ends up alone in a world without being told. */
+    if(mp.ws && mp.ws.readyState>1){ mpDropSocket(); mpRetry(); return; }
     var now=player.x.toFixed(2)+','+player.y.toFixed(2)+','+player.z.toFixed(2)+','+yaw.toFixed(2);
     if(now!==mp.last){
       if(mpSend({type:'move', x:+player.x.toFixed(2), y:+player.y.toFixed(2),
@@ -5729,8 +5838,8 @@ function mpJoinByCode(raw){
     return Promise.resolve(false);
   }
   /* Already have this district? Go back to it rather than making a second one. */
-  var known=null;
-  districtIndex.list.forEach(function(d){ if(d.code===code) known=d.slug; });
+  var hit=districtWithCode(code);
+  var known=hit?hit.slug:null;
   var step=known?switchDistrict(known)
                 :createDistrict(mpCodeWords(code),'meadow');
   return step.then(function(){
@@ -6026,9 +6135,12 @@ window.__henrycraft={
             seed:seed>>>0, theme:theme.key,
             list:districtIndex.list.map(function(d){
               return {slug:d.slug,name:d.name,theme:d.theme,code:d.code||null,
-                      lastPlayed:d.lastPlayed};
+                      codes:d.codes||null,lastPlayed:d.lastPlayed};
             })};
   },
+  /* Which district answers to this code, old codes included - the lookup travel uses
+     to find where a portal leads. */
+  districtByCode:function(c){ var d=districtWithCode(c); return d?d.slug:null; },
   createDistrict:createDistrict,
   switchDistrict:switchDistrict,
 
@@ -6443,6 +6555,12 @@ window.__henrycraft={
     stale:function(){ return mp.stale; },
     /* Which thing is out of date: 'server', 'client', or null. */
     staleWho:function(){ return mp.staleWho; },
+    /* Is a patient reconnect still pending? Waking up must throw it away rather than
+       leave him waiting fifteen seconds after picking the phone back up. */
+    retryPending:function(){ return !!mp.timer; },
+    sockState:function(){ return mp.ws?mp.ws.readyState:-1; },
+    wake:mpWakeUp,
+    reunion:function(){ return mp.reunion; },
     /* Whether the room can agree on where a portal goes. False against an older
        server, and then portals hold off rather than splitting the party. */
     portalsShared:function(){ return mp.portalsShared; },

@@ -1177,6 +1177,143 @@ function requireNode22() {
     note(`a world built alone (${inHis[0].slug}) became room ${inHis[0].code}, ` +
          `with his diamond tower intact on both screens`);
 
+    /* ---- three things from an evening of real play -------------------------- */
+    console.log('\nRejoining, waking up, and codes short enough to read out');
+    for (const label of ['S1', 'S2']) {
+      const pg = pages.find(p => p.label === label);
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+    const R = await newPlayer('R');
+
+    /* His picker had six districts called "Little Spring Mine (mine)". Once a shared
+       district has been adopted, the room's blocks live in the local save - so every
+       rejoin looked like a client turning up with a world of its own to protect, and
+       protecting it meant duplicating it. Rejoining your own room must not do that. */
+    const rc2 = code();
+    const rejoin = await R.evaluate(async c => {
+      const H = window.__henrycraft;
+      H.setBlock(30, H.surfaceY(30, 30) + 1, 30, H.ids.BRICK);
+      const before = H.districts().list.length;
+      const counts = [];
+      for (let i = 0; i < 4; i++) {
+        H.mp.start(c);
+        const until = Date.now() + 20000;
+        while (H.mp.status() !== 'sharing' && Date.now() < until) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+        counts.push({n: H.districts().list.length, reunion: H.mp.reunion(),
+                     status: H.mp.status()});
+        H.mp.stop();
+        await new Promise(r => setTimeout(r, 250));
+      }
+      return {before, counts, after: H.districts().list.length,
+              names: H.districts().list.map(d => d.name)};
+    }, rc2);
+    check('sharing the same district four times over does not clone it four times',
+          rejoin.after === rejoin.before,
+          JSON.stringify({before: rejoin.before, after: rejoin.after,
+                          names: rejoin.names}));
+    check('and after the first time it knows it is coming back to its own room',
+          rejoin.counts.slice(1).every(c => c.reunion === true) &&
+          rejoin.counts.every(c => c.status === 'sharing'),
+          JSON.stringify(rejoin.counts));
+    check('so nothing called "(mine)" is ever created',
+          !rejoin.names.some(n => /\(mine\)/.test(n)), JSON.stringify(rejoin.names));
+    note(`four shares of one district: ${rejoin.before} district before, ` +
+         `${rejoin.after} after`);
+
+    /* "A person gets kicked out very easy, like if they put their phone down." A
+       sleeping phone does not run timers, so the patient exponential retry was still
+       sitting on its wait when he picked it up. Waking must throw that away. */
+    const woke = await R.evaluate(async c => {
+      const H = window.__henrycraft;
+      H.mp.start(c);
+      const until = Date.now() + 20000;
+      while (H.mp.status() !== 'sharing' && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      const on = H.mp.status();
+      H.mp.drop();                                  /* the phone goes on the table */
+      /* Wait for the drop to actually land rather than assuming a fixed number of
+         milliseconds is enough. It is not: on the first run of this test the socket
+         had not finished closing, so there was no retry to observe and the check
+         after it passed having tested nothing. */
+      const t0 = Date.now();
+      const seen = Date.now() + 25000;
+      const trace = [];
+      while (!H.mp.retryPending() && Date.now() < seen) {
+        trace.push(H.mp.status() + '/' + H.mp.sockState() + (H.mp.retryPending() ? '+t' : ''));
+        await new Promise(r => setTimeout(r, 50));
+      }
+      const asleep = {status: H.mp.status(), pending: H.mp.retryPending(),
+                      noticedAfterMs: Date.now() - t0,
+                      trace: trace.slice(0, 4).join(' ')};
+      /* Picked up again: the real event a browser fires. */
+      document.dispatchEvent(new Event('visibilitychange'));
+      await new Promise(r => setTimeout(r, 100));
+      const poked = {pending: H.mp.retryPending(), status: H.mp.status(),
+                     wasPending: asleep.pending};
+      const back = Date.now() + 15000;
+      while (H.mp.status() !== 'sharing' && Date.now() < back) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      return {on, asleep, poked, ended: H.mp.status(), ms: Date.now()};
+    }, rc2);
+    check('a dropped connection leaves a patient retry waiting',
+          woke.on === 'sharing' && woke.asleep.pending === true,
+          JSON.stringify(woke));
+    /* The number matters, not just that it eventually happens. Before the server was
+       fixed to complete the closing handshake, this took 10,043ms - ten seconds in
+       which the game believed it was still playing together and nothing arrived.
+       Three seconds is a generous ceiling for a loaded CI runner; the real figure is
+       the poll interval. */
+    check(`and the drop is noticed at once, not eventually ` +
+          `(${woke.asleep.noticedAfterMs}ms)`,
+          woke.asleep.noticedAfterMs < 3000,
+          `took ${woke.asleep.noticedAfterMs}ms; the server may not be completing ` +
+          `the close handshake`);
+    /* wasPending is in the condition on purpose: without it this passes when there
+       was never a wait to throw away. */
+    check('and picking the phone back up throws the wait away instead of sitting on it',
+          woke.poked.wasPending === true && woke.poked.pending === false,
+          JSON.stringify(woke.poked));
+    check('so it is playing together again, not kicked out',
+          woke.ended === 'sharing', JSON.stringify(woke));
+    note(`a dropped socket was noticed after ${woke.asleep.noticedAfterMs}ms; ` +
+         `waking cleared the wait (${woke.asleep.pending} -> ${woke.poked.pending}) ` +
+         `and it is ${woke.ended}`);
+
+    /* "The code we have to use to sync up is way too long." His home district still
+       carried little-spring-mine-K4TRUYSC6J from the first time it was ever shared.
+       It gets a short one - and the old one keeps working, because portals are bound
+       to codes now and shortening one must not orphan a way home. */
+    const shortened = await R.evaluate(async lc => {
+      const H = window.__henrycraft;
+      H.mp.stop();
+      H.mp.start(lc);                       /* as it was, long code and all */
+      await new Promise(r => setTimeout(r, 400));
+      const was = H.mp.code();
+      H.mp.stop();
+      await new Promise(r => setTimeout(r, 200));
+      H.mp.start();                         /* shared again, no code given */
+      await new Promise(r => setTimeout(r, 400));
+      const now = H.mp.code();
+      const d = H.districts();
+      const me = d.list.filter(x => x.slug === d.current)[0] || {};
+      H.mp.stop();
+      return {was, now, aliases: me.codes, byOld: H.districtByCode(was),
+              byNew: H.districtByCode(now), slug: d.current};
+    }, codeLong('little-spring-mine'));
+    check('a district still carrying a long code is given a short one',
+          !/-/.test(shortened.now) && shortened.now.length === 6 &&
+          /-/.test(shortened.was), JSON.stringify(shortened));
+    check('and it still answers to the old one, so a portal bound to it is not orphaned',
+          shortened.byOld === shortened.slug && shortened.byNew === shortened.slug &&
+          (shortened.aliases || []).includes(shortened.was),
+          JSON.stringify(shortened));
+    note(`code shortened: ${shortened.was} -> ${shortened.now}, ` +
+         `old one still finds ${shortened.byOld}`);
+
     /* ---- the state the game is actually in until the worker is deployed ----
        Pressing the button with nothing listening must not produce an error, a
        dialog, or a game that stops working. This is also the tunnel case, and the

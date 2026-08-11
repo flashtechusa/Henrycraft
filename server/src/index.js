@@ -399,7 +399,26 @@ export class District {
     // to bounce arbitrary content through the server to another player.
   }
 
-  async webSocketClose(ws) { this.departed(ws); }
+  /* The client started closing - a phone going to sleep, a tab going away, a walk
+     out of wifi range. With WebSocket Hibernation the runtime does NOT echo the
+     close frame for us, so if this handler does not close its end the socket sits in
+     CLOSING on the other side: the browser never fires onclose, the game never knows
+     it has been disconnected, and it never tries to come back. Measured at ten
+     seconds on a local network before the client noticed; over a phone network it can
+     be indefinite.
+
+     That is "a person gets kicked out very easy, like if they put their phone down" -
+     except that they were not kicked out, they were left believing they were still
+     playing together while nothing arrived. */
+  async webSocketClose(ws, code, reason) {
+    this.departed(ws);
+    /* 1005 and 1006 must never be sent, and neither may anything outside the
+       permitted ranges - sending one throws and leaves the handshake incomplete,
+       which is the very thing being fixed. */
+    const out = (Number.isInteger(code) && code >= 3000 && code <= 4999) ? code : 1000;
+    try { ws.close(out, typeof reason === 'string' ? reason.slice(0, 100) : 'bye'); }
+    catch (e) { /* already gone; nothing left to complete */ }
+  }
   async webSocketError(ws) { this.departed(ws); }
 
   departed(ws) {

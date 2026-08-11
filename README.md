@@ -85,9 +85,19 @@ keep working.
 
 Joining with a code just joins &mdash; no question, no second button. The
 whose-copy-wins panel only appears for somebody who has actually **built**
-something in the district they are sharing, because that is the only time it is a
-real question. A **👥 count** sits next to the star at the top while sharing; tap
-it for who is here.
+something in the district they are sharing **and has not shared it under this code
+before**. That second condition was missing, and it filled the picker with six
+districts called *Little Spring Mine (mine)*: once a shared district has been
+adopted, the room's blocks live in the local save, so every rejoin looked like a
+client turning up with a world of its own to protect &mdash; and protecting it meant
+duplicating it. Coming back to your own room now resyncs instead, which loses nothing
+and copies nothing.
+
+A district that still carries one of the old long codes is given a short one the next
+time it is shared, and **keeps the old code as an alias**. Portals are bound to codes
+now, so shortening one without that would orphan a way home.
+
+A **👥 count** sits next to the star at the top while sharing; tap it for who is here.
 
 Up to **eight** people at once. A ninth is turned away politely and simply keeps
 playing in their own copy.
@@ -135,6 +145,29 @@ merged silently.
 background. A child is never shown an error dialog. When it comes back, the
 server's blocks arrive and anything built in the meantime is pushed up, so neither
 side loses work.
+
+**Putting a phone down used to look like being kicked out**, and the cause was on the
+server. With WebSocket Hibernation the runtime does not echo the closing frame for
+you: if `webSocketClose` does not close its own end, the browser's socket sits in
+`CLOSING` for ever, `onclose` never fires, and the game goes on believing it is still
+playing together while nothing arrives. Measured at **10,043 ms** on a local network;
+over a phone network it can be indefinite.
+
+Three things fix it, and the test measures the result rather than trusting it:
+
+- The server completes the handshake in `webSocketClose`, guarding the close code
+  (1005, 1006 and anything outside the permitted ranges throw if you try to send them,
+  which would leave the handshake incomplete all over again).
+- The game notices a socket that has stopped being `OPEN`, ten times a second, instead
+  of waiting for an `onclose` that may never come. This is the guarantee, because it
+  does not depend on which server version is deployed.
+- Waking from a locked screen, a switched tab or a return to wifi reconnects
+  immediately rather than sitting out the exponential backoff — a sleeping phone does
+  not run timers, so the wait was often not even scheduled.
+
+Each was measured separately: neither fix, 10,013 ms and the check fails; the client
+guard alone, 302 ms; both, 51 ms — which is the test's polling interval, so
+effectively at once.
 
 ### Travelling together
 
