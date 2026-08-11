@@ -416,6 +416,11 @@ body.touch #hint{display:none}
   background:rgba(232,69,60,.22);border:3px solid #e8453c;border-radius:12px;
   padding:8px 10px;margin:0 0 10px;font-size:13px;font-weight:800;line-height:1.35
 }
+/* The words are written in by mpPaintPanel, so before anything is wrong there are
+   none - and an empty red alarm box is worse than no box at all. Belt and braces
+   next to the hide class: whatever the state of that class, nothing draws until
+   there is something to say. */
+#staleWarn:empty{display:none}
 #roster{display:flex;flex-direction:column;gap:6px;margin:4px 0 10px}
 .rosterRow{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
 .rosterRow .dot{
@@ -4489,6 +4494,24 @@ function randomDistrictName(themeKey){
   var A=w?w.a:NAME_FIRST, B=w?w.b:NAME_SECOND;
   return A[(Math.random()*A.length)|0]+' '+B[(Math.random()*B.length)|0];
 }
+/* Could the game itself have made this name?
+
+   Two players in one world were calling it two different things - Sunny Creek on one
+   screen and Quiet Glen on the other - because whoever joined by code never learned
+   what the place was called. Passing the name between them is the fix, and this is
+   what makes passing it safe: only a name built from the game's own word lists is
+   ever accepted, so a name somebody typed over cannot travel and cannot be drawn.
+   Exactly the rule player names already follow, for exactly the same reason. */
+function isGeneratedName(name){
+  var m=/^([A-Za-z]+) ([A-Za-z]+)$/.exec(typeof name==='string'?name:'');
+  if(!m) return false;
+  var okA=NAME_FIRST.indexOf(m[1])>=0, okB=NAME_SECOND.indexOf(m[2])>=0;
+  for(var k in THEME_WORDS){
+    if(THEME_WORDS[k].a.indexOf(m[1])>=0) okA=true;
+    if(THEME_WORDS[k].b.indexOf(m[2])>=0) okB=true;
+  }
+  return okA&&okB;
+}
 
 /* ---------------- districts ----------------
    A district is one place, saved under its own key. The old code kept a single
@@ -4938,7 +4961,7 @@ var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
         /* reunion: this district already carried this code, so we are coming back to
            our own room rather than meeting a rival copy of it. pongs counts answers
            to a ping, which is how a half-open socket is spotted after a sleep. */
-        reunion:false, pongs:0,
+        reunion:false, pongs:0, attempts:0, heard:0, dupReason:null, openTimer:null,
         /* Portals across a shared session. `portalsShared` is what the server told
            us it can do; `switching` and `arriving` mark the one arrival that keeps
            the session rather than ending it; `pendingReturn` is a way home waiting
@@ -5075,6 +5098,7 @@ function mpStart(code){
 function mpStop(quiet){
   mp.wanted=false;
   if(mp.timer){ clearTimeout(mp.timer); mp.timer=null; }
+  mpClearOpenTimer();
   if(mp.ws){
     mpSend({type:'leave'});
     try{ mp.ws.close(1000,'left'); }catch(e){}
@@ -5140,19 +5164,45 @@ function mpStopForSwitch(){
 
 function mpConnect(){
   if(!mp.wanted || !mp.code || mp.ws) return;
+  mp.attempts++;
   var ws;
   try{ ws=new WebSocket(mpEndpoint(mp.code)); }
   catch(e){ mpRetry(); return; }
   mp.ws=ws;
   mpSetStatus(mp.retry?'reconnecting':'connecting');
   ws.onopen=function(){
+    /* The socket works, so the timer below has nothing left to catch. Cleared here
+       rather than when the welcome is processed: on a tablet drawing one frame a
+       second the welcome can sit in the queue for a while behind a frame, and killing
+       a perfectly good connection because the main thread was busy would cause the
+       very disconnection this is meant to prevent. */
+    mpClearOpenTimer();
     mp.retry=0;
     mpSend({type:'join', playerName:mpMe.name, colour:mpMe.colour,
             look:localLookIndex(),
             offer:{seed:seed, starSeed:starSeed, theme:theme.key,
+                   /* Only ever a name the game generated - see isGeneratedName. A name
+                      typed over by hand is simply not sent. */
+                   name:(current&&isGeneratedName(current.name))?current.name:null,
                    edits:mpShareableEdits()}});
   };
   ws.onmessage=function(e){ mpMessage(e.data); };
+  /* A connect that never finishes must not last for ever.
+
+     Everything else here recovers from a socket that closed; nothing recovered from one
+     that opened and then said nothing, or never opened at all. The status simply stayed
+     "Connecting…", which from the outside is indistinguishable from being left out of
+     the game - and it turned up about one run in four when switching rooms quickly.
+     Twelve seconds and we start again, which is what the reconnect path would have
+     done had the socket had the decency to close. */
+  mpClearOpenTimer();
+  mp.openTimer=setTimeout(function(){
+    mp.openTimer=null;
+    if(!mp.wanted) return;
+    if(mp.status==='sharing'||mp.status==='choose') return;
+    mpDropSocket();
+    mpRetry();
+  },12000);
   ws.onerror=function(){ /* onclose always follows; a child is shown nothing */ };
   ws.onclose=function(ev){
     mp.ws=null;
@@ -5164,9 +5214,16 @@ function mpConnect(){
 }
 /* Quiet, patient reconnection. Never a dialog: from his side the world simply
    carries on, alone, until the others reappear. */
+function mpClearOpenTimer(){
+  if(mp.openTimer){ clearTimeout(mp.openTimer); mp.openTimer=null; }
+}
 function mpRetry(){
   if(mp.timer || !mp.wanted) return;
-  var wait=Math.min(15000, 1000*Math.pow(2,Math.min(mp.retry++,4)));
+  /* 1, 2, 4, then 8 seconds for ever. It used to ramp to fifteen, which is a long time
+     to stand in a world alone waiting to be let back into a room that is definitely
+     there - and after several quick trips through portals the waits stack up. Eight is
+     still gentle on a server that is genuinely unreachable. */
+  var wait=Math.min(8000, 1000*Math.pow(2,Math.min(mp.retry++,3)));
   mp.timer=setTimeout(function(){ mp.timer=null; mpConnect(); },wait);
 }
 
@@ -5182,8 +5239,22 @@ function mpRetry(){
    that was not already wanted, so it costs a solo game nothing. */
 function mpWakeUp(){
   if(!mp.wanted) return;
-  if(mp.ws && mp.ws.readyState===1){ mpProbe(); return; }
-  if(mp.ws) mpDropSocket();      /* stuck half-closed; see below */
+  if(mp.ws){
+    /* CONNECTING (0) is left strictly alone. Treating "not open yet" as "broken" was
+       a bad bug: on a slow tablet the handshake takes a moment, and pageshow and focus
+       both fire around a page settling down - so every attempt was destroyed a
+       fraction of a second after it started and the game sat on "still trying to
+       reach the others" for ever. It only ever showed up on the slower device, which
+       is exactly the device a five-year-old is holding. */
+    if(mp.ws.readyState===1) mpProbe();          /* open: make sure it is really alive */
+    else if(mp.ws.readyState>1) mpRestartSocket();/* closing or closed: let it go */
+    return;
+  }
+  mpRestartSocket();
+}
+/* Throw away the patient wait and connect now. */
+function mpRestartSocket(){
+  if(mp.ws) mpDropSocket();
   if(mp.timer){ clearTimeout(mp.timer); mp.timer=null; }
   mp.retry=0;
   mpConnect();
@@ -5195,6 +5266,7 @@ function mpWakeUp(){
    not to do that, but an older one deployed somewhere still would, and a phone that
    silently stops receiving is not something to leave to good manners. */
 function mpDropSocket(){
+  mpClearOpenTimer();
   var dead=mp.ws;
   if(!dead) return;
   mp.ws=null;
@@ -5209,13 +5281,20 @@ function mpDropSocket(){
    above can do its job. */
 function mpProbe(){
   if(!mp.wanted||!mp.ws||mp.ws.readyState!==1) return;
+  /* If something arrived a moment ago the socket is plainly fine, and poking it costs
+     a message for nothing. */
+  if(Date.now()-mp.heard<5000) return;
   var was=mp.pongs, sock=mp.ws;
   if(!mpSend({type:'ping'})) return;
+  /* Twelve seconds, not four. The tablet draws about one frame a second and a frame is
+     a long synchronous lump of work; four seconds was easily short enough to time out a
+     perfectly good connection, and closing a good connection mid-session is how a
+     player ends up alone in a world - the very thing this is meant to prevent. */
   setTimeout(function(){
     if(mp.wanted&&mp.ws===sock&&mp.pongs===was){
       try{ sock.close(4002,'no answer after waking'); }catch(e){}
     }
-  },4000);
+  },12000);
 }
 document.addEventListener('visibilitychange',function(){
   if(!document.hidden) mpWakeUp();
@@ -5240,6 +5319,7 @@ function mpMessage(raw){
   if(m.type==='welcome'){ mpWelcome(m); return; }
   if(m.type==='joined'){ mpAddPlayer(m.player); mpPaintPanel(); return; }
   if(m.type==='left'){ mpRemovePlayer(m.id); mpPaintPanel(); return; }
+  mp.heard=Date.now();          /* proof the socket is alive, whatever this was */
   if(m.type==='pong'){ mp.pongs++; return; }
   if(m.type==='moved'){ mpMoved(m); return; }
   if(m.type==='edited'){ mpRemoteEdit(m); return; }
@@ -5264,7 +5344,9 @@ function mpWelcome(w){
   mp.ever=true;
   mpRefreshStale();
   mpSettleWorld(w).then(function(settled){
+    mpClearOpenTimer();                /* the welcome arrived; nothing to time out */
     if(!settled) return;               /* he is being asked whose copy wins */
+    mpAdoptRoomName(w.name);
     mpPortalsIn(w.portals);
     mpFlushPendingReturn();
     /* Everything already standing here becomes something they can walk through
@@ -5284,6 +5366,10 @@ function mpSettleWorld(w){
     mp.arriving=false;
     mp.accepted=true;
     if(!w.adopted && (w.seed>>>0)!==(seed>>>0)){
+      /* Recorded so a test can say why a copy was kept aside rather than only that one
+         was. A seed mismatch here means this device's record for that code describes a
+         different world from the room's, which should be rare. */
+      mp.dupReason='arriving '+(seed>>>0)+' vs room '+(w.seed>>>0);
       /* The room turns out to hold a different world from this device's copy of the
          same code. Everybody has to be in one world, so the room's wins - and the
          local copy is kept beside it rather than thrown away. */
@@ -5547,6 +5633,22 @@ function roomIdentityFor(slug){
       });
     });
   }).catch(function(){ return null; });
+}
+
+/* Call the place what everybody else calls it.
+
+   Checked against the game's own word lists first, so the only thing that can arrive
+   here is a name this game could have generated itself. Anything else is ignored and
+   the local name stands. */
+function mpAdoptRoomName(name){
+  if(!current||!isGeneratedName(name)) return;
+  if(current.name===name) return;
+  var want=uniqueName(name);
+  current.name=want;
+  districtIndex.list.forEach(function(d){ if(d.slug===current.slug) d.name=want; });
+  refreshDistrictHud();
+  buildDistrictList();
+  scheduleSave(); doSave();
 }
 
 /* The way home he built on arriving, offered to the room now that we are in it. */
@@ -5843,7 +5945,14 @@ function mpJoinByCode(raw){
   var step=known?switchDistrict(known)
                 :createDistrict(mpCodeWords(code),'meadow');
   return step.then(function(){
-    if(current) current.code=code;
+    /* Deliberately NOT stamping the code on the district here.
+
+       mpStart works out whether we have been in this room before by asking whether the
+       district already carried this code - and stamping it a line early forged that
+       answer for a district created two seconds ago. The effect was subtle and bad: a
+       joiner "resynced" instead of adopting, so it kept its own randomly seeded terrain
+       and merely had the other player's blocks painted on top. Same room, same code,
+       different world. mpStart stamps it. */
     mp.joining=true;
     mpStart(code);
     return saveCurrent();
@@ -6141,6 +6250,7 @@ window.__henrycraft={
   /* Which district answers to this code, old codes included - the lookup travel uses
      to find where a portal leads. */
   districtByCode:function(c){ var d=districtWithCode(c); return d?d.slug:null; },
+  isGeneratedName:isGeneratedName,
   createDistrict:createDistrict,
   switchDistrict:switchDistrict,
 
@@ -6559,6 +6669,10 @@ window.__henrycraft={
        leave him waiting fifteen seconds after picking the phone back up. */
     retryPending:function(){ return !!mp.timer; },
     sockState:function(){ return mp.ws?mp.ws.readyState:-1; },
+    /* How many sockets this session has opened. One connect should be one attempt;
+       a jump here means something is destroying connections it should leave alone. */
+    attempts:function(){ return mp.attempts; },
+    dupReason:function(){ return mp.dupReason||null; },
     wake:mpWakeUp,
     reunion:function(){ return mp.reunion; },
     /* Whether the room can agree on where a portal goes. False against an older

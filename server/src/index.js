@@ -77,6 +77,14 @@ function safeColour(raw) {
   return COLOURS.includes(raw) ? raw : COLOURS[0];
 }
 function num(v) { return typeof v === 'number' && Number.isFinite(v) ? v : null; }
+/* A district name, structurally. The real guarantee is on the receiving client, which
+   checks it against the word lists a name is built from - but nothing arbitrary is
+   stored here either, so there is no field on this server a grown-up could type into
+   and have a child read. */
+function safeDistrictName(raw) {
+  if (typeof raw !== 'string') return null;
+  return /^[A-Z][a-z]{1,11} [A-Z][a-z]{1,11}$/.test(raw) ? raw : null;
+}
 
 /* ---------------- portals ----------------
 
@@ -281,6 +289,12 @@ export class District {
           seed: num(offer.seed) ?? Math.floor(Math.random() * 1e9),
           starSeed: num(offer.starSeed) ?? Math.floor(Math.random() * 1e9),
           theme: typeof offer.theme === 'string' ? offer.theme : 'meadow',
+          /* What the place is called, so two players do not end up calling one world
+             two different things. Only ever a name the game generated: the client
+             refuses to send anything else, and the client that receives it checks it
+             against its own word lists before drawing it. This is structural belt to
+             that braces - two capitalised words and nothing else gets stored. */
+          name: safeDistrictName(offer.name),
         };
         if (offer.edits && typeof offer.edits === 'object') {
           for (const [k, v] of Object.entries(offer.edits)) {
@@ -301,6 +315,7 @@ export class District {
         seed: this.meta.seed,
         starSeed: this.meta.starSeed,
         theme: this.meta.theme,
+        name: this.meta.name || null,
         edits: Object.fromEntries(this.edits),
         /* Always an array, even when empty. The game uses its presence to tell a
            server that can share portals from one that cannot: an older Worker sends

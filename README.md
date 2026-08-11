@@ -97,6 +97,18 @@ A district that still carries one of the old long codes is given a short one the
 time it is shared, and **keeps the old code as an alias**. Portals are bound to codes
 now, so shortening one without that would orphan a way home.
 
+**One world, one name.** Whoever joins by code used to name the place for themselves,
+so the same district was *Sunny Creek* on one screen and *Quiet Glen* on the other. The
+name travels with the room now &mdash; and only a name the game itself could have
+generated crosses the wire. It is checked against the very word lists a district name is
+built from, on the way out and again on the way in, so a name typed over by hand is
+never sent and never drawn. That is the same rule player names follow, for the same
+reason: there must be no way for a grown-up to type something a child then reads.
+
+A district called *Home* is the exception and keeps its own name: nearly everybody has
+one already, so adopting it would land as *Home 2* and read as more confusing than a
+different name.
+
 A **👥 count** sits next to the star at the top while sharing; tap it for who is here.
 
 Up to **eight** people at once. A ninth is turned away politely and simply keeps

@@ -24,6 +24,7 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const net = require('net');
 const {spawn} = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -205,6 +206,14 @@ function requireNode22() {
   }
   const waitFor = (page, fn, arg, ms) =>
     page.waitForFunction(fn, arg, {timeout: ms || 20000}).then(() => true).catch(() => false);
+  /* "In the same world together" is two facts, and the second one lags: the socket has
+     to reach the new room and the roster has to come back. Asserting after a fixed
+     sleep caught a client still connecting and reported it as being alone - a test
+     failure that looked exactly like the bug it was meant to be watching for. */
+  const waitTogether = (page, ms) => waitFor(page, () => {
+    const H = window.__henrycraft;
+    return H.mp.status() === 'sharing' && H.mp.players().length === 1;
+  }, null, ms || 45000);
 
   try {
     // ---- 1: two clients, edits both ways --------------------------------------
@@ -942,7 +951,7 @@ function requireNode22() {
     await backHome(T2);
     await waitFor(T1, c => window.__henrycraft.mp.code() === c, homeCodes[0]);
     await waitFor(T2, c => window.__henrycraft.mp.code() === c, homeCodes[0]);
-    await sleep(1200);
+    await Promise.all([waitTogether(T1), waitTogether(T2)]);
     const home = await Promise.all([T1, T2].map(p => p.evaluate(() => {
       const H = window.__henrycraft, d = H.districts();
       return {code: d.code, slug: d.current, room: H.mp.code(),
@@ -959,17 +968,28 @@ function requireNode22() {
       await goThrough(T1); await goThrough(T2);
       await waitFor(T1, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
       await waitFor(T2, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
-      await sleep(500);
+      await Promise.all([waitTogether(T1), waitTogether(T2)]);
       await backHome(T1); await backHome(T2);
       await waitFor(T1, c => window.__henrycraft.mp.code() === c, homeCodes[0]);
       await waitFor(T2, c => window.__henrycraft.mp.code() === c, homeCodes[0]);
-      await sleep(500);
+      await Promise.all([waitTogether(T1), waitTogether(T2)]);
     }
+    /* A generous deadline on purpose. Two software-rasterised worlds in one browser,
+       eight room switches back to back with no human pause between them, is harder on
+       a connection than anything a person does - and a client that is legitimately
+       mid-reconnect ("Lost them for a moment") is behaving correctly, not failing.
+       Long enough to let a real recovery finish; short enough that a genuine failure
+       to reconnect still fails the check. */
+    await Promise.all([waitTogether(T1, 45000), waitTogether(T2, 45000)]);
     const later = await Promise.all([T1, T2].map(p => p.evaluate(() => {
       const d = window.__henrycraft.districts();
-      return {districts: d.list.length, code: d.code,
+      const H = window.__henrycraft;
+      return {districts: d.list.length, code: d.code, seed: d.seed,
               names: d.list.map(x => x.name),
-              others: window.__henrycraft.mp.players().length};
+              why: H.mp.dupReason(), status: H.mp.status(),
+              sock: H.mp.sockState(), attempts: H.mp.attempts(),
+              pending: H.mp.retryPending(), line: H.mp.statusLine(),
+              others: H.mp.players().length};
     })));
     check('three round trips later there is still one world at each end',
           later[0].districts === home[0].districts &&
@@ -988,7 +1008,7 @@ function requireNode22() {
     await Promise.all([goThrough(T1), goThrough(T2)]);
     await waitFor(T1, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
     await waitFor(T2, c => window.__henrycraft.mp.code() === c, seenBy[0].code);
-    await sleep(1500);
+    await Promise.all([waitTogether(T1), waitTogether(T2)]);
     const together = await Promise.all([T1, T2].map(p => p.evaluate(() => {
       const H = window.__henrycraft, d = H.districts();
       return {code: d.code, others: H.mp.players().length,
@@ -1282,6 +1302,139 @@ function requireNode22() {
     note(`a dropped socket was noticed after ${woke.asleep.noticedAfterMs}ms; ` +
          `waking cleared the wait (${woke.asleep.pending} -> ${woke.poked.pending}) ` +
          `and it is ${woke.ended}`);
+
+    /* One world, one name.
+
+       He and his son ended up in the same district calling it two different things -
+       Sunny Creek on one screen, Quiet Glen on the other - because whoever joins by
+       code never learned what the place was called. The name travels now, and only a
+       name the game itself could have generated is ever accepted, so nothing anybody
+       typed can cross. */
+    const nc = code();
+    const N1 = await newPlayer('N1');
+    const N2 = await newPlayer('N2');
+    const sharerSays = await N1.evaluate(async c => {
+      const H = window.__henrycraft;
+      /* A district with a name the game generated. The very first district is called
+         "Home", which is not two words from the word lists - so nothing travels for
+         it, and the joiner keeps its own name. That is deliberate: nearly everybody
+         has a "Home" already, so adopting the name would land as "Home 2" and be more
+         confusing than a different name. */
+      await H.createDistrict('Bright Valley', 'meadow');
+      H.mp.start(c);
+      const until = Date.now() + 20000;
+      while (H.mp.status() !== 'sharing' && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      return {name: H.districts().list.filter(d => d.slug === H.districts().current)[0].name,
+              generated: H.isGeneratedName(H.districts().list
+                .filter(d => d.slug === H.districts().current)[0].name)};
+    }, nc);
+    await N2.evaluate(c => window.__henrycraft.mp.join(c), nc);
+    await waitFor(N2, () => window.__henrycraft.mp.status() === 'sharing');
+    const agreed = await waitFor(N2, n => {
+      const d = window.__henrycraft.districts();
+      const here = d.list.filter(x => x.slug === d.current)[0];
+      return !!here && here.name === n;
+    }, sharerSays.name, 15000);
+    const theirName = await N2.evaluate(() => {
+      const d = window.__henrycraft.districts();
+      return (d.list.filter(x => x.slug === d.current)[0] || {}).name;
+    });
+    check('the world he shared has a name the game generated',
+          sharerSays.generated === true, JSON.stringify(sharerSays));
+    check('and whoever joins by code calls the place the same thing',
+          agreed && theirName === sharerSays.name,
+          `sharer says "${sharerSays.name}", joiner says "${theirName}"`);
+    /* The same room is not the same world unless the ground is the same shape. A
+       joiner that resyncs instead of adopting keeps its own randomly seeded terrain
+       and merely has the other player's blocks painted on top - same code, same
+       roster, different hills. That is what a forged "we have been here before"
+       signal did, and it only showed up as an intermittent failure elsewhere. */
+    const seeds = await Promise.all([N1, N2].map(p => p.evaluate(() =>
+      ({seed: window.__henrycraft.districts().seed,
+        theme: window.__henrycraft.districts().theme,
+        why: window.__henrycraft.mp.dupReason()}))));
+    check('and stands on the same ground, not just in the same room',
+          seeds[0].seed === seeds[1].seed && seeds[0].theme === seeds[1].theme,
+          JSON.stringify(seeds));
+    note(`joiner adopted the world itself: seed ${seeds[1].seed} on both`);
+    /* The safety half: a name typed over by hand must not travel, because a name that
+       travels is a name another player reads. */
+    const typed = await N1.evaluate(() => {
+      const H = window.__henrycraft;
+      return {ok: H.isGeneratedName('Sunny Creek'),
+              typed: H.isGeneratedName('call me at 555 1234'),
+              markup: H.isGeneratedName('<img src=x onerror=alert(1)>'),
+              sneaky: H.isGeneratedName('Sunny Creek '),
+              words: H.isGeneratedName('Zzzz Qqqq')};
+    });
+    check('a name that is not two words from the game\'s own lists is refused',
+          typed.ok === true && typed.typed === false && typed.markup === false &&
+          typed.sneaky === false && typed.words === false,
+          JSON.stringify(typed));
+    note(`one world, one name: both call it "${sharerSays.name}"`);
+    for (const label of ['N1', 'N2']) {
+      const pg = pages.find(p => p.label === label);
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+
+    /* A wake event landing while the socket is still shaking hands.
+
+       This is the bug that stopped Henry's tablet connecting at all: "not open yet"
+       was treated as "broken", and pageshow and focus both fire around a page
+       settling down - so on the slower of two devices every attempt was destroyed a
+       moment after it started, and it sat on "Still trying to reach the others" for
+       ever. It never showed up on the PC, because the handshake there finished before
+       any event landed.
+
+       Fired three times in a row on purpose, which is what a tablet does. */
+    /* A server that accepts the connection and then says nothing at all, so the
+       socket stays in CONNECTING for as long as we like. Locally a real handshake
+       finishes in under ten milliseconds, which is why sampling for readyState 0
+       never caught it and the first version of this check passed having tested
+       nothing. */
+    const slow = net.createServer(sock => { sock.on('error', () => {}); });
+    await new Promise(r => slow.listen(0, '127.0.0.1', r));
+    const slowPort = slow.address().port;
+    const SL = await newPlayer('slow', null,
+      `http://127.0.0.1:${port}/index.html?sync=127.0.0.1:${slowPort}`);
+    const midShake = await SL.evaluate(async c => {
+      const H = window.__henrycraft;
+      H.mp.start(c);
+      /* The socket is not made synchronously - mpStart waits on the stored identity
+         first - so firing once immediately tests nothing (readyState -1: no socket).
+         Fire repeatedly across the whole window instead, and record whether a
+         CONNECTING socket was ever actually caught in the act. */
+      /* Wait until the socket really is mid-handshake, which against this server it
+         stays. Then fire what a tablet fires while a page settles down. */
+      const wait = Date.now() + 8000;
+      while (H.mp.sockState() !== 0 && Date.now() < wait) {
+        await new Promise(r => setTimeout(r, 20));
+      }
+      const caught = H.mp.sockState() === 0;
+      const before = H.mp.attempts();
+      for (let i = 0; i < 40; i++) {
+        window.dispatchEvent(new Event('pageshow'));
+        window.dispatchEvent(new Event('focus'));
+        document.dispatchEvent(new Event('visibilitychange'));
+        await new Promise(r => setTimeout(r, 10));
+      }
+      return {caught, before, after: H.mp.attempts(),
+              state: H.mp.sockState(), status: H.mp.status()};
+    }, rc2);
+    /* `caught` is in the condition deliberately: if the socket was never actually
+       mid-handshake, this proves nothing and must not pass. */
+    check('waking up while still connecting does not kill the attempt',
+          midShake.caught === true && midShake.after === midShake.before &&
+          midShake.state === 0,
+          JSON.stringify(midShake));
+    note(`120 wake events fired at a socket still shaking hands: ` +
+         `${midShake.before} connection attempt before, ${midShake.after} after`);
+
+    const slowPg = pages.find(p => p.label === 'slow');
+    if (slowPg) { await slowPg.ctx.close(); pages.splice(pages.indexOf(slowPg), 1); }
+    slow.close();
 
     /* "The code we have to use to sync up is way too long." His home district still
        carried little-spring-mine-K4TRUYSC6J from the first time it was ever shared.
