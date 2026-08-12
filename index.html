@@ -490,6 +490,10 @@ body.touch #hint{display:none}
         here as well. Nothing about any of it can be failed. -->
    <div class="hudrow" id="raceRow">
     <div class="chip hide" id="lapChip">🏁 <b><span id="lapNum">1</span></b></div>
+    <!-- Only while a drift is charging or a boost is running. Sparks while it charges, in
+         the colour it has reached; a flame while it fires. Something to watch for, and the
+         only way he finds out he has a boost at all. -->
+    <div class="chip hide" id="boostChip"><span id="boostIcon">✨</span></div>
     <div class="chip hide" id="timeChip">⏱ <b><span id="lapNow">0.0s</span></b><span
          id="lapBest" class="dim"></span></div>
    </div>
@@ -3058,6 +3062,154 @@ function updateStars(dt,t){
   }
 }
 
+/* ---------------- item boxes ----------------
+
+   Boxes round the circuit that give him something when he drives through one, and come
+   back a few seconds later so the lap is never used up.
+
+   What is deliberately not here is a weapon. The genre this borrows from is built on
+   hitting whoever is in front of you, and the brief for this game is not: nothing in it may
+   hurt, chase or startle him, and remote players cannot affect each other at all. So every
+   item works on the kart that collected it and on nothing else, and the catch-up mechanic
+   pays out in the trailing driver's favour rather than by punishing the leader - the same
+   drama, with nobody hit.
+
+   A box gives its item straight away rather than holding it in a slot. Holding one and
+   choosing the moment is most of the tactics in a kart game and all of the button-work,
+   and he drives with one thumb: drive through the box, go fast. Nothing to learn. */
+var ITEM_EVERY=52;          /* blocks of lap between boxes */
+var ITEM_BACK=6.0;          /* seconds before a collected box comes back */
+var ITEM_REACH=2.4;
+var ITEMS=[
+  {key:'mushroom', label:'🍄 Mushroom!',            boost:1.3, star:0},
+  {key:'triple',   label:'🍄🍄🍄 Three mushrooms!', boost:2.8, star:0},
+  {key:'golden',   label:'✨ Golden mushroom!',      boost:5.0, star:0},
+  /* The star is the best thing in the box and it still hurts nobody: for four seconds the
+     grass is as quick as the road, so the whole district is track. */
+  {key:'star',     label:'🌟 Star! Grass is fast!',  boost:4.0, star:4.0}
+];
+var itemBoxes=[], itemHeld=null;
+/* How many boxes he has driven through since this circuit was built. A running total,
+   because the boxes themselves cannot answer the question: one collected ten seconds ago has
+   already come back and looks exactly like one never touched, which is how a test of mine
+   managed to report one pickup out of five. */
+var itemsTaken=0;
+var boxGeo=new THREE.BoxGeometry(0.82,0.82,0.82);
+/* One material per box rather than one shared between them. They cycle through the colours
+   at their own offsets, and a shared material would make every box on the circuit the same
+   colour as the one nearest him - the geometry is shared, which is where the saving is. */
+var boxGlowMat=new THREE.MeshBasicMaterial({color:srgb(0xbfe9ff),transparent:true,
+                                            opacity:0.30,side:THREE.BackSide});
+
+function clearItemBoxes(){
+  itemBoxes.forEach(function(b){
+    scene.remove(b.mesh);
+    b.core.material.dispose();       /* its own material, so its own to throw away */
+  });
+  itemBoxes=[];
+  itemHeld=null;
+  itemsTaken=0;
+}
+function placeItemBoxes(){
+  clearItemBoxes();
+  if(!trackInfo) return;
+  var count=Math.max(4,Math.round(trackInfo.length/ITEM_EVERY));
+  for(var i=0;i<count;i++){
+    /* Spread by distance round the lap, and offset side to side so a row of them is not a
+       single line down the middle he can follow without steering. Held well inside the
+       kerbs: a box out by the edge is a box he sails past. */
+    var at=trackAtFraction(trackInfo.shape,(i+0.35)/count);
+    var lean=((i%3)-1)*2.1;
+    var g=new THREE.Group();
+    var core=new THREE.Mesh(boxGeo,new THREE.MeshLambertMaterial({color:srgb(0xffffff)}));
+    var glow=new THREE.Mesh(boxGeo,boxGlowMat); glow.scale.setScalar(1.35);
+    g.add(core,glow);
+    var bx=clamp(at.x-at.tz*lean,2,WX-2), bz=clamp(at.z+at.tx*lean,2,WZ-2);
+    var by=trackInfo.y+1.25;
+    g.position.set(bx,by,bz);
+    scene.add(g);
+    itemBoxes.push({x:bx,y:by,z:bz,mesh:g,core:core,back:0});
+  }
+}
+
+/* How much of a leg-up he could do with, 0 to 1.
+
+   Two things say he is having a hard time of it, and the more urgent of them wins. Being
+   behind somebody else round the lap is the obvious one, and it is the only one that exists
+   while he is racing his dad. The other works when he is on his own, which is most of the
+   time: a lap going worse than his own best is a lap that could do with a mushroom. Neither
+   takes anything from anybody - it only decides how good the next box is. */
+function itemHelp(){
+  if(!trackInfo) return 0;
+  var n=trackInfo.pts.length, lap=trackInfo.length;
+  var help=0;
+  var mine=trackNearest(trackInfo.shape,player.x,player.z).i;
+  for(var id in mp.players){
+    var p=mp.players[id];
+    var g=p.group?p.group.position:null;
+    if(!g) continue;
+    var theirs=trackNearest(trackInfo.shape,g.x,g.z).i;
+    var d=theirs-mine;
+    if(d>n/2) d-=n;
+    if(d<-n/2) d+=n;
+    if(d>0) help=Math.max(help,Math.min(1,(d/n)/0.35));   /* a third of a lap back = all of it */
+  }
+  /* Off his own best pace. Only once he has a best to be off. */
+  if(bestLap!==null && lapTime>0){
+    var round=Math.abs(lapTotal)/n;                        /* how far round this lap he is */
+    if(round>0.15){
+      var pace=lapTime/(round*bestLap);                    /* 1 = on for a best, 2 = twice as long */
+      help=Math.max(help,Math.min(1,(pace-1.05)/0.45));
+    }
+  }
+  return clamp(help,0,1);
+}
+/* Which item a box gives. Weighted by itemHelp, so a driver in front gets a mushroom and a
+   driver a long way back gets a star. Never nothing: an empty box is a broken box. */
+function rollItem(help){
+  var w=[1-help*0.85, 0.35+help*0.25, 0.10+help*0.55, 0.05+help*0.60];
+  var total=0, i;
+  for(i=0;i<w.length;i++){ if(w[i]<0.02) w[i]=0.02; total+=w[i]; }
+  var r=Math.random()*total;
+  for(i=0;i<w.length;i++){ r-=w[i]; if(r<=0) return ITEMS[i]; }
+  return ITEMS[0];
+}
+function giveItem(it){
+  itemHeld=it.key;
+  itemsTaken++;
+  player.boost=Math.max(player.boost,it.boost);
+  if(it.star>0) player.star=Math.max(player.star,it.star);
+  sfx('star');
+  toast(it.label,1600);
+  burst(new THREE.Vector3(player.x,player.y+1.1,player.z),0xbfe9ff,18);
+  return it;
+}
+function updateItemBoxes(dt,t){
+  for(var i=0;i<itemBoxes.length;i++){
+    var b=itemBoxes[i];
+    if(b.back>0){
+      b.back-=dt;
+      if(b.back<=0) b.mesh.visible=true;
+      continue;
+    }
+    b.mesh.rotation.y+=dt*1.4;
+    b.mesh.rotation.x=Math.sin(t*0.9+i)*0.3;
+    b.mesh.position.y=b.y+Math.sin(t*1.8+i*1.1)*0.14;
+    /* Cycling through the colours, so a box never looks like one of the stars. */
+    b.core.material.color.setHSL((t*0.30+i*0.13)%1,0.85,0.62);
+    if(!player.kart) continue;
+    var dx=player.x-b.x, dy=(player.y+0.9)-b.mesh.position.y, dz=player.z-b.z;
+    /* Same generosity as the stars: at kart speed a fixed radius can be driven clean
+       through between two frames, which reads as the box being broken. */
+    var reach=ITEM_REACH+Math.hypot(player.vx,player.vz)*dt;
+    if(dx*dx+dy*dy+dz*dz<reach*reach){
+      b.mesh.visible=false;
+      b.back=ITEM_BACK;
+      giveItem(rollItem(itemHelp()));
+    }
+  }
+}
+
 /* ---------------- particles ---------------- */
 var particles=[];
 var pGeo=new THREE.BoxGeometry(0.14,0.14,0.14);
@@ -3088,7 +3240,13 @@ function updateParticles(dt){
 /* ---------------- player ---------------- */
 var PW=0.29, PH=1.5, EYE=1.34;
 var player={x:WX/2,y:20,z:WZ/2,vx:0,vy:0,vz:0,onGround:false,fly:false,walk:0,flyBoost:0,
-            kart:false};
+            kart:false,
+            /* drift: seconds held in the current slide, 0 when not drifting. tier: which
+               spark colour it has reached, -1 for none yet. boost and star: seconds left
+               of each. star makes grass as quick as tarmac - see the speed it picks. */
+            drift:0, driftDir:0, driftTier:-1, driftSlack:0, boost:0, star:0,
+            /* seconds spent going nowhere with the throttle down - see rescueKart */
+            stuck:0};
 /* How a kart drives. Fast enough to be exciting on a 64-block circuit, slow enough that
    a corner can be judged by a five-year-old, and every number here is about how it
    feels rather than about winning: there is nothing to win. */
@@ -3097,7 +3255,53 @@ var player={x:WX/2,y:20,z:WZ/2,vx:0,vy:0,vz:0,onGround:false,fly:false,walk:0,fl
    the grid loop's corners come out near 4. Turning more slowly than that would mean
    corners he physically cannot take at full throttle, which is not a challenge to a
    five-year-old, it is a wall. */
-var KART_TOP=11.5, KART_GRASS=5.5, KART_ACCEL=3.6, KART_TURN=3.4;
+/* KART_TURN has to be enough for a BOOSTED kart to take the tightest corner the generator
+   makes, not just an unboosted one. The tightest takeable radius is speed over turn rate:
+   at 11.5 blocks a second and 4.2 that is 2.7, comfortably inside the 4.5 the circuits
+   measure - but a boost puts him at 15.9, which needs 3.5. Getting this wrong is not a
+   handling complaint, it is a kart that cannot make the corner at all: at 17.25 and 4.2 the
+   figure was 4.1 against a 4.5 corner, and two seeds out of twenty became undriveable -
+   the test driver spent 60% of one of them wedged in the scenery off the outside of a
+   hairpin. */
+var KART_TOP=11.5, KART_GRASS=5.5, KART_ACCEL=5.2, KART_TURN=4.6;
+
+/* Powerslides.
+
+   Automatic, with no button to hold. Every kart game triggers a drift off a shoulder
+   button held through the corner, and that is a two-handed job: steer with one thumb,
+   hold with the other, release on the exit. He is five and he steers with one thumb on a
+   tablet. So a hard turn at speed IS the drift - lean on the stick and the kart slides
+   and starts charging, straighten up and it fires. Everything a drift does here is a
+   reward for turning hard, and there is nothing to learn and nothing to miss: not
+   drifting simply means no boost.
+
+   Three tiers with the colours the genre taught everyone - blue, orange, gold. The first
+   comes quickly on purpose, because a boost he never sees is a mechanic he does not know
+   he has. */
+/* Below this a slide is a wobble rather than a drift - and it has to sit under KART_GRASS,
+   not over it. At 6.0 it was above the 5.5 a kart does on grass, so running wide out of a
+   corner killed the slide at exactly the moment a slide is worth having, and a skid pad
+   measured a drift breaking and restarting eleven times in three seconds. */
+var DRIFT_MIN_SPEED=4.5;
+var DRIFT_STEER=0.55;                 /* how hard he has to be turning to start one */
+var DRIFT_HOLD=0.30;                  /* and how little it takes to keep one going */
+var DRIFT_GRACE=0.20;                 /* seconds below that before it finally lets go */
+var DRIFT_TURN_BONUS=1.5;             /* a sliding kart turns tighter than a gripping one */
+/* Scaled to the corners this circuit generator actually makes, which had to be measured
+   rather than guessed at: over four circuits and six minutes of committed driving, a slide
+   lasts 0.5 to 0.8 seconds on average and the longest single one is 1.8 to 2.4. The first
+   set of numbers put gold at 1.9 - past the longest corner on most seeds - so seventy
+   seconds of driving never once saw it. A tier nobody reaches is not a tier. */
+var DRIFT_TIERS=[0.35,0.75,1.35];     /* seconds of slide for blue, orange, gold */
+var DRIFT_BOOST=[0.60,1.00,1.55];     /* seconds of boost each of them is worth */
+var DRIFT_COLOURS=[0x49c3ff,0xff8a1f,0xffe14a];
+/* 1.38 rather than 1.5, for the same reason: it is the number that decides how tight a
+   corner a boosting kart can still get round. */
+var BOOST_TOP=1.38, BOOST_ACCEL=11.0;
+/* Slip: while drifting the kart points further into the corner than it is travelling,
+   which is the whole look of the thing. Held to a slide rather than a spin - it can only
+   ever lean into the turn, and it unwinds the moment the drift ends. */
+var DRIFT_SLIP=0.34;
 var yaw=0.6, pitch=-0.20, firstPerson=false, camDist=5.0, camNow=5.0;
 var CAM_MIN=2.0;   /* never closer than this - below it, look through his eyes instead */
 
@@ -3179,6 +3383,7 @@ var lapTime=0, lastLap=null, bestLap=null, lapClean=true;
 function resetLaps(){
   lapCount=0; lapTotal=0; lapIdx=null;
   lapTime=0; lastLap=null; bestLap=null; lapClean=true;
+  clearKartMotion();
 }
 function lapClock(t){
   if(t===null||t===undefined) return '–';
@@ -3195,6 +3400,9 @@ function paintLapClock(now){
   lapPaintAt=now;
   var e=document.getElementById('lapNow');
   if(e) e.textContent=lapClock(lapTime);
+  /* The drift pip changes several times a second while a corner is being taken, which is
+     faster than lap boundaries repaint it - so it rides along with the clock. */
+  paintKartButton();
 }
 
 function buildKart(shirtHex){
@@ -3235,17 +3443,127 @@ function ensureKart(){
   kartGroup.userData.shirt=kartShirt();
   scene.add(kartGroup);
 }
+/* Sparks off the back wheels while he is drifting, and a flame while he is boosting.
+
+   Eased in and out rather than snapped, so a kart does not appear to be sideways the frame
+   the stick crosses a threshold, and thrown a few times a second rather than every frame -
+   sixty sparks a second is a particle system with nothing left for anything else. */
+var slipShown=0, sparkAt=0;
 function drawKart(dt,moving){
   if(!player.kart){ if(kartGroup) kartGroup.visible=false; return; }
   ensureKart();
   kartGroup.visible=true;
   kartGroup.position.set(player.x,player.y,player.z);
-  kartGroup.rotation.y=yaw+Math.PI;
+  var wantSlip=player.drift>0?(player.driftDir*DRIFT_SLIP*1.5):0;
+  slipShown+=(wantSlip-slipShown)*Math.min(1,dt*9);
+  kartGroup.rotation.y=yaw+Math.PI+slipShown;
   for(var i=0;i<kartWheels.length;i++) kartWheels[i].rotation.x-=moving*dt*3.2;
+
+  var now=performance.now()/1000;
+  if((player.drift>0||player.boost>0) && now-sparkAt>0.055){
+    sparkAt=now;
+    /* Behind him, at wheel height. */
+    var bx=player.x+Math.sin(yaw)*0.55, bz=player.z+Math.cos(yaw)*0.55;
+    var col=player.boost>0 ? 0xfff0a0
+          : (player.driftTier>=0 ? DRIFT_COLOURS[player.driftTier] : 0xdfe8f0);
+    burst(new THREE.Vector3(bx,player.y+0.22,bz),col,player.boost>0?3:2);
+  }
 }
 
 /* In and out. One button with a kart on it, and no way to get it wrong: if there is
    nowhere sensible to stand he simply stays in the kart. */
+/* Start, hold or finish a powerslide. Called once per physics step, from the karting
+   branch of updatePlayer, with the stick reading and the speed it already worked out. */
+function updateDrift(st,rolling,dt){
+  var fast=rolling>DRIFT_MIN_SPEED && player.onGround && !player.fly;
+  var dir=st>0?1:-1, hard=Math.abs(st);
+
+  if(player.drift>0){
+    /* Turning the other way is a decision, and ends the slide at once. */
+    if(hard>DRIFT_HOLD && dir!==player.driftDir){ endDrift(); return; }
+    /* Otherwise it takes less to hold a slide than to start one, and easing off for a
+       moment does not throw it away.
+
+       Without that, nothing drifted. Nobody holds a stick at a constant angle through a
+       corner - a real thumb wanders and a steering correction crosses back over the
+       threshold several times a second - so a drift that ends the instant the stick dips
+       ends immediately, every time. Measuring found 38 slides started in two minutes of
+       driving and not one of them living long enough to earn a single spark. */
+    /* Scrubbing off a little speed mid-corner does not cancel it either, for the same
+       reason easing the stick does not: both happen constantly and neither means he has
+       stopped drifting. Dropping below the floor for longer than the grace does. */
+    if(fast && hard>DRIFT_HOLD) player.driftSlack=0;
+    else {
+      player.driftSlack+=dt;
+      if(player.driftSlack>DRIFT_GRACE){ endDrift(); return; }
+    }
+  } else {
+    if(!fast || hard<=DRIFT_STEER) return;
+    player.driftDir=dir;
+    player.driftSlack=0;
+  }
+
+  player.drift+=dt;
+  var tier=-1, i;
+  for(i=0;i<DRIFT_TIERS.length;i++) if(player.drift>=DRIFT_TIERS[i]) tier=i;
+  if(tier>player.driftTier){
+    player.driftTier=tier;
+    sfx('place');
+  }
+}
+/* Finish one, and pay out whatever it charged. */
+function endDrift(){
+  if(player.driftTier>=0){
+    /* The longer boost wins rather than the newer one, so chaining drifts never shortens
+       a boost he has already earned. */
+    player.boost=Math.max(player.boost,DRIFT_BOOST[player.driftTier]);
+    burst(new THREE.Vector3(player.x,player.y+0.35,player.z),
+          DRIFT_COLOURS[player.driftTier],10+player.driftTier*6);
+    sfx('star');
+  }
+  player.drift=0; player.driftDir=0; player.driftTier=-1; player.driftSlack=0;
+}
+/* Put him back on the road.
+
+   Every kart game has somebody who picks you up and sets you down again, and this one needs
+   it more than most: with a boost he can be doing sixteen blocks a second, and a corner
+   taken too fast puts him in the trees. Held against a hillside with the throttle down, a
+   five-year-old has no idea that reverse exists.
+
+   So if the kart is pressed against something and going nowhere while he is asking it to
+   go, it is lifted back to the nearest point of the road, pointed the way the lap goes, and
+   set down. No damage, no penalty, no fuss - the only cost is that a lap he was lifted
+   through cannot become his best time, the same rule flying gets.
+
+   It is also what made the racing tests stop being flaky. The same twenty seeds passed one
+   run and failed six checks the next, because which item a box gives is random and a lucky
+   golden mushroom into a hairpin is a kart in the scenery. Tuning the boost down until the
+   dice usually landed well would have hidden that rather than fixed it. */
+var STUCK_LIMIT=1.4;
+function rescueKart(){
+  if(!trackInfo) return;
+  var n=trackInfo.pts.length;
+  var near=trackNearest(trackInfo.shape,player.x,player.z);
+  var p=trackInfo.pts[near.i], q=trackInfo.pts[(near.i+8)%n];
+  player.x=p.x; player.z=p.z; player.y=trackInfo.y+1.02;
+  yaw=Math.atan2(-(q.x-p.x),-(q.z-p.z));
+  player.vx=player.vy=player.vz=0;
+  player.stuck=0;
+  player.drift=0; player.driftDir=0; player.driftTier=-1; player.driftSlack=0;
+  /* A lap he was carried through is not a lap he drove. */
+  lapClean=false;
+  sfx('place');
+  burst(new THREE.Vector3(player.x,player.y+0.6,player.z),0x9fd8ff,14);
+  toast('🛟 Back on the track!',1500);
+}
+
+/* Everything a kart is doing, back to nothing: used when he gets out, when a world is
+   replaced under him, and by a test that wants a clean start. */
+function clearKartMotion(){
+  player.drift=0; player.driftDir=0; player.driftTier=-1; player.driftSlack=0;
+  player.boost=0; player.star=0; player.stuck=0;
+}
+
 function toggleKart(){
   player.kart=!player.kart;
   if(player.kart){
@@ -3257,6 +3575,7 @@ function toggleKart(){
     sfx('place');
     toast('🏎️ Off you go!',1600);
   } else {
+    clearKartMotion();
     sfx('step');
     toast('🚶 Out of the kart',1400);
   }
@@ -3291,6 +3610,15 @@ function paintKartButton(){
      he is driving. It is a keyboard crib for a grown-up and it comes straight back. */
   var hint=document.getElementById('hint');
   if(hint) hint.classList.toggle('drivinghide',driving);
+  var bc=document.getElementById('boostChip');
+  if(bc){
+    var charging=driving&&player.drift>0, firing=driving&&player.boost>0;
+    bc.classList.toggle('hide',!(charging||firing));
+    if(charging||firing){
+      document.getElementById('boostIcon').textContent=
+        firing?'🔥' : (player.driftTier<0?'✨' : ['💙','🧡','💛'][player.driftTier]);
+    }
+  }
   var tc=document.getElementById('timeChip');
   if(tc){
     tc.classList.toggle('hide',!driving);
@@ -3405,7 +3733,17 @@ function updatePlayer(dt){
        kart while parked would let him turn on a sixpence, which looks wrong and makes
        a corner harder to judge. */
     var bite=0.35+0.65*Math.min(1,rolling/4.5);
-    yaw-=st*KART_TURN*bite*dt;
+    updateDrift(st,rolling,dt);
+    /* A sliding kart turns tighter than a gripping one, which is what makes a drift worth
+       starting on a hairpin rather than only on the way out of it. */
+    yaw-=st*KART_TURN*(player.drift>0?DRIFT_TURN_BONUS:1)*bite*dt;
+    if(player.boost>0) player.boost=Math.max(0,player.boost-dt);
+    if(player.star>0) player.star=Math.max(0,player.star-dt);
+    /* Wedged: asking to go somewhere and not going. Only counted while he is actually on
+       the throttle, so parking up to look at the view is never mistaken for being stuck. */
+    if(rolling<0.9 && Math.abs(input.fwd)>0.2) player.stuck+=dt;
+    else player.stuck=0;
+    if(player.stuck>STUCK_LIMIT) rescueKart();
     s=0;
   } else if(isTouch){
     /* on a touchscreen the stick steers instead of strafing, so turning around
@@ -3423,6 +3761,12 @@ function updatePlayer(dt){
        not a punishment - it is a reason to enjoy the road - so it is a nudge rather
        than a wall, and nothing about being off the track can hurt him or stop him. */
     speed=onRoadAt(player.x,player.y,player.z)?KART_TOP:KART_GRASS;
+    /* A star does not make him invincible, because there is nothing here to be invincible
+       from. What it does is make the grass no slower than the road, so for a few seconds
+       the whole district is a track and cutting the corner is the fun rather than the
+       mistake. */
+    if(player.star>0) speed=KART_TOP;
+    if(player.boost>0) speed*=BOOST_TOP;
     if(swim) speed=Math.min(speed,3.2);
     if(f<0) speed*=0.42;
   }
@@ -3440,7 +3784,18 @@ function updatePlayer(dt){
   var accel=player.onGround||player.fly?18:8;
   /* A kart gathers speed instead of arriving at it, which is most of what makes going
      fast feel fast. */
-  if(karting) accel=player.onGround?KART_ACCEL:2.2;
+  if(karting) accel=player.onGround?(player.boost>0?BOOST_ACCEL:KART_ACCEL):2.2;
+  /* The slide. While drifting, what the kart is asked for points further round the corner
+     than where it is going, so it travels at an angle to the way it faces - which is the
+     whole look of a powerslide. Leaning the wish rather than damping the velocity keeps it
+     inside the one place that decides how a kart moves, and it can only ever lean into the
+     turn, so it slides and never spins. */
+  if(karting && player.drift>0){
+    var sl=-player.driftDir*DRIFT_SLIP;
+    var cs=Math.cos(sl), sn=Math.sin(sl);
+    var lx=wishX*cs-wishZ*sn, lz=wishX*sn+wishZ*cs;
+    wishX=lx; wishZ=lz;
+  }
   player.vx+=(wishX-player.vx)*Math.min(1,accel*dt);
   player.vz+=(wishZ-player.vz)*Math.min(1,accel*dt);
 
@@ -4459,7 +4814,7 @@ function showWin(){
 el('winAgain').addEventListener('click',function(){
   el('win').classList.add('hide');
   starSeed=(starSeed*7919+104729)>>>0;   /* new star layout only */
-  placeStars(null);
+  placeStars(null); placeItemBoxes();
   scheduleSave();
   toast('10 new stars hidden!');
 });
@@ -5734,7 +6089,7 @@ function enterDistrict(rec){
   applyEdits();
   for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
   rebuildAll();
-  placeStars(rec.stars||null);
+  placeStars(rec.stars||null); placeItemBoxes();
   spawnAnimals();
   spawnFish();
   recountFire();
@@ -6572,7 +6927,7 @@ function mpAdoptServerCopy(){
     applyEdits();
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
-    placeStars(null); spawnAnimals(); spawnFish(); recountFire();
+    placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); recountFire();
     resetLaps();
     portals=[]; reindexPortals();
     /* The room's portals go back on straight away, or a district that was adopted
@@ -7325,6 +7680,7 @@ function frame(){
     updateAnimals(dt);
     updateFish(dt,now);
     updateStars(dt,now);
+    updateItemBoxes(dt,now);
     updateLaps(dt);
     paintLapClock(now);
     animateFire(dt);
@@ -7506,6 +7862,44 @@ window.__henrycraft={
   },
   toggleKart:toggleKart,
   laps:function(){ return lapCount; },
+  /* Drifting and boosting, as numbers. */
+  kartState:function(){
+    return {stuck:+player.stuck.toFixed(2),
+            drift:+player.drift.toFixed(2), tier:player.driftTier,
+            dir:player.driftDir, slack:+player.driftSlack.toFixed(3),
+            boost:+player.boost.toFixed(2), star:+player.star.toFixed(2),
+            speed:+Math.hypot(player.vx,player.vz).toFixed(2),
+            shown:{hidden:getComputedStyle(document.getElementById('boostChip'))
+                           .display==='none',
+                   icon:document.getElementById('boostIcon').textContent}};
+  },
+  /* Every box on the circuit: where it is, and whether it is out at the moment. */
+  itemBoxes:function(){
+    return itemBoxes.map(function(b){
+      return {x:+b.x.toFixed(2), y:+b.y.toFixed(2), z:+b.z.toFixed(2),
+              back:+b.back.toFixed(2), out:b.mesh.visible};
+    });
+  },
+  itemHeld:function(){ return itemHeld; },
+  itemsTaken:function(){ return itemsTaken; },
+  /* Repaint the HUD on demand. The real game does this ten times a second from the
+     animation loop; a test that drives without running the loop has to ask. */
+  paintHud:function(){ paintKartButton(); },
+  itemHelp:function(){ return +itemHelp().toFixed(3); },
+  /* Roll a lot of boxes at a given amount of help, so the weighting can be measured rather
+     than argued about. Does not touch the kart. */
+  rollItems:function(help,n){
+    var out={};
+    ITEMS.forEach(function(it){ out[it.key]=0; });
+    for(var i=0;i<n;i++) out[rollItem(help).key]++;
+    return out;
+  },
+  /* Hand him one by name, for checking what each one does without waiting to find a box. */
+  giveItemNamed:function(key){
+    for(var i=0;i<ITEMS.length;i++) if(ITEMS[i].key===key) return giveItem(ITEMS[i]).key;
+    return null;
+  },
+  clearKartMotion:clearKartMotion,
   /* The clock, the lap he just did, his best here, and whether the lap in progress still
      counts as driven. */
   lapTimes:function(){
@@ -7538,6 +7932,12 @@ window.__henrycraft={
     playing=true;
     var dt=1/60, steps=Math.max(1,Math.round(seconds/dt));
     var offRoad=0, best=0, minY=99, maxSpeed=0, stalled=0;
+    /* What the drifting did over the run: how much of it was spent sliding, how much
+       boosting, how many slides were finished and the best spark reached. */
+    var drifted=0, boosted=0, driftsDone=0, bestTier=-1, wasDrift=false;
+    /* The longest single slide of the run, which is the number that decides whether three
+       tiers is two tiers and a rumour. */
+    var longestDrift=0;
     input.jump=false; input.down=false;
     for(var i=0;i<steps;i++){
       input.fwd=throttleFn?throttleFn(i*dt):1;
@@ -7548,6 +7948,15 @@ window.__henrycraft={
          collects nothing - which is exactly what the first version of this reported,
          and it was the harness rather than the game. */
       updateStars(dt,i*dt);
+      updateItemBoxes(dt,i*dt);
+      if(player.drift>0){
+        drifted++;
+        bestTier=Math.max(bestTier,player.driftTier);
+        longestDrift=Math.max(longestDrift,player.drift);
+      }
+      if(wasDrift && player.drift===0) driftsDone++;
+      wasDrift=player.drift>0;
+      if(player.boost>0) boosted++;
       if(!onRoadAt(player.x,player.y,player.z)) offRoad++;
       /* Sitting still with the throttle open means wedged against something, which is
          the one situation a five-year-old cannot get himself out of. */
@@ -7560,6 +7969,8 @@ window.__henrycraft={
     playing=wasPlaying;
     return {laps:lapCount, turned:+best.toFixed(3),
             offRoadFrames:offRoad, stalledFrames:stalled, frames:steps,
+            driftFrames:drifted, boostFrames:boosted, drifts:driftsDone,
+            bestTier:bestTier, longestDrift:+longestDrift.toFixed(2),
             minY:+minY.toFixed(2),
             maxSpeed:+maxSpeed.toFixed(2),
             at:{x:+player.x.toFixed(2), y:+player.y.toFixed(2), z:+player.z.toFixed(2)}};
@@ -7589,7 +8000,14 @@ window.__henrycraft={
     if(!trackInfo) return 1;
     var n=trackInfo.pts.length;
     var near=trackNearest(trackInfo.shape,player.x,player.z);
-    var A=trackInfo.pts[near.i], B=trackInfo.pts[(near.i+26)%n], C=trackInfo.pts[(near.i+52)%n];
+    /* Look further ahead the faster he is going - about a second and a half of road either
+       way. A fixed look-ahead was fine while a kart did one speed; with boosts it was
+       reading the corner a boosting kart was already in, so the driver never lifted, ran
+       wide, and buried itself in the trees outside a hairpin. */
+    var spd=Math.hypot(player.vx,player.vz);
+    var step=Math.max(12,Math.round((5+spd*1.1)/0.34/2));
+    var A=trackInfo.pts[near.i], B=trackInfo.pts[(near.i+step)%n],
+        C=trackInfo.pts[(near.i+step*2)%n];
     var area=Math.abs((B.x-A.x)*(C.z-A.z)-(C.x-A.x)*(B.z-A.z))/2;
     var ab=Math.hypot(B.x-A.x,B.z-A.z), bc=Math.hypot(C.x-B.x,C.z-B.z),
         ca=Math.hypot(A.x-C.x,A.z-C.z);
@@ -8116,7 +8534,7 @@ window.__henrycraft={
     generateWorld();
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
-    placeStars(null); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
+    placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
     resetLaps();
     return {theme:theme.key,seed:seed,waterLevel:WATER_LEVEL};
   },
@@ -8159,7 +8577,7 @@ window.__henrycraft={
     generateWorld();
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
-    placeStars(null); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
+    placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
     resetLaps();
     return seed;
   },

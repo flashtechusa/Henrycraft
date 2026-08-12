@@ -296,6 +296,54 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
          `${(Math.max(...pv) * 100).toFixed(0)}% of a district, within a tenth of what the ` +
          `lap's own length accounts for (it was 57% to 64% before the world grew)`);
 
+    /* Every square of the road, not just the centre line.
+
+       The check above walks the middle of the road every seventh sample, which is 256 points
+       out of five thousand squares of tarmac - so a hole at the kerb, or a boulder a block
+       off the racing line, was invisible to it. A hole in a road at fifteen blocks a second
+       is a jolt he did not ask for, and this game does not do jolts. Leaves are allowed
+       through: they hang over the verge and he drives under them. */
+    const surface = await page.evaluate(n => {
+      const H = window.__henrycraft, ids = H.ids, out = [];
+      for (let i = 0; i < n; i += 4) {
+        H.loadThemeSeed('racing', 3000 + i * 37);
+        const t = H.track(), W = H.dims().WX;
+        let squares = 0, holes = 0, blocked = 0;
+        const worst = [];
+        for (let x = 0; x < W; x++) for (let z = 0; z < W; z++) {
+          let best = 1e9;
+          for (let k = 0; k < t.pts.length; k += 3) {
+            const d = Math.hypot(t.pts[k].x - (x + 0.5), t.pts[k].z - (z + 0.5));
+            if (d < best) best = d;
+          }
+          if (best > t.half) continue;
+          squares++;
+          const on = H.getBlock(x, t.y, z);
+          if (on !== ids.ROAD && on !== ids.ROADLINE && on !== ids.GRID && on !== ids.KERB) {
+            holes++;
+            if (worst.length < 5) worst.push({x, z, block: on, what: 'not road'});
+          }
+          for (let up = 1; up <= 3; up++) {
+            const ab = H.getBlock(x, t.y + up, z);
+            if (ab !== ids.AIR && ab !== ids.LEAVES) {
+              blocked++;
+              if (worst.length < 5) worst.push({x, z, up, block: ab, what: 'in the way'});
+            }
+          }
+        }
+        out.push({seed: 3000 + i * 37, squares, holes, blocked, worst});
+      }
+      return out;
+    }, SEEDS);
+    check('every square of the road is road, with no holes anywhere in it',
+          surface.every(s => s.holes === 0),
+          JSON.stringify(surface.filter(s => s.holes)));
+    check('and nothing solid stands anywhere on it, not just on the racing line',
+          surface.every(s => s.blocked === 0),
+          JSON.stringify(surface.filter(s => s.blocked)));
+    note(`${surface.reduce((a, s) => a + s.squares, 0)} squares of tarmac checked across ` +
+         `${surface.length} circuits, block by block, for holes and obstructions`);
+
     // ---- 3: he starts on the grid, in a kart --------------------------------
     console.log('\n3. he arrives on the start line');
     const start = await page.evaluate(() => {
@@ -681,12 +729,23 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
       const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       if (!H.kart()) H.toggleKart();
       const atStart = H.lapTimes();
-      /* Two laps, driven properly. */
-      H.drive(120, () => H.autoSteer(), () => H.autoThrottle());
+      /* Lap by lap, recording each one as it lands. Driving a fixed two minutes and then
+         comparing the best against the last was the first version, and it is wrong now that
+         a lap can be marked as not-driven: a rescued or flown lap is timed and shown but
+         never becomes the best, so the last lap really can be quicker than the best one. */
+      const seen = [];
+      let laps = H.laps();
+      for (let i = 0; i < 200 && seen.length < 3; i++) {
+        H.drive(1, () => H.autoSteer(), () => H.autoThrottle());
+        if (H.laps() > laps) {
+          laps = H.laps();
+          const t = H.lapTimes();
+          seen.push({last: t.last, best: t.best, clean: t.clean});
+        }
+      }
       await frame();
       const after = H.lapTimes();
-      const laps = H.laps();
-      return {atStart, after, laps, lapLength: H.lapLength()};
+      return {atStart, after, laps, seen, lapLength: H.lapLength()};
     });
     check('the clock starts at nothing and runs while he drives',
           timed.atStart.now === 0 && timed.atStart.last === null &&
@@ -694,10 +753,15 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
     check(`a completed lap is given a time (${timed.after.last}s)`,
           timed.laps >= 2 && timed.after.last !== null && timed.after.last > 20 &&
           timed.after.last < 90, JSON.stringify(timed));
-    /* The best has to be a real lap he did, and never slower than one. */
-    check('and his best is the quickest of them, not the last of them',
-          timed.after.best !== null && timed.after.best <= timed.after.last + 0.001,
-          JSON.stringify(timed.after));
+    /* The best never gets worse, and it is one of the laps he actually drove. */
+    check('his best never goes up, lap after lap',
+          timed.seen.every((l, i) => i === 0 || l.best <= timed.seen[i - 1].best + 0.001),
+          JSON.stringify(timed.seen));
+    check('and it is the quickest of the laps he drove all of himself',
+          timed.after.best !== null &&
+          Math.abs(timed.after.best -
+                   Math.min(...timed.seen.map(l => l.last))) < 0.02,
+          JSON.stringify({best: timed.after.best, laps: timed.seen}));
     check('the clock restarts for the next lap rather than running on',
           timed.after.now < timed.after.last, JSON.stringify(timed.after));
     /* And the chip agrees with the clock behind it - which is the part that would break
@@ -724,17 +788,25 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
       H.drive(120, () => H.autoSteer(), () => H.autoThrottle());
       const honest = H.lapTimes();
       /* Now fly part of a lap and finish it. */
+      const lapsBefore = H.laps();
       H.setFly(true);
       H.drive(4, () => H.autoSteer(), () => H.autoThrottle());
       const midFlight = H.lapTimes();
       H.setFly(false);
-      H.drive(120, () => H.autoSteer(), () => H.autoThrottle());
+      /* Finish exactly this lap and stop. Driving on for a fixed two minutes instead was the
+         first version, and it failed for an honest reason: a later clean lap beat the old
+         best fair and square, which says nothing about the flown one. */
+      for (let i = 0; i < 150 && H.laps() === lapsBefore; i++) {
+        H.drive(1, () => H.autoSteer(), () => H.autoThrottle());
+      }
       const afterFlying = H.lapTimes();
-      return {honest, midFlight, afterFlying};
+      return {honest, midFlight, afterFlying, lapsBefore, lapsAfter: H.laps()};
     });
     check('flying marks the lap as not driven',
           flown.midFlight.clean === false, JSON.stringify(flown.midFlight));
     check('and a lap with flying in it never becomes his best',
+          flown.lapsAfter === flown.lapsBefore + 1 &&
+          flown.afterFlying.last !== null &&
           flown.afterFlying.best === flown.honest.best, JSON.stringify(flown));
     /* And the clean flag has to recover, or every lap after one flight is untimeable. */
     check('the lap after that counts again',
@@ -761,6 +833,293 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
           walked.backIn.now === 0 && walked.backIn.clean === true,
           JSON.stringify(walked));
     note(`out of the kart the clock held at ${walked.onFoot.now}s and restarted at 0`);
+
+    // ---- 8d: powerslides -----------------------------------------------------
+    console.log('\n8d. leaning on a corner slides the kart and pays a boost');
+    const drift = await page.evaluate(() => {
+      const H = window.__henrycraft;
+      /* A driver who commits to a corner, which is what a thumb does: autoSteer aims at the
+         centre line and is forever correcting, so it never holds a slide. Multiplying and
+         clamping it saturates the stick through a corner and leaves it near nothing on a
+         straight - a person, roughly.
+
+         The first version of this used a skid pad instead: hold the stick at 0.9 and drive
+         in a circle. That leaves the road at once, scrubs down to four blocks a second, and
+         cannot sustain a drift at all - so it measured the rig rather than the game. */
+      const committed = () => Math.max(-1, Math.min(1, H.autoSteer() * 3.5));
+      const grid = () => {
+        H.loadThemeSeed('racing', 4242);
+        if (!H.kart()) H.toggleKart();
+        H.clearKartMotion();
+      };
+
+      /* A minute of real driving, and what the drifting did over it. */
+      grid();
+      const run = H.drive(60, committed, () => H.autoThrottle());
+
+      /* A straight line cannot start one. */
+      grid();
+      H.drive(2.0, () => 0, () => 1);
+      const straight = H.kartState();
+
+      /* Charge one up on the road, watching the chip at every step. */
+      grid();
+      let charging = null;
+      const icons = [];
+      for (let i = 0; i < 600 && !charging; i++) {
+        H.drive(0.05, committed, () => H.autoThrottle());
+        H.paintHud();
+        const k = H.kartState();
+        icons.push({tier: k.tier, boost: k.boost, icon: k.shown.icon, hidden: k.shown.hidden});
+        if (k.tier >= 0 && k.boost === 0) charging = k;
+      }
+      /* One gentle step must not throw the charge away.
+
+         A hard step first, because the grace period is shared: the committed driver has
+         already spent some of it on its own corrections, so easing off from an unknown
+         amount of slack measures the driver rather than the rule. Holding hard for a frame
+         is what resets it, and is what a thumb through a corner is doing anyway. */
+      const dir = charging ? (charging.dir || 1) : 1;
+      H.drive(0.05, () => 0.9 * dir, () => 1);
+      const held = H.kartState();
+      H.drive(0.12, () => 0.15 * dir, () => 1);
+      const wobbled = H.kartState();
+      /* Letting go properly ends it and pays out. */
+      H.drive(0.5, () => 0, () => 1);
+      const released = H.kartState();
+
+      /* Turning the other way throws the charge away. A fresh slide starts the same step,
+         because the stick is already over far enough to start one - so what is checked is
+         that the sparks are gone, not that the drift is. */
+      grid();
+      let charged2 = null;
+      for (let i = 0; i < 600 && !charged2; i++) {
+        H.drive(0.05, committed, () => H.autoThrottle());
+        const k = H.kartState();
+        if (k.tier >= 0 && k.boost === 0) charged2 = k;
+      }
+      H.drive(0.06, () => -(charged2 ? charged2.dir : 1), () => 1);
+      const flipped = H.kartState();
+
+      /* Gold is reachable, searched for rather than assumed on one lap. A lap's best spark
+         varies from run to run - the items it collects change its speed and so its line - so
+         asserting gold on a single lap is asserting that a dice landed the right way up.
+         What is fixed is that gold is reachable at all, which is what this looks for. */
+      grid();
+      const hunt = H.drive(90, committed, () => H.autoThrottle());
+
+      /* Creeping along cannot drift: a slide at walking pace is a wobble. */
+      grid();
+      const crawl = [];
+      for (let i = 0; i < 8; i++) { H.drive(0.08, () => 0.9, () => 0.1); crawl.push(H.kartState()); }
+
+      return {run: {driftPct: +(run.driftFrames / run.frames).toFixed(2),
+                    boostPct: +(run.boostFrames / run.frames).toFixed(2),
+                    drifts: run.drifts, bestTier: run.bestTier,
+                    maxSpeed: run.maxSpeed, turned: +run.turned.toFixed(2),
+                    stuck: +(run.stalledFrames / run.frames).toFixed(3)},
+              straight, icons, charging, held, wobbled, released, charged2, flipped,
+              hunt: {bestTier: hunt.bestTier, longest: hunt.longestDrift,
+                     drifts: hunt.drifts},
+              crawl: {maxDrift: Math.max(...crawl.map(c => c.drift)),
+                      maxSpeed: Math.max(...crawl.map(c => c.speed))}};
+    });
+    check('driving straight never starts a slide',
+          drift.straight.drift === 0 && drift.straight.tier === -1,
+          JSON.stringify(drift.straight));
+    check('a committed driver drifts through the corners of a real lap',
+          drift.run.driftPct > 0.10 && drift.run.drifts >= 8,
+          JSON.stringify(drift.run));
+    check('charging at least an orange spark on the way round',
+          drift.run.bestTier >= 1, JSON.stringify(drift.run));
+    check('and gold is reachable by driving',
+          drift.hunt.bestTier === 2, JSON.stringify(drift.hunt));
+    /* The boost is the point of it: faster than a kart can go on its own. */
+    check(`the boost is worth more than top speed (${drift.run.maxSpeed} against 11.5)`,
+          drift.run.maxSpeed > 11.5 * 1.2 && drift.run.boostPct > 0.15,
+          JSON.stringify(drift.run));
+    /* And none of it can leave him stuck, which is the one thing he cannot undo himself. */
+    check('and none of it ever leaves him sitting still',
+          drift.run.stuck < 0.02, JSON.stringify(drift.run));
+    /* A spark while it charges, a flame while it fires, and never nothing at either. */
+    const sparks = drift.icons.filter(i => i.tier >= 0 && i.boost === 0);
+    const flames = drift.icons.filter(i => i.boost > 0);
+    check('the chip shows a spark while it charges and a flame while it fires',
+          sparks.length > 0 && flames.length > 0 &&
+          sparks.every(i => !i.hidden && ['\ud83d\udc99', '\ud83e\udde1', '\ud83d\udc9b'].indexOf(i.icon) >= 0) &&
+          flames.every(i => !i.hidden && i.icon === '\ud83d\udd25'),
+          JSON.stringify({sparks: sparks.slice(0, 3), flames: flames.slice(0, 3)}));
+    /* The hysteresis, which is the difference between a mechanic and a rumour: nobody holds
+       a stick at a constant angle, and without it nothing drifted at all. */
+    check('easing off for a moment does not throw the slide away',
+          !!drift.charging && drift.wobbled.drift > drift.held.drift &&
+          drift.wobbled.tier >= drift.held.tier,
+          JSON.stringify({held: drift.held, wobbled: drift.wobbled}));
+    check('and letting go properly ends it and pays the boost',
+          drift.released.drift === 0 && drift.released.boost > 0,
+          JSON.stringify(drift.released));
+    check('turning the other way throws the charge away',
+          !!drift.charged2 && drift.charged2.tier >= 0 && drift.flipped.tier === -1,
+          JSON.stringify({charged: drift.charged2, flipped: drift.flipped}));
+    check('creeping along cannot drift at all',
+          drift.crawl.maxDrift === 0, JSON.stringify(drift.crawl));
+    note(`the longest single slide over 90 seconds is ${drift.hunt.longest}s, across ` +
+         `${drift.hunt.drifts} of them - which is what the three spark thresholds are ` +
+         `scaled to`);
+    note(`a committed lap spends ${(drift.run.driftPct * 100).toFixed(0)}% of itself ` +
+         `sliding and ${(drift.run.boostPct * 100).toFixed(0)}% boosting, over ` +
+         `${drift.run.drifts} drifts, topping out at ${drift.run.maxSpeed} blocks a second ` +
+         `against 11.5 unboosted - and never once stuck`);
+
+    /* Being lifted back onto the road, which is the thing that makes none of the above
+       able to leave him stranded. */
+    const rescue = await page.evaluate(() => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('racing', 4242);
+      if (!H.kart()) H.toggleKart();
+      H.clearKartMotion();
+      /* Off the road and into whatever is out there, throttle down the whole way. */
+      H.turn(Math.PI / 2);
+      const r = H.drive(14, () => 0, () => 1);
+      const p = H.player();
+      const back = {onRoad: H.onRoad(p.x, p.y, p.z), clean: H.lapTimes().clean,
+                    stuck: H.kartState().stuck};
+      /* And parked up on purpose, with no throttle, he is left exactly where he is - looking
+         at the view is not the same as being stuck. */
+      H.loadThemeSeed('racing', 4242);
+      if (!H.kart()) H.toggleKart();
+      H.clearKartMotion();
+      H.turn(Math.PI / 2);
+      H.drive(3.0, () => 0, () => 1);          /* out onto the grass */
+      const parkedAt = H.player();
+      H.drive(4.0, () => 0, () => 0);          /* let go, and wait */
+      const stillAt = H.player();
+      return {back, moved: +Math.hypot(stillAt.x - parkedAt.x, stillAt.z - parkedAt.z).toFixed(2),
+              parkedOnRoad: H.onRoad(stillAt.x, stillAt.y, stillAt.z),
+              minY: r.minY};
+    });
+    check('driving into the scenery and holding the throttle puts him back on the road',
+          rescue.back.onRoad === true && rescue.minY > 0, JSON.stringify(rescue));
+    /* A leg-up, so the lap it happened on cannot become his best - the same rule flying gets. */
+    check('and the lap he was carried through cannot become his best',
+          rescue.back.clean === false, JSON.stringify(rescue.back));
+    /* And it must not fire when he has simply parked. */
+    check('parking off the road on purpose leaves him exactly where he parked',
+          rescue.parkedOnRoad === false && rescue.moved < 2.5, JSON.stringify(rescue));
+    note(`held against the scenery he is set back on the road within ${1.4}s; parked with ` +
+         `the throttle off he stays put (moved ${rescue.moved} blocks in four seconds)`);
+
+    // ---- 8e: item boxes ------------------------------------------------------
+    console.log('\n8e. item boxes, and not one of them can hurt anybody');
+    const items = await page.evaluate(async () => {
+      const H = window.__henrycraft, ids = H.ids;
+      H.loadThemeSeed('racing', 4242);
+      const t = H.track();
+      const boxes = H.itemBoxes();
+      /* Every box has to be over the road, at a height a kart drives through, and inside
+         the world. A box out on the grass is a box he never finds. */
+      let onRoad = 0, reachable = 0;
+      boxes.forEach(b => {
+        const under = H.getBlock(Math.floor(b.x), t.y, Math.floor(b.z));
+        if (under === ids.ROAD || under === ids.ROADLINE || under === ids.GRID) onRoad++;
+        if (b.y - t.y > 0.5 && b.y - t.y < 2.6) reachable++;
+      });
+      /* Now drive, and see whether they are collected and whether they come back. */
+      if (!H.kart()) H.toggleKart();
+      H.clearKartMotion();
+      const before = H.itemBoxes().filter(b => b.out).length;
+      H.drive(25, () => H.autoSteer(), () => H.autoThrottle());
+      /* The running total, not how many are away right now. A box collected ten seconds ago
+         has already come back and is indistinguishable from one never touched - which is
+         how the first version of this reported one pickup out of five. */
+      const collected = H.itemsTaken();
+      const down = H.itemBoxes().map((b, i) => (b.out ? -1 : i)).filter(i => i >= 0);
+      const held = H.itemHeld();
+      /* Now wait for them without collecting any more: out of the kart, the timers still
+         run and pickups do not. Driving on instead collects fresh boxes, so the count never
+         settles and "they all came back" can never be true. */
+      H.toggleKart();
+      H.drive(9, () => 0, () => 0);
+      const stillDown = H.itemBoxes().map((b, i) => (b.out ? -1 : i)).filter(i => i >= 0);
+      return {n: boxes.length, onRoad, reachable, before, collected, held, down, stillDown,
+              lap: H.lapLength()};
+    });
+    check(`there are ${items.n} boxes and every one is over the road`,
+          items.n >= 4 && items.onRoad === items.n, JSON.stringify(items));
+    check('at a height a kart drives through',
+          items.reachable === items.n, JSON.stringify(items));
+    check(`driving through them collects them (${items.collected} in 25 seconds)`,
+          items.collected >= 3 && items.held !== null, JSON.stringify(items));
+    check('and every one comes back, so a lap is never used up',
+          items.down.length > 0 && items.stillDown.length === 0, JSON.stringify(items));
+    note(`${items.n} boxes round a ${items.lap}-block lap; ${items.collected} collected in ` +
+         `25 seconds, and the ${items.down.length} still away all came back within nine`);
+
+    /* The rubber band, measured. Weighted towards a plain mushroom when he is in front and
+       towards the good ones when he is behind - which is the whole catch-up mechanic here,
+       because nothing gets thrown at anybody. */
+    const weights = await page.evaluate(() => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('racing', 4242);
+      return {lead: H.rollItems(0, 4000), mid: H.rollItems(0.5, 4000),
+              back: H.rollItems(1, 4000)};
+    });
+    const share = (r, k) => r[k] / Object.keys(r).reduce((a, x) => a + r[x], 0);
+    check('in front he mostly gets a plain mushroom',
+          share(weights.lead, 'mushroom') > 0.5 && share(weights.lead, 'star') < 0.1,
+          JSON.stringify(weights.lead));
+    check('a long way behind he mostly gets the good ones',
+          share(weights.back, 'golden') + share(weights.back, 'star') > 0.5 &&
+          share(weights.back, 'mushroom') < 0.15, JSON.stringify(weights.back));
+    check('and every box gives something - there is no empty one',
+          Object.keys(weights.mid).every(k => weights.mid[k] > 0), JSON.stringify(weights.mid));
+    note(`in front: ${(share(weights.lead, 'mushroom') * 100).toFixed(0)}% mushroom, ` +
+         `${(share(weights.lead, 'star') * 100).toFixed(0)}% star. Behind: ` +
+         `${(share(weights.back, 'mushroom') * 100).toFixed(0)}% mushroom, ` +
+         `${((share(weights.back, 'golden') + share(weights.back, 'star')) * 100).toFixed(0)}% ` +
+         `golden or star`);
+
+    /* What each item does, and - the part that matters - what none of them does. */
+    const effects = await page.evaluate(() => {
+      const H = window.__henrycraft, out = {};
+      ['mushroom', 'triple', 'golden', 'star'].forEach(k => {
+        H.loadThemeSeed('racing', 4242);
+        if (!H.kart()) H.toggleKart();
+        H.clearKartMotion();
+        const before = H.kartState();
+        H.giveItemNamed(k);
+        const after = H.kartState();
+        /* A star makes the grass as quick as the road, which is the strongest thing any of
+           them does. Measured by driving off the track with one and seeing the speed. */
+        H.drive(0.02, () => 0, () => 1);
+        out[k] = {boostBefore: before.boost, boost: after.boost, star: after.star};
+      });
+      /* And with a star, grass is not slow. */
+      H.loadThemeSeed('racing', 4242);
+      if (!H.kart()) H.toggleKart();
+      H.clearKartMotion();
+      H.turn(Math.PI / 2);
+      const plain = H.drive(6, () => 0, () => 1).maxSpeed;
+      H.loadThemeSeed('racing', 4242);
+      if (!H.kart()) H.toggleKart();
+      H.clearKartMotion();
+      H.turn(Math.PI / 2);
+      H.giveItemNamed('star');
+      const starred = H.drive(6, () => 0, () => 1).maxSpeed;
+      return {out, plain, starred};
+    });
+    check('every item gives a boost, and the good ones give a longer one',
+          effects.out.mushroom.boost > 0 &&
+          effects.out.triple.boost > effects.out.mushroom.boost &&
+          effects.out.golden.boost > effects.out.triple.boost,
+          JSON.stringify(effects.out));
+    check('only the star changes anything besides the boost',
+          effects.out.star.star > 0 && effects.out.mushroom.star === 0 &&
+          effects.out.triple.star === 0 && effects.out.golden.star === 0,
+          JSON.stringify(effects.out));
+    note(`a mushroom is worth ${effects.out.mushroom.boost}s of boost, three ` +
+         `${effects.out.triple.boost}s, a golden one ${effects.out.golden.boost}s, and a ` +
+         `star ${effects.out.star.boost}s plus ${effects.out.star.star}s of fast grass`);
 
     // ---- 9: a bigger world, and only where it was asked for -----------------
     console.log('\n9. a racing district is bigger, and nothing else changed size');

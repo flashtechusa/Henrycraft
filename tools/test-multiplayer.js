@@ -1631,6 +1631,59 @@ function requireNode22() {
          `${raceHost.dims.WX}-block district, start line at ` +
          `${raceHost.start.x.toFixed(0)},${raceHost.start.z.toFixed(0)}`);
 
+    /* Items, and the thing that matters about them: one player collecting every box on the
+       circuit cannot touch the other one.
+
+       The genre this borrows from is built on hitting whoever is in front. This game's brief
+       is the opposite - remote players cannot damage, push, trap or otherwise affect each
+       other - so every item works on the kart that collected it and on nothing else, and the
+       catch-up mechanic pays out in the trailing driver's favour instead of punishing the
+       leader. This is the check that says so rather than the comment. */
+    const beforeItems = await R2.evaluate(() => {
+      const H = window.__henrycraft;
+      const p = H.player();
+      return {at: {x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2)},
+              kart: H.kart(), laps: H.laps(), stars: H.starsFound(),
+              boxes: H.itemBoxes().length, taken: H.itemsTaken(),
+              blocks: Object.keys(H.editMap()).length};
+    });
+    const raider = await R1.evaluate(() => {
+      const H = window.__henrycraft;
+      if (!H.kart()) H.toggleKart();
+      /* Round the circuit twice, hoovering up every box on it. */
+      H.drive(100, () => H.autoSteer(), () => H.autoThrottle());
+      return {taken: H.itemsTaken(), boost: H.kartState().boost,
+              laps: H.laps()};
+    });
+    await new Promise(r => setTimeout(r, 900));
+    const afterItems = await R2.evaluate(() => {
+      const H = window.__henrycraft;
+      const p = H.player();
+      return {at: {x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2)},
+              kart: H.kart(), laps: H.laps(), stars: H.starsFound(),
+              boxes: H.itemBoxes().length, taken: H.itemsTaken(),
+              blocks: Object.keys(H.editMap()).length,
+              state: H.kartState()};
+    });
+    check(`one player collected ${raider.taken} boxes`, raider.taken >= 4,
+          JSON.stringify(raider));
+    /* Not moved, not slowed, not sped up, nothing taken, nothing built or broken. */
+    check('and none of it reached the other player at all',
+          JSON.stringify(afterItems.at) === JSON.stringify(beforeItems.at) &&
+          afterItems.laps === beforeItems.laps &&
+          afterItems.stars === beforeItems.stars &&
+          afterItems.blocks === beforeItems.blocks &&
+          afterItems.state.boost === 0 && afterItems.state.star === 0 &&
+          afterItems.state.drift === 0,
+          JSON.stringify({before: beforeItems, after: afterItems}));
+    /* His own boxes are his own: they do not disappear because somebody else drove through
+       them, so a five-year-old cannot have one taken off him. */
+    check('and his own boxes are all still there to be collected',
+          afterItems.boxes === beforeItems.boxes && afterItems.taken === 0,
+          JSON.stringify({before: beforeItems, after: afterItems}));
+    note(`${raider.taken} boxes collected by one player; the other was not moved, slowed, ` +
+         `sped up or emptied, and still had all ${afterItems.boxes} of his own`);
+
     /* And the failure this guards against: a room whose world is bigger than the one this
        device can build, which is what an older game on the tablet would look like. The
        blocks arrive with coordinates it has no room for. Dropping them silently is how

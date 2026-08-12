@@ -134,6 +134,84 @@ mistake in a different place. It is one predicate, `canBuild()`, read by everyth
 decides what he would act on, so all of it stops together; getting out gives all of it
 straight back.
 
+## Powerslides, item boxes, and what is deliberately missing
+
+**Drifting has no button.** Every kart game puts it on a shoulder button held through the
+corner, which is a two-handed job: steer with one thumb, hold with the other, release on the
+exit. He is five and he steers with one thumb. So *a hard turn at speed is the drift* &mdash;
+lean on the stick and the kart slides and starts charging, straighten up and it fires. Blue,
+orange then gold sparks, the colours the genre taught everyone, on a chip beside the lap
+clock. Nothing to learn and nothing to miss: not drifting simply means no boost.
+
+Two numbers had to be measured rather than guessed, and both were wrong first time:
+
+- **The speed floor was above the speed of grass.** A slide needed 6 blocks a second to
+  survive and a kart does 5.5 on grass, so running wide out of a corner killed the drift at
+  exactly the moment a drift is worth having. A skid pad measured one slide breaking and
+  restarting eleven times in three seconds.
+- **The spark thresholds did not fit the corners.** Gold was set at 1.9 seconds of sliding;
+  over four circuits and six minutes of committed driving, the longest single slide is 1.8 to
+  2.4 seconds, so seventy seconds of driving never once reached gold. A tier nobody reaches
+  is not a tier. They are 0.35, 0.75 and 1.35 now, scaled to what the corners actually give.
+
+There is also **hysteresis**, which is the difference between a mechanic and a rumour: it
+takes less to hold a slide than to start one, and easing off for a fifth of a second does not
+throw the charge away. Nobody holds a stick at a constant angle &mdash; a real thumb wanders
+and a correction crosses back over the threshold several times a second. Without it, a
+two-minute drive started 38 slides and not one of them lived long enough to earn a spark.
+
+**Item boxes** sit round the circuit and come back a few seconds after he drives through one,
+so a lap is never used up. A box gives its item straight away rather than holding it in a
+slot: holding one and choosing the moment is most of the tactics in a kart game and all of
+the button-work, and he drives with one thumb. Drive through the box, go fast.
+
+**Every item works on the kart that collected it and on nothing else.** That is the part
+worth being explicit about, because it is where this game parts company with the genre it is
+borrowing from. There are no shells, no lightning and no bananas, and the catch-up mechanic
+pays out in the *trailing* driver's favour instead of punishing the leader:
+
+| | in front | a long way behind |
+| --- | --- | --- |
+| 🍄 Mushroom, 1.3s of boost | 67% | 8% |
+| 🍄🍄🍄 Three mushrooms, 2.8s | | |
+| ✨ Golden mushroom, 5s | | 64% golden or star |
+| 🌟 Star, 4s &mdash; and grass is as quick as tarmac | 3% | |
+
+The star is the best thing in the box and it still hurts nobody: for four seconds the whole
+district is a track, so cutting the corner becomes the fun rather than the mistake. "How far
+behind" is measured two ways and the more urgent wins &mdash; behind another player round the
+lap, which is the one that exists while he is racing his dad, and off his own best pace,
+which works when he is on his own. Neither takes anything from anybody; it only decides how
+good the next box is.
+
+A test in the multiplayer suite has one player hoover up 13 boxes in a row and then checks the
+other player was not moved, slowed, sped up or emptied, and still has all 12 of his own boxes
+waiting. Boxes are per-player: a five-year-old cannot have one taken off him.
+
+**And he cannot get stuck.** With a boost he does 16 blocks a second, and a corner taken too
+fast puts him in the trees; held against a hillside with the throttle down, he has no idea
+that reverse exists. So a kart pressed against something and going nowhere *while he is asking
+it to go* is lifted back to the nearest point of the road after a second and a half, pointed
+the way the lap goes, and set down. No damage, no penalty, no fuss. Parking up with the
+throttle off leaves him exactly where he parked &mdash; looking at the view is not the same as
+being stuck.
+
+That one is not a nicety, it is what made the racing tests stop being flaky. The same twenty
+seeds passed one run and failed six checks the next, because which item a box gives is random
+and a lucky golden mushroom into a hairpin is a kart in the scenery. Tuning the boost down
+until the dice usually landed well would have hidden that rather than fixed it.
+
+One more number that had to be measured: **`KART_TURN` has to be enough for a *boosted* kart
+to take the tightest corner the generator makes.** The tightest takeable radius is speed over
+turn rate; at 17.25 blocks a second and 4.2 radians that is 4.1 against a 4.5-block corner,
+and two seeds out of twenty became undriveable &mdash; the test driver spent 60% of one of
+them wedged off the outside of a hairpin. The turn rate is 4.6 and the boost 1.38× now, which
+puts it at 3.5.
+
+**Not built, and why:** vertical loops, because the physics has gravity and no upside-down
+driving and faking it would be a lie. Jump ramps, because they fight the flat road that was
+asked for two requests ago. And weapons, which are covered above.
+
 **The ten stars go round the circuit** rather than being hidden, floating at kart height
 along the racing line, and collecting them is driving through them. The reach grows with
 speed, because at kart pace on a slow tablet a fixed radius can be driven clean through -
@@ -180,7 +258,7 @@ reader's point of view, because the reader is the one who has to reload. It clea
 sharing is switched off rather than latching, which is the mistake the first version of
 the out-of-date banner made.
 
-`node tools/test-racing.js` covers it in 60 checks, and the ones that matter drive rather
+`node tools/test-racing.js` covers it in 90 checks, and the ones that matter drive rather
 than look: a lap and a half on each of twenty seeds, with the real stick input through the
 real physics, timed &mdash; **45 to 53 seconds a lap**, which is the thing he actually
 asked for. It measures the circuit rather than trusting it: every seed's lap length,
