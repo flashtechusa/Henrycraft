@@ -231,7 +231,29 @@ kart, because it is how he gets himself out of anywhere, but a lap with flying i
 shown and never becomes his best: he was not driving it. The best time is saved with the
 district, so it is still there tomorrow.
 
-There is still **no position, no lap limit, no target time and no way to lose.** A slow lap
+**Every lap is written down.** Tapping the ⏱ chip opens *Your laps*: a numbered list of
+every lap he has driven round this circuit, the quickest clean one marked 🏆, and a lap he
+was rescued through marked 🛟 *helped* so the list never quietly flatters him. It is saved
+with the district, capped at twenty, and still there tomorrow. That answers a question the
+first version couldn't: the running clock told you the lap you were on and the toast told you
+the one you'd just done, but nothing kept the rest.
+
+**Racing somebody shows who is in front.** A 🥇/🥈 chip while sharing a circuit, and the
+Playing-together panel becomes a live scoreboard — medals, names, and the lap each driver is
+on, refreshed twice a second while it's open.
+
+Position alone cannot answer "who is in front": it cannot tell the leader from somebody a
+whole lap behind. So the lap number and how far through it now travel with the move message
+and the Worker relays them, clamped server-side so no client can claim to be on lap 900.
+**This needs `npx wrangler deploy`** — until then the game says it does not know rather than
+guessing, and the chip stays hidden. `curl https://sync.henrysgame.com/health` reports
+`standings=1` when it's live. Being shown 1st while losing is exactly the kind of unfairness
+this game does not do, so a missing answer is better than a wrong one.
+
+The standings also feed the item weighting, which now measures "behind" in whole laps rather
+than by position round the current one.
+
+There is still **no position limit, no lap limit, no target time and no way to lose.** A slow lap
 is a number and nothing else; the best time only ever moves the way he wants it to. Going
 round the other way un-does progress rather than taking a lap away. Laps are counted as **distance travelled
 along the road**, not by driving over a line and not as an angle about the middle: a line
@@ -258,7 +280,7 @@ reader's point of view, because the reader is the one who has to reload. It clea
 sharing is switched off rather than latching, which is the mistake the first version of
 the out-of-date banner made.
 
-`node tools/test-racing.js` covers it in 90 checks, and the ones that matter drive rather
+`node tools/test-racing.js` covers it in 96 checks, and the ones that matter drive rather
 than look: a lap and a half on each of twenty seeds, with the real stick input through the
 real physics, timed &mdash; **45 to 53 seconds a lap**, which is the thing he actually
 asked for. It measures the circuit rather than trusting it: every seed's lap length,

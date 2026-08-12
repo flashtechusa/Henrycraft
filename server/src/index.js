@@ -147,7 +147,8 @@ export default {
          an older one drops the character number, and every player is drawn as
          character 0 - which is Henry, so a room of four looks like four Henrys.
          `curl https://sync.henrysgame.com/health` tells you which one is deployed. */
-      return new Response('ok look=1 characters=' + CHARACTER_NAMES.length + ' portals=1',
+      return new Response('ok look=1 characters=' + CHARACTER_NAMES.length +
+                          ' portals=1 standings=1',
                           {headers: {'content-type': 'text/plain'}});
     }
 
@@ -339,9 +340,15 @@ export class District {
     if (msg.type === 'move') {
       const x = num(msg.x), y = num(msg.y), z = num(msg.z), yaw = num(msg.yaw);
       if (x === null || y === null || z === null) return;
-      // Advisory only. Broadcast for drawing; never applied to anyone's physics,
-      // so a remote player cannot push, trap or move anybody.
-      this.broadcast({type: 'moved', id: att.id, x, y, z, yaw: yaw ?? 0}, ws);
+      // How far round a racing circuit they have got: which lap, and how far through it as
+      // a fraction. Both are only used to work out who is in front, and both are clamped
+      // to something sane here so a bad or hostile client cannot claim to be on lap 900.
+      const lapRaw = num(msg.lap), progRaw = num(msg.prog);
+      const lap = lapRaw === null ? null : Math.max(0, Math.min(999, Math.floor(lapRaw)));
+      const prog = progRaw === null ? null : Math.max(0, Math.min(1, progRaw));
+      // Advisory only. Broadcast for drawing and for the standings; never applied to
+      // anyone's physics, so a remote player cannot push, trap or move anybody.
+      this.broadcast({type: 'moved', id: att.id, x, y, z, yaw: yaw ?? 0, lap, prog}, ws);
       return;
     }
 

@@ -1631,6 +1631,82 @@ function requireNode22() {
          `${raceHost.dims.WX}-block district, start line at ` +
          `${raceHost.start.x.toFixed(0)},${raceHost.start.z.toFixed(0)}`);
 
+    /* The standings, which is what he asked for: who is in front.
+
+       Position alone cannot answer it - it cannot tell the leader from somebody a whole lap
+       behind - so the lap number and how far through it travel with the move message and the
+       Worker relays them. An older Worker drops them, and then the game says it does not
+       know rather than guessing: being shown 1st while losing is exactly the kind of
+       unfairness this game does not do. */
+    console.log('\nWho is in front');
+    /* R1 goes round a whole lap; R2 barely moves. */
+    const led = await R1.evaluate(async () => {
+      const H = window.__henrycraft;
+      if (!H.kart()) H.toggleKart();
+      H.clearKartMotion();
+      let n = 0;
+      for (let i = 0; i < 200 && H.laps() < 1; i++) {
+        H.drive(1, () => H.autoSteer(), () => H.autoThrottle());
+        n++;
+      }
+      /* Let the animation loop send the new position - drive() advances physics without it. */
+      await new Promise(r => setTimeout(r, 1200));
+      return {laps: H.laps(), prog: H.lapProgress(), seconds: n,
+              standings: H.standings(), place: H.placeShown()};
+    });
+    await new Promise(r => setTimeout(r, 1200));
+    const trailed = await R2.evaluate(async () => {
+      const H = window.__henrycraft;
+      if (!H.kart()) H.toggleKart();
+      await new Promise(r => setTimeout(r, 600));
+      /* Tap the "who is here" chip, which is how he opens it. The roster is only rebuilt
+         while the panel is on screen - reading the DOM without opening it reads whatever was
+         painted when somebody last joined, which is before anybody has driven anywhere. */
+      document.getElementById('peopleChip').click();
+      await new Promise(r => setTimeout(r, 900));
+      return {laps: H.laps(), standings: H.standings(), place: H.placeShown(),
+              roster: [].slice.call(document.querySelectorAll('#roster .rosterRow'))
+                        .map(r => r.textContent)};
+    });
+    check(`the leader completed a lap and knows he is in front`,
+          led.laps >= 1 && !!led.standings && led.standings.length === 2 &&
+          led.standings[0].me === true && led.place.hidden === false &&
+          led.place.text === '1st of 2', JSON.stringify(led));
+    /* And the other device agrees, which is the part that needs the lap number to travel. */
+    check('and the other player is told he is second, on the same reckoning',
+          !!trailed.standings && trailed.standings.length === 2 &&
+          trailed.standings[0].me === false &&
+          trailed.place.hidden === false && trailed.place.text === '2nd of 2',
+          JSON.stringify(trailed));
+    check('a whole lap ahead counts as ahead, not as being round the next corner',
+          !!trailed.standings &&
+          trailed.standings[0].lap > trailed.standings[1].lap,
+          JSON.stringify(trailed.standings));
+    /* The panel is a scoreboard while a race is on: medals, and the lap each of them is on. */
+    check('and the Playing-together panel lists them in order with their laps',
+          trailed.roster.length === 2 &&
+          /lap \d+/.test(trailed.roster[0]) && /lap \d+/.test(trailed.roster[1]),
+          JSON.stringify(trailed.roster));
+    note(`the leader drove ${led.laps} lap in ${led.seconds}s and both devices agree: ` +
+         `"${led.place.text}" and "${trailed.place.text}"; panel reads ` +
+         `${JSON.stringify(trailed.roster)}`);
+
+    /* And where there is nothing to rank, nothing is shown. A one-player race has no
+       standing worth printing, and neither does a meadow. */
+    const nothingToRank = await R2.evaluate(() => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('meadow', 5);
+      const off = {standings: H.standings(), place: H.placeShown()};
+      /* Back to the circuit before anything downstream looks at it. Leaving him in a meadow
+         made the item checks below compare nought against nought and pass without meaning
+         anything - a meadow has no boxes to be untouched. */
+      H.loadThemeSeed('racing', 24680);
+      return {off, boxesBack: H.itemBoxes().length};
+    });
+    check('off a circuit there is no ranking and no chip',
+          nothingToRank.off.standings === null &&
+          nothingToRank.off.place.hidden === true, JSON.stringify(nothingToRank));
+
     /* Items, and the thing that matters about them: one player collecting every box on the
        circuit cannot touch the other one.
 
@@ -1678,7 +1754,9 @@ function requireNode22() {
           JSON.stringify({before: beforeItems, after: afterItems}));
     /* His own boxes are his own: they do not disappear because somebody else drove through
        them, so a five-year-old cannot have one taken off him. */
+    /* And there have to BE some, or this passes by comparing nought with nought. */
     check('and his own boxes are all still there to be collected',
+          beforeItems.boxes >= 4 &&
           afterItems.boxes === beforeItems.boxes && afterItems.taken === 0,
           JSON.stringify({before: beforeItems, after: afterItems}));
     note(`${raider.taken} boxes collected by one player; the other was not moved, slowed, ` +

@@ -443,8 +443,37 @@ body.touch #hint{display:none}
    next to the hide class: whatever the state of that class, nothing draws until
    there is something to say. */
 #staleWarn:empty{display:none}
+/* The panel the lap list sits in. There is no shared `.card` rule in this sheet - every
+   overlay styles its own - so this one says what it looks like rather than inheriting a
+   background that does not exist. A screenshot is what showed that: the times were floating
+   over the track with nothing behind them. */
+#lapBook .card{
+  background:var(--panel);border:4px solid var(--ink);border-radius:18px;
+  box-shadow:0 6px 0 rgba(0,0,0,.45);
+  padding:22px;display:grid;gap:10px;min-width:min(92vw,340px)
+}
+#lapBook h2{margin:0 0 2px;font-size:22px;letter-spacing:.1em;color:var(--sun);
+  text-shadow:0 3px 0 var(--ink)}
+#lapBook small{font-size:12px;opacity:.75;font-weight:700;letter-spacing:.03em}
+#lapBook .blockbtn{width:100%;font-size:16px;padding:15px}
+
+/* The list of laps. Numbers big enough to read at arm's length, the best one picked out,
+   and a lap he was carried through marked so the list does not quietly lie about it. */
+#lapList{display:flex;flex-direction:column;gap:5px;margin:6px 0 12px;
+  max-height:46vh;overflow-y:auto}
+.lapRow{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px}
+.lapRow .n{opacity:.6;font-size:14px;min-width:2.6em;text-align:right}
+.lapRow .t{font-variant-numeric:tabular-nums}
+.lapRow.best .t{color:var(--sun)}
+.lapRow .tag{font-size:13px;opacity:.72;font-weight:700}
+#lapList:empty::after{content:"No laps yet - go round once!";opacity:.75;font-weight:700}
+
 #roster{display:flex;flex-direction:column;gap:6px;margin:4px 0 10px}
 .rosterRow{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
+/* On a circuit the roster is the standings: a medal, then the name, then the lap they are
+   on pushed out to the right. */
+.rosterRow .place{min-width:1.6em}
+.rosterRow .lapcell{margin-left:auto;font-size:13px;font-weight:700;opacity:.72}
 .rosterRow .dot{
   width:16px;height:16px;border-radius:50%;
   border:2px solid rgba(0,0,0,.35);flex:0 0 auto
@@ -494,8 +523,12 @@ body.touch #hint{display:none}
          the colour it has reached; a flame while it fires. Something to watch for, and the
          only way he finds out he has a boost at all. -->
     <div class="chip hide" id="boostChip"><span id="boostIcon">✨</span></div>
-    <div class="chip hide" id="timeChip">⏱ <b><span id="lapNow">0.0s</span></b><span
-         id="lapBest" class="dim"></span></div>
+    <!-- Only while racing somebody else on a circuit. Alone there is nothing to be in
+         front of, and a "1st of 1" is a joke a five-year-old does not need. -->
+    <div class="chip hide" id="placeChip"><span id="placeIcon">🥇</span> <b><span
+         id="placeText">1st</span></b></div>
+    <button class="chip hide" id="timeChip" title="Every lap you have driven">⏱ <b><span
+         id="lapNow">0.0s</span></b><span id="lapBest" class="dim"></span></button>
    </div>
   </div>
 
@@ -592,6 +625,17 @@ body.touch #hint{display:none}
     <small>Everything built there is lost. This cannot be undone.</small>
     <button class="blockbtn" id="delNo">Keep it</button>
     <button class="blockbtn danger" id="delYes">Delete it</button>
+  </div>
+</div>
+
+<!-- Every lap he has driven round this circuit. Opened by tapping the clock, which is
+     where he is already looking, and closed by one big button. -->
+<div class="overlay hide" id="lapBook">
+  <div class="card">
+    <h2>Your laps</h2>
+    <div id="lapList"></div>
+    <small id="lapBookNote"></small>
+    <button class="blockbtn go" id="lapBookDone">Back to racing</button>
   </div>
 </div>
 
@@ -3141,18 +3185,23 @@ function placeItemBoxes(){
    takes anything from anybody - it only decides how good the next box is. */
 function itemHelp(){
   if(!trackInfo) return 0;
-  var n=trackInfo.pts.length, lap=trackInfo.length;
+  var n=trackInfo.pts.length;
   var help=0;
-  var mine=trackNearest(trackInfo.shape,player.x,player.z).i;
-  for(var id in mp.players){
-    var p=mp.players[id];
-    var g=p.group?p.group.position:null;
-    if(!g) continue;
-    var theirs=trackNearest(trackInfo.shape,g.x,g.z).i;
-    var d=theirs-mine;
-    if(d>n/2) d-=n;
-    if(d<-n/2) d+=n;
-    if(d>0) help=Math.max(help,Math.min(1,(d/n)/0.35));   /* a third of a lap back = all of it */
+  /* How far behind the leader he is, in laps. Taken from the standings, which know which lap
+     everybody is on - so somebody a whole lap ahead reads as a whole lap ahead rather than as
+     being just round the next corner. */
+  var st=standings();
+  if(st){
+    var mine=null, lead=null, i;
+    for(i=0;i<st.length;i++){
+      var at=st[i].lap+st[i].prog;
+      if(st[i].me) mine=at;
+      if(lead===null||at>lead) lead=at;
+    }
+    if(mine!==null && lead!==null && lead>mine){
+      /* A third of a lap back is as much help as there is. */
+      help=Math.max(help,Math.min(1,(lead-mine)/0.35));
+    }
   }
   /* Off his own best pace. Only once he has a best to be off. */
   if(bestLap!==null && lapTime>0){
@@ -3377,12 +3426,18 @@ var kartGroup=null, kartWheels=null, lapTotal=0, lapCount=0;
    halfway, or because he was put somewhere by a portal - is shown but never becomes his
    best. bestLap is saved with the district, so it is still there tomorrow. */
 var lapTime=0, lastLap=null, bestLap=null, lapClean=true;
+/* Every lap he has driven round this circuit, newest last: {t: seconds, clean: was it
+   driven all the way}. Saved with the district and capped, because a list that grows for
+   ever is a save file that grows for ever - twenty is more laps than one sitting. */
+var LAP_KEEP=20;
+var lapLog=[];
 /* Everything about laps, back to nothing. Called wherever a world is replaced, because a
    time and a tally that outlive the circuit they were set on are nonsense. bestLap is a
    property of the district's record, so whoever rebuilds the world puts it back. */
 function resetLaps(){
   lapCount=0; lapTotal=0; lapIdx=null;
   lapTime=0; lastLap=null; bestLap=null; lapClean=true;
+  lapLog=[];
   clearKartMotion();
 }
 function lapClock(t){
@@ -3393,7 +3448,7 @@ function lapClock(t){
 /* The running clock, ten times a second rather than sixty. It shows one decimal place, so
    sixty repaints a second would write the same text five times out of six - and the whole
    point of a chunked mesher is not to hand the browser work it can throw away. */
-var lapPaintAt=0;
+var lapPaintAt=0, panelPaintAt=0;
 function paintLapClock(now){
   if(!trackInfo||!player.kart) return;
   if(now-lapPaintAt<0.1) return;
@@ -3403,6 +3458,14 @@ function paintLapClock(now){
   /* The drift pip changes several times a second while a corner is being taken, which is
      faster than lap boundaries repaint it - so it rides along with the clock. */
   paintKartButton();
+  /* And while the Playing-together panel is open it is a live scoreboard, so it has to be
+     rebuilt as the race goes on rather than only when somebody joins or leaves. Twice a
+     second: it rebuilds a handful of rows, and nobody can read faster than that. */
+  var tog=document.getElementById('together');
+  if(tog && !tog.classList.contains('hide') && now-panelPaintAt>0.5){
+    panelPaintAt=now;
+    mpPaintPanel();
+  }
 }
 
 function buildKart(shirtHex){
@@ -3582,6 +3645,59 @@ function toggleKart(){
   paintKartButton();
   scheduleSave();
 }
+function ordinal(n){
+  if(n===1) return '1st';
+  if(n===2) return '2nd';
+  if(n===3) return '3rd';
+  return n+'th';
+}
+
+/* How far through the current lap he is, 0 to 1. Measured the same way laps are counted -
+   distance travelled along the road - so the two can never disagree with each other. */
+function lapProgress(){
+  if(!trackInfo) return 0;
+  var n=trackInfo.pts.length;
+  var f=(Math.abs(lapTotal)/n)%1;
+  return f<0?0:f;
+}
+
+/* The list of laps, newest at the top - the one he just did is the one he wants to see. */
+function paintLapBook(){
+  var list=document.getElementById('lapList');
+  if(!list) return;
+  list.innerHTML='';
+  var best=null, i;
+  for(i=0;i<lapLog.length;i++){
+    if(lapLog[i].clean && (best===null||lapLog[i].t<best)) best=lapLog[i].t;
+  }
+  for(i=lapLog.length-1;i>=0;i--){
+    var l=lapLog[i];
+    var row=document.createElement('div');
+    row.className='lapRow'+(l.clean && l.t===best ? ' best' : '');
+    var n=document.createElement('span'); n.className='n'; n.textContent=(i+1)+'.';
+    var t=document.createElement('span'); t.className='t'; t.textContent=lapClock(l.t);
+    row.appendChild(n); row.appendChild(t);
+    if(l.clean && l.t===best){
+      var tag=document.createElement('span'); tag.className='tag'; tag.textContent='🏆 best';
+      row.appendChild(tag);
+    } else if(!l.clean){
+      /* Said out loud rather than hidden: it counted as a lap, it just cannot be the best. */
+      var tag2=document.createElement('span'); tag2.className='tag';
+      tag2.textContent='🛟 helped';
+      row.appendChild(tag2);
+    }
+    list.appendChild(row);
+  }
+  var note=document.getElementById('lapBookNote');
+  if(note){
+    note.textContent=lapLog.length
+      ? (best===null
+          ? 'Drive a whole lap on your own wheels for a best time.'
+          : 'Your best is '+lapClock(best)+'. Laps you were helped through do not count for that.')
+      : '';
+  }
+}
+
 function paintKartButton(){
   var b=document.getElementById('kartBtn');
   if(!b) return;
@@ -3617,6 +3733,19 @@ function paintKartButton(){
     if(charging||firing){
       document.getElementById('boostIcon').textContent=
         firing?'🔥' : (player.driftTier<0?'✨' : ['💙','🧡','💛'][player.driftTier]);
+    }
+  }
+  /* Where he is in the race. Medals for the top three and a plain number after that, and
+     never the word "last" - the standing is there to be chased, not to be told off with. */
+  var pc2=document.getElementById('placeChip');
+  if(pc2){
+    var st=driving?standings():null;
+    var me=st?st.filter(function(r){ return r.me; })[0]:null;
+    pc2.classList.toggle('hide',!me);
+    if(me){
+      document.getElementById('placeIcon').textContent=
+        ['🥇','🥈','🥉'][me.place-1]||'🏁';
+      document.getElementById('placeText').textContent=ordinal(me.place)+' of '+st.length;
     }
   }
   var tc=document.getElementById('timeChip');
@@ -3662,9 +3791,15 @@ function updateLaps(dt){
   if(laps>lapCount){
     lapCount=laps;
     lastLap=lapTime;
+    /* Every one of them goes in the book, whether it was driven clean or not - he asked to
+       see his lap times, and a lap he was rescued through is still a lap he did. Which is
+       which is kept, because only a clean one can be the best. */
+    lapLog.push({t:+lapTime.toFixed(2), clean:lapClean});
+    if(lapLog.length>LAP_KEEP) lapLog.shift();
     /* Only a lap driven all the way round counts towards his best. */
     var isBest=lapClean && (bestLap===null||lastLap<bestLap-0.05);
-    if(isBest){ bestLap=lastLap; scheduleSave(); }
+    if(isBest) bestLap=lastLap;
+    scheduleSave();                 /* the book changed, best or not */
     lapTime=0;
     lapClean=true;
     sfx('star');
@@ -6017,6 +6152,9 @@ function snapshot(){
     /* His best lap round this circuit. Absent from every record written before laps were
        timed, and from every district that is not a circuit, both of which read as "none". */
     best:(typeof bestLap==='number')?+bestLap.toFixed(2):null,
+    /* The lap times themselves, so the list is still there tomorrow. Absent from every
+       record written before laps were timed, which reads as no laps yet. */
+    laps:lapLog.slice(),
     /* Codes this district used to be known by, so a portal bound to an old one still
        finds it after the code was shortened. */
     codes:current&&current.codes&&current.codes.length?current.codes.slice():null,
@@ -6112,6 +6250,11 @@ function enterDistrict(rec){
      belongs to the circuit, so it comes back out of the record. */
   resetLaps();
   bestLap=(trackInfo&&typeof rec.best==='number')?rec.best:null;
+  if(trackInfo && rec.laps && rec.laps.length){
+    lapLog=rec.laps.filter(function(l){ return l && typeof l.t==='number'; })
+                   .slice(-LAP_KEEP)
+                   .map(function(l){ return {t:l.t, clean:l.clean!==false}; });
+  }
   paintKartButton();
   setFly(false);
   districtIndex.current=rec.slug;
@@ -7258,6 +7401,39 @@ function mpMoved(m){
   p.speed=Math.hypot(dx,dz)/MP_SEND;
   p.to=to; p.t=0;
   p.group.visible=true;
+  /* How far round the circuit they say they are. Absent from an older Worker, which does not
+     relay it - and rather than guess, the standings simply say they do not know. Guessing
+     would mean ranking two drivers by position alone, which cannot tell the leader from
+     somebody a whole lap behind, and being shown 1st while losing is exactly the kind of
+     unfairness this game does not do. */
+  if(Number.isFinite(m.lap)&&Number.isFinite(m.prog)){
+    p.lap=Math.max(0,Math.floor(m.lap));
+    p.prog=Math.max(0,Math.min(1,m.prog));
+  }
+}
+
+/* Who is where, best first.
+
+   One entry per driver including him, ordered by laps completed and then by how far through
+   the current one - which is what "in front" means on a circuit, and is why the lap number
+   has to travel with the position.
+
+   Returns null when there is nothing to rank: alone, off a circuit, or sharing with somebody
+   whose game is too old to say where they are. A missing answer is better than a wrong one. */
+function standings(){
+  if(!trackInfo||!mp.wanted) return null;
+  var rows=[{id:null, name:mpMe?mpMe.name:'You', me:true,
+             lap:lapCount, prog:lapProgress()}];
+  var known=true;
+  for(var id in mp.players){
+    var p=mp.players[id];
+    if(!Number.isFinite(p.lap)||!Number.isFinite(p.prog)){ known=false; continue; }
+    rows.push({id:id, name:p.name||'Someone', me:false, lap:p.lap, prog:p.prog});
+  }
+  if(rows.length<2||!known) return null;
+  rows.sort(function(a,b){ return (b.lap-a.lap)||(b.prog-a.prog); });
+  rows.forEach(function(r,i){ r.place=i+1; });
+  return rows;
 }
 
 /* Advisory only, and drawn only. This runs after physics and writes nothing but
@@ -7274,8 +7450,17 @@ function mpUpdate(dt){
     if(mp.ws && mp.ws.readyState>1){ mpDropSocket(); mpRetry(); return; }
     var now=player.x.toFixed(2)+','+player.y.toFixed(2)+','+player.z.toFixed(2)+','+yaw.toFixed(2);
     if(now!==mp.last){
-      if(mpSend({type:'move', x:+player.x.toFixed(2), y:+player.y.toFixed(2),
-                 z:+player.z.toFixed(2), yaw:+yaw.toFixed(3)})) mp.last=now;
+      var m={type:'move', x:+player.x.toFixed(2), y:+player.y.toFixed(2),
+             z:+player.z.toFixed(2), yaw:+yaw.toFixed(3)};
+      /* On a circuit, say how far round it he is: which lap and how far through it. It is
+         the only way the other device can work out who is in front, because position alone
+         cannot tell a leader from somebody a whole lap behind him. Sent only where it means
+         something - there is no lap to be on in a meadow. */
+      if(trackInfo){
+        m.lap=lapCount;
+        m.prog=+lapProgress().toFixed(4);
+      }
+      if(mpSend(m)) mp.last=now;
     }
     /* Block edits go out in bounded batches: lighting a 21x21 portal touches 441
        cells at once, and a burst that size should not stall a frame. */
@@ -7397,13 +7582,38 @@ function mpPaintPanel(){
      else sends to what he reads. */
   while(host.firstChild) host.removeChild(host.firstChild);
   var meIdx=localLookIndex();
-  var rows=[{label:lookName(meIdx)||((mpMe&&mpMe.name)||'You'), dot:lookDot(meIdx), me:true}];
+  var rows=[{id:null, label:lookName(meIdx)||((mpMe&&mpMe.name)||'You'),
+             dot:lookDot(meIdx), me:true}];
   for(var id in mp.players){
-    rows.push({label:mp.players[id].label, dot:lookDot(mp.players[id].lookIndex), me:false});
+    rows.push({id:id, label:mp.players[id].label,
+               dot:lookDot(mp.players[id].lookIndex), me:false});
+  }
+  /* On a circuit the list is the standings, best first, with the lap each of them is on.
+     Everywhere else it is just who is here, in the order they arrived. */
+  var order=standings();
+  if(order){
+    var placeOf={}, lapOf={};
+    order.forEach(function(r){
+      placeOf[r.me?'me':r.id]=r.place;
+      lapOf[r.me?'me':r.id]=r.lap+1;
+    });
+    rows.sort(function(a,b){
+      return (placeOf[a.me?'me':a.id]||99)-(placeOf[b.me?'me':b.id]||99);
+    });
+    rows.forEach(function(r){
+      r.place=placeOf[r.me?'me':r.id];
+      r.lap=lapOf[r.me?'me':r.id];
+    });
   }
   rows.forEach(function(r){
     var row=document.createElement('div');
     row.className='rosterRow';
+    if(r.place){
+      var pl=document.createElement('span');
+      pl.className='place';
+      pl.textContent=['🥇','🥈','🥉'][r.place-1]||(r.place+'.');
+      row.appendChild(pl);
+    }
     var dot=document.createElement('span');
     dot.className='dot';
     dot.style.background=r.dot;
@@ -7412,6 +7622,12 @@ function mpPaintPanel(){
        from the word list. Nothing that arrived as text is drawn. */
     nm.textContent=r.label+(r.me?' (you)':'');
     row.appendChild(dot); row.appendChild(nm);
+    if(r.lap){
+      var lp=document.createElement('span');
+      lp.className='lapcell';
+      lp.textContent='lap '+r.lap;
+      row.appendChild(lp);
+    }
     host.appendChild(row);
   });
 }
@@ -7554,6 +7770,15 @@ el('mIdeas').addEventListener('click',function(){
 });
 el('ideasDone').addEventListener('click',function(){
   el('ideas').classList.add('hide');
+});
+/* Tap the clock to see every lap. Nothing about the race stops while it is open - he is
+   parked on the grid reading it, or his dad is still going round. */
+el('timeChip').addEventListener('click',function(){
+  paintLapBook();
+  el('lapBook').classList.remove('hide');
+});
+el('lapBookDone').addEventListener('click',function(){
+  el('lapBook').classList.add('hide');
 });
 el('mTogether').addEventListener('click',function(){
   toggleMenu(false);
@@ -7882,6 +8107,28 @@ window.__henrycraft={
   },
   itemHeld:function(){ return itemHeld; },
   itemsTaken:function(){ return itemsTaken; },
+  /* Every lap he has driven here, and what the panel that lists them shows. */
+  lapLog:function(){ return lapLog.map(function(l){ return {t:l.t, clean:l.clean}; }); },
+  lapBook:function(){
+    paintLapBook();
+    var rows=[].slice.call(document.querySelectorAll('#lapList .lapRow'));
+    return {open:!document.getElementById('lapBook').classList.contains('hide'),
+            rows:rows.map(function(r){
+              return {text:r.textContent, best:r.classList.contains('best')};
+            }),
+            note:document.getElementById('lapBookNote').textContent};
+  },
+  openLapBook:function(){ document.getElementById('timeChip').click(); },
+  closeLapBook:function(){ document.getElementById('lapBookDone').click(); },
+  /* Who is where on the circuit, best first - null when there is nothing to rank. */
+  standings:standings,
+  lapProgress:function(){ return +lapProgress().toFixed(4); },
+  placeShown:function(){
+    var c=document.getElementById('placeChip');
+    return {hidden:getComputedStyle(c).display==='none',
+            icon:document.getElementById('placeIcon').textContent,
+            text:document.getElementById('placeText').textContent};
+  },
   /* Repaint the HUD on demand. The real game does this ten times a second from the
      animation loop; a test that drives without running the loop has to ask. */
   paintHud:function(){ paintKartButton(); },

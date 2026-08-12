@@ -1121,6 +1121,76 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
          `${effects.out.triple.boost}s, a golden one ${effects.out.golden.boost}s, and a ` +
          `star ${effects.out.star.boost}s plus ${effects.out.star.star}s of fast grass`);
 
+    // ---- 8f: the book of lap times -------------------------------------------
+    console.log('\n8f. every lap he has driven, in a list he can open');
+    const book = await page.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('racing', 4242);
+      document.getElementById('playBtn').click();
+      if (!H.kart()) H.toggleKart();
+      H.clearKartMotion();
+      const empty = H.lapBook();
+      /* Three laps, and see whether all three are written down. */
+      let laps = H.laps();
+      for (let i = 0; i < 250 && H.lapLog().length < 3; i++) {
+        H.drive(1, () => H.autoSteer(), () => H.autoThrottle());
+      }
+      const log = H.lapLog();
+      const shown = H.lapBook();
+      /* Opening and closing it, the way he would. */
+      H.openLapBook();
+      const opened = H.lapBook().open;
+      H.closeLapBook();
+      const closed = H.lapBook().open;
+      return {empty, log, shown, opened, closed, laps: H.laps(),
+              times: H.lapTimes()};
+    });
+    check('an empty book says so rather than showing nothing at all',
+          book.empty.rows.length === 0, JSON.stringify(book.empty));
+    check(`every lap he drives is written down (${book.log.length} of them)`,
+          book.log.length >= 3 && book.log.every(l => l.t > 20 && l.t < 120),
+          JSON.stringify(book.log));
+    check('and the list shows one row per lap, newest first',
+          book.shown.rows.length === book.log.length &&
+          book.shown.rows[0].text.indexOf(book.log[book.log.length - 1].t.toFixed(1)) >= 0,
+          JSON.stringify({rows: book.shown.rows, log: book.log}));
+    /* Exactly one row is the best, and it is the quickest clean lap in the book. */
+    const bestRows = book.shown.rows.filter(r => r.best);
+    const cleanTimes = book.log.filter(l => l.clean).map(l => l.t);
+    check('exactly one lap is marked as his best, and it is the quickest clean one',
+          bestRows.length === 1 &&
+          bestRows[0].text.indexOf(Math.min(...cleanTimes).toFixed(1)) >= 0,
+          JSON.stringify({bestRows, cleanTimes}));
+    check('tapping the clock opens the list and the button closes it',
+          book.opened === true && book.closed === false,
+          JSON.stringify({opened: book.opened, closed: book.closed}));
+    note(`${book.log.length} laps in the book: ` +
+         `${book.log.map(l => l.t.toFixed(1) + 's' + (l.clean ? '' : ' (helped)')).join(', ')}`);
+
+    /* And the book survives a reload, because it is saved with the district. */
+    const bookSaved = await page.evaluate(async () => {
+      const H = window.__henrycraft;
+      await H.createDistrict('Lap Book Circuit', 'racing');
+      if (!H.kart()) H.toggleKart();
+      H.clearKartMotion();
+      for (let i = 0; i < 250 && H.lapLog().length < 2; i++) {
+        H.drive(1, () => H.autoSteer(), () => H.autoThrottle());
+      }
+      return {slug: H.districts().current, log: H.lapLog(), best: H.lapTimes().best};
+    });
+    await page.reload({waitUntil: 'load'});
+    await page.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready());
+    const bookAfter = await page.evaluate(() => {
+      const H = window.__henrycraft;
+      return {slug: H.districts().current, log: H.lapLog(), best: H.lapTimes().best};
+    });
+    check('the book is still there after closing the game',
+          bookAfter.slug === bookSaved.slug &&
+          JSON.stringify(bookAfter.log) === JSON.stringify(bookSaved.log) &&
+          bookAfter.best === bookSaved.best,
+          JSON.stringify({before: bookSaved, after: bookAfter}));
+    note(`${bookSaved.log.length} laps and a best of ${bookSaved.best}s survived a reload`);
+
     // ---- 9: a bigger world, and only where it was asked for -----------------
     console.log('\n9. a racing district is bigger, and nothing else changed size');
     const sizes = await page.evaluate(() => {
