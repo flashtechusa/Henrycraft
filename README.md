@@ -126,8 +126,15 @@ the road rather than a punishment: nothing about being off the track stops him, 
 or takes anything away.
 
 **Driving is not building.** From the driving seat the wireframe box that shows where a
-block would go is gone, and so are the block picker and the keyboard crib &mdash; nothing
-can be dug or placed at all. Hiding the box while leaving digging switched on would have
+block would go is gone, and so are the block picker, the keyboard crib, and on a tablet **all
+seven action buttons** &mdash; Dig, Build, Dig Down, Dig Up, Fly, Jump and Fly Lower. Four of
+them do nothing while driving and the other three are not what a kart is for. What is left is
+the stick, which steers, and the four chips along the top, one of which is the way out. All
+seven come back the instant he steps out.
+
+Climbing into a kart also lands him if he was flying, because the Fly Lower button goes with
+the rest &mdash; without that he could end up airborne with nothing on screen to bring him
+down. Nothing can be dug or placed at all. Hiding the box while leaving digging switched on would have
 been worse than leaving the box: an invisible cursor quietly taking a bite out of the road
 at eleven blocks a second. A row of blocks that does nothing when tapped is the same
 mistake in a different place. It is one predicate, `canBuild()`, read by everything that
@@ -280,7 +287,7 @@ reader's point of view, because the reader is the one who has to reload. It clea
 sharing is switched off rather than latching, which is the mistake the first version of
 the out-of-date banner made.
 
-`node tools/test-racing.js` covers it in 96 checks, and the ones that matter drive rather
+`node tools/test-racing.js` covers it in 101 checks, and the ones that matter drive rather
 than look: a lap and a half on each of twenty seeds, with the real stick input through the
 real physics, timed &mdash; **45 to 53 seconds a lap**, which is the thing he actually
 asked for. It measures the circuit rather than trusting it: every seed's lap length,

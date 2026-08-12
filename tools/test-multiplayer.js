@@ -1172,9 +1172,20 @@ function requireNode22() {
       return q ? H.travel(q.id) : false;
     });
     await walk(S1);
-    await sleep(1500);
+    /* Waited for by state, not by a number of milliseconds. Fixed sleeps here were the last
+       flaky thing in this file: 2.5 seconds is usually enough for a district switch, a room
+       adoption and a tower's worth of blocks to arrive, and under load it is not - so the
+       suite reported three failures on one run and none on the next, which is worse than a
+       failure because it teaches you to ignore it. */
+    await waitFor(S1, w => window.__henrycraft.districts().current === w, solo.built, 30000);
     await walk(S2);
-    await sleep(2500);
+    await waitFor(S2, w => window.__henrycraft.districts().current === w, solo.built, 30000);
+    /* Both of them in the room, seeing each other, with his tower actually there. */
+    await Promise.all([S1, S2].map(p => waitFor(p, t => {
+      const H = window.__henrycraft;
+      return H.mp.status() === 'sharing' && H.mp.players().length === 1 &&
+             [0, 1, 2, 3].every(i => H.getBlock(t.x, t.y + i, t.z) === t.id);
+    }, solo.tower, 60000)));
     const inHis = await Promise.all([S1, S2].map(p => p.evaluate(t => {
       const H = window.__henrycraft, d = H.districts();
       return {code: d.code, slug: d.current, others: H.mp.players().length,

@@ -122,8 +122,17 @@ body>canvas{display:block;position:fixed;inset:0}
 body.touch #touchUI{display:block}
 body.touch #palette{display:none}
 /* Hidden while he is driving - see paintKartButton. Its own class rather than the shared
-   `hide`, so getting out cannot leave either of them hidden by the other rule. */
-#palette.drivinghide,#hint.drivinghide{display:none}
+   `hide`, so getting out cannot leave any of them hidden by the other rule.
+
+   The whole right-hand cluster goes: Dig, Build, Dig Down and Dig Up do nothing from the
+   driving seat, and Fly, Jump and Fly Lower are not what a kart is for. What is left is the
+   stick, which steers, and the four chips along the top - one of which is the way out. */
+#palette.drivinghide,#hint.drivinghide,#pads.drivinghide{display:none}
+/* The block button needs the same weight as the rule that shows it. `body.touch #blockBtn`
+   carries an element as well as an id and a class, so it beat `#blockBtn.drivinghide` and the
+   button stayed on screen through the whole thing - which a test counting computed styles
+   caught and a test counting class names would not have. */
+body.touch #blockBtn.drivinghide{display:none}
 
 /* touch: one block button at the bottom, full picker only when asked for */
 #blockBtn{display:none}
@@ -3630,6 +3639,9 @@ function clearKartMotion(){
 function toggleKart(){
   player.kart=!player.kart;
   if(player.kart){
+    /* Land him first. The fly buttons are hidden from the driving seat, so climbing into a
+       kart in mid-air would leave him flying with nothing on screen to bring him down. */
+    if(player.fly) setFly(false,true);
     lapIdx=null;                   /* laps are counted from wherever he sets off */
     /* And timed from there too. Getting out throws away the progress towards a lap - see
        updateLaps - so climbing back in genuinely does start a fresh one, which is why this
@@ -3721,6 +3733,18 @@ function paintKartButton(){
      because half of what it lists is digging. Both come straight back when he gets out. */
   var pal=document.getElementById('palette');
   if(pal) pal.classList.toggle('drivinghide',driving);
+  /* The action pads and the block button that opens the picker. Same reason as the palette:
+     a button that does nothing when tapped is worse than no button, and on a tablet they are
+     the biggest thing on the screen after the track. */
+  var pads=document.getElementById('pads');
+  if(pads) pads.classList.toggle('drivinghide',driving);
+  var bbtn=document.getElementById('blockBtn');
+  if(bbtn) bbtn.classList.toggle('drivinghide',driving);
+  /* And if the picker happens to be open, close it - he cannot place what he picks. */
+  if(driving){
+    var pick=document.getElementById('picker');
+    if(pick) pick.classList.add('hide');
+  }
   /* The line of key hints goes too. Half of what it lists is digging, and it sits across
      the middle of the picture on a short window - which is exactly where the road is when
      he is driving. It is a keyboard crib for a grown-up and it comes straight back. */
@@ -4891,7 +4915,7 @@ downBtn.addEventListener('touchcancel',dnu);
 downBtn.addEventListener('mousedown',dnd);
 window.addEventListener('mouseup',dnu);
 
-function setFly(on){
+function setFly(on,quiet){
   player.fly=on;
   player.vy=0;
   player.flyBoost=on?0.8:0;
@@ -4899,7 +4923,9 @@ function setFly(on){
   el('btnFly').classList.toggle('on',on);
   el('btnJump').innerHTML=on?'<i>⬆️</i>Up':'<i>⬆️</i>Jump';
   el('mFly').textContent='Flying: '+(on?'on':'off');
-  toast(on?'🪽 Up we go! Hold UP for higher':'Walking');
+  /* Quiet when something else is about to say what just happened - getting into a kart
+     lands him, and "Walking" is not what that moment is. */
+  if(!quiet) toast(on?'🪽 Up we go! Hold UP for higher':'Walking');
 }
 function setView(fp){
   firstPerson=fp;
@@ -8001,7 +8027,9 @@ window.__henrycraft={
   selected:function(){ return selected; },
   selectBlock:selectBlock,
   player:function(){ return {x:player.x,y:player.y,z:player.z,
-                             vx:player.vx,vy:player.vy,vz:player.vz}; },
+                             vx:player.vx,vy:player.vy,vz:player.vz,
+                             fly:player.fly,kart:player.kart,
+                             onGround:player.onGround}; },
   /* Where the stars are and how many he has, for the racing suite. */
   stars:function(){ return stars.map(function(s){
     return {x:+s.x.toFixed(2), y:+s.y.toFixed(2), z:+s.z.toFixed(2), done:!!s.done}; }); },

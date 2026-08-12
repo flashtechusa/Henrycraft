@@ -717,6 +717,77 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
              `which it did before there was a lap clock`
            : `, always left of the buttons`));
 
+    /* The tablet's own controls. A fresh context with touch on, because the action pads only
+       exist there: checking them on a desktop page would be checking that something already
+       hidden is hidden, which is how the `hide` class went years without a rule behind it. */
+    const padsCtx = await browser.newContext({viewport: {width: 900, height: 560},
+                                              hasTouch: true, isMobile: true});
+    const padsPage = await padsCtx.newPage();
+    try {
+      await padsPage.goto(url, {waitUntil: 'load', timeout: 120000});
+      await padsPage.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
+                                     {timeout: 150000});
+      const pads = await padsPage.evaluate(async () => {
+        const H = window.__henrycraft;
+        H.loadThemeSeed('racing', 4242);
+        document.getElementById('playBtn').click();
+        const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const vis = id => getComputedStyle(document.getElementById(id)).display !== 'none';
+        const drawn = id => document.getElementById(id).getClientRects().length > 0;
+        const shot = () => ({
+          touch: document.body.classList.contains('touch'),
+          pads: drawn('pads'), blockBtn: drawn('blockBtn'), stick: drawn('stick'),
+          kartBtn: drawn('kartBtn'), menu: drawn('btnMenu'), view: drawn('btnView'),
+          /* Actually rendered, not merely styled as visible. A child of a display:none
+             parent still reports its own computed display, so counting that reported seven
+             buttons inside a hidden cluster. getClientRects is empty for anything the page
+             is not drawing, whatever the reason. */
+          buttons: [].slice.call(document.querySelectorAll('#pads .blockbtn'))
+                     .filter(b => b.getClientRects().length > 0).length,
+        });
+        if (H.kart()) H.toggleKart();
+        await frame();
+        const walking = shot();
+        H.toggleKart();
+        await frame();
+        const driving = shot();
+        /* In the air, then into the kart: he must not be left flying with no way down. */
+        H.toggleKart();
+        H.setFly(true);
+        const flyingOnFoot = H.player().fly;
+        H.toggleKart();
+        await frame();
+        const gotInFlying = {fly: H.player().fly, pads: shot()};
+        H.toggleKart();
+        await frame();
+        const back = shot();
+        return {walking, driving, back, flyingOnFoot, gotInFlying};
+      });
+      check('on the tablet the seven action buttons are there while he is on foot',
+            pads.walking.touch === true && pads.walking.pads === true &&
+            pads.walking.buttons === 7, JSON.stringify(pads.walking));
+      check('and every one of them is gone from the driving seat',
+            pads.driving.pads === false && pads.driving.buttons === 0 &&
+            pads.driving.blockBtn === false, JSON.stringify(pads.driving));
+      /* But not the stick, which is how he steers, nor the way out of the kart. */
+      check('the stick and the way out of the kart stay exactly where they were',
+            pads.driving.stick === true && pads.driving.kartBtn === true &&
+            pads.driving.menu === true && pads.driving.view === true,
+            JSON.stringify(pads.driving));
+      check('and getting out brings all seven straight back',
+            pads.back.pads === true && pads.back.buttons === 7 &&
+            pads.back.blockBtn === true, JSON.stringify(pads.back));
+      /* Climbing into a kart in mid-air has to put him down, or the Fly Lower button
+         disappears while he is still up there. */
+      check('climbing into a kart while flying lands him first',
+            pads.flyingOnFoot === true && pads.gotInFlying.fly === false,
+            JSON.stringify(pads.gotInFlying));
+      note(`on a tablet: ${pads.walking.buttons} action buttons on foot, ` +
+           `${pads.driving.buttons} in the kart, ${pads.back.buttons} again after getting out`);
+    } finally {
+      await padsCtx.close();
+    }
+
     // ---- 8c: timed laps -----------------------------------------------------
     console.log('\n8c. laps are timed, and the times are honest');
     const timed = await page.evaluate(async () => {
