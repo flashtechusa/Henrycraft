@@ -48,7 +48,7 @@ touches an existing one. Districts are picked from cards with a painted
 thumbnail of what that place looks like, so he can choose by looking rather than
 reading.
 
-Each district has one of five themes, fixed when it is created:
+Each district has one of six themes, fixed when it is created:
 
 | Theme | What it looks like |
 | --- | --- |
@@ -57,6 +57,7 @@ Each district has one of five themes, fixed when it is created:
 | **Desert Dunes** | low sand dunes, cacti, a few small oases |
 | **Island Bay** | turquoise sea broken into islands, palms on the sand |
 | **Mushroom Hollow** | lilac sky, dark soil, giant red and purple mushrooms |
+| **Racing Circuit** | green country with a flat kart track cut through it &mdash; see below |
 
 New districts arrive already named &mdash; two friendly words like *Otter Bay* &mdash;
 with a dice button to re-roll. The name can be typed over, but typing is never
@@ -68,13 +69,33 @@ confirm, so a mis-tap cannot wipe a build.
 A sixth kind of district: a **Racing Circuit**, with a go-kart and a track to drive it
 round. Make one from the district picker &mdash; ✚, then the 🏁 card.
 
-The circuit is generated, not drawn by hand, so every one is different: a closed loop
-whose radius breathes twice and three times round the lap, which gives corners of several
-sizes and can never cross itself. Nine blocks of road, red-and-white kerbs down both
-sides, a dashed line down the middle, and a chequered start line under a brick arch he
-drives through. The ground under the road is raised or cut to meet it and feathered out
-over five blocks, so the track sits in the country rather than on a bridge across it -
-nothing is suspended and there is nothing to fall off.
+The circuit is generated, not drawn by hand, so every one is different, and it is a
+proper circuit rather than a ring road: **a lap is 210 to 240 blocks**, with hairpins,
+an infield section and long straights. It is grown the way a random maze is grown &mdash;
+take the ring of cells round the edge of a coarse grid, then push a couple of its sides
+inwards through the middle, each push replacing a straight edge with a three-sided
+detour. Corners are then rounded off and the whole thing resampled as a closed spline,
+and the result is checked before it is built: long enough, inside the world, no two
+corridors closer together than the road is wide, and no corner tighter than a kart can
+take at speed. A layout that fails any of those is thrown away and another is grown.
+
+Nine blocks of road, red-and-white kerbs down both sides, a dashed line down the middle,
+and a chequered start line under a brick arch he drives through.
+
+That length is the ceiling rather than a choice: a 230-block lap of 11-wide road covers
+about 60% of a 64-block district, which is arithmetic and not a fault. Seen from the air
+a circuit is now more tarmac than field; seen from the driving seat &mdash; which is where
+he sees it &mdash; it is a road with kerbs, grass and trees beyond them. Going longer
+means a bigger world for racing districts, which would mean touching the save format and
+doubling what his tablet has to draw, so it has not been done.
+
+**The road is dead flat** &mdash; one height for the whole circuit, chosen from the middle
+of the ground it crosses and always above the water. The country either side is feathered
+up or down to meet it over three blocks, so the track sits in the landscape rather than on
+a bridge across it: nothing is suspended and there is nothing to fall off. Flat is not a
+shortcut, it is the point &mdash; the first version followed the ground, and a road that
+climbs a block at a time looks bumpy from the seat however smooth the numbers say it is.
+He said so, and he was right.
 
 **Getting in and out is one button**, the 🏎️ beside the camera, and it only appears in a
 racing district. The stick steers instead of strafing while driving, and turns more the
@@ -90,17 +111,23 @@ which reads as a broken star rather than a near miss.
 
 **Laps count upwards** on a 🏁 chip at the top, and that is all they do. There is no
 timer, no position, no lap limit and no way to lose; going round the other way simply
-un-does progress rather than taking a lap away. Laps are counted as an angle swept about
-the middle of the circuit, not by driving over a line, because a line can be missed at
-the edge of the road - and being told you have not finished a lap you have just finished
-is exactly the sort of unfairness this game does not have.
+un-does progress rather than taking a lap away. Laps are counted as **distance travelled
+along the road**, not by driving over a line and not as an angle about the middle: a line
+can be missed at the edge of the road, and an angle only works on a circle. On a circuit
+that doubles back on itself the angle sweeps forward and backward round the lap, so a lap
+he had genuinely just finished counted as half of one. Being told you have not finished a
+lap you have just finished is exactly the sort of unfairness this game does not have.
+Teleporting across the circuit does not earn a lap either, because a jump longer than a
+kart could have driven is not credited.
 
 Everything else about a racing district is an ordinary district: he can dig it, build in
 it, fly over it, put portals in it and share it.
 
 `node tools/test-racing.js` covers it, and the checks that matter drive rather than look:
 a full lap on each of twenty seeds, with the real stick input through the real physics.
-That is what caught the bug worth mentioning - **the start arch was being built across
+It also measures the circuit rather than trusting it &mdash; every seed's lap length, its
+tightest corner, and the biggest height step anywhere on the road, which has to be zero.
+Driving is what caught the bug worth mentioning: **the start arch was being built across
 the road instead of beside it**, because the "across" and "along" vectors were the same
 one, so on several seeds the first thing a kart did was drive into its own start line and
 stop. A screenshot of the finished track would have shown it; a test that only checked
@@ -531,7 +558,7 @@ real Android build, so they only pass in CI.
 
 `node tools/test-districts.js` covers districts: that the pre-district save
 migrates with every block edit intact, that districts stay isolated from each
-other, that switching and returning restores everything, and that all five themes
+other, that switching and returning restores everything, and that all six themes
 generate playable worlds over 20 seeds each with measurably different terrain and
 colours.
 
@@ -545,7 +572,7 @@ desktop sizes.
 
 `node tools/test-portals.js` covers portals: frame detection at every size from
 1×2 to 21×21 in both vertical planes, a specific hint for each wrong shape, and
-50 travel trials across all five themes checking arrival safety, the return
+50 travel trials across all six themes checking arrival safety, the return
 portal and edit preservation. It also asserts the performance properties that
 matter — that a 21×21 portal costs the same number of draw calls as a 1×2 one
 (441 blocks and 1,764 triangles arrive as 2 merged meshes and 3 draw calls), and

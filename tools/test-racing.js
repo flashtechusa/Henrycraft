@@ -90,15 +90,27 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
            the road and its kerbs, and consecutive samples must be a small step apart -
            a gap would be a road with a hole in it. */
         let worst = 0, minR = 1e9, maxR = 0, offWorld = 0, biggestStep = 0;
-        for (let k = 0; k < t.pts.length; k++) {
-          const p = t.pts[k], q = t.pts[(k + 1) % t.pts.length];
+        /* The corners, as a driver meets them: the radius of the circle through three
+           points a few blocks apart. A hairpin is welcome; something tighter than a kart
+           can physically turn is not. */
+        let tightest = 1e9;
+        const N0 = t.pts.length, look = Math.round(6 / 0.34);
+        for (let k = 0; k < N0; k++) {
+          const p = t.pts[k], q = t.pts[(k + 1) % N0];
           const r = Math.hypot(p.x - t.cx, p.z - t.cz);
           minR = Math.min(minR, r); maxR = Math.max(maxR, r);
           if (p.x < t.half + 2 || p.z < t.half + 2 ||
               p.x > 64 - t.half - 2 || p.z > 64 - t.half - 2) offWorld++;
           biggestStep = Math.max(biggestStep, Math.hypot(p.x - q.x, p.z - q.z));
-          /* Height changes have to be gentle, or the road is a staircase. */
+          /* The road is flat now, so any height change at all is a fault. */
           worst = Math.max(worst, Math.abs(p.y - q.y));
+          const A = t.pts[(k - look + N0) % N0], B = p, C = t.pts[(k + look) % N0];
+          const area = Math.abs((B.x - A.x) * (C.z - A.z) - (C.x - A.x) * (B.z - A.z)) / 2;
+          if (area > 1e-6) {
+            const ab = Math.hypot(B.x - A.x, B.z - A.z), bc = Math.hypot(C.x - B.x, C.z - B.z),
+                  ca = Math.hypot(A.x - C.x, A.z - C.z);
+            tightest = Math.min(tightest, (ab * bc * ca) / (4 * area));
+          }
         }
         /* Closed: the last sample joins the first. */
         const closes = Math.hypot(t.pts[0].x - t.pts[t.pts.length - 1].x,
@@ -116,7 +128,9 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         }
         out.push({seed: 3000 + i * 37, minR: +minR.toFixed(1), maxR: +maxR.toFixed(1),
                   offWorld, closes, worstStep: +worst.toFixed(2),
-                  biggestStep: +biggestStep.toFixed(2), pinch: +pinch.toFixed(1)});
+                  biggestStep: +biggestStep.toFixed(2), pinch: +pinch.toFixed(1),
+                  lap: H.lapLength(), tightest: +tightest.toFixed(1),
+                  reach: +(maxR - minR).toFixed(1)});
       }
       return out;
     }, SEEDS);
@@ -130,12 +144,26 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
     check('no circuit doubles back close enough to cross itself',
           shapes.every(s => s.pinch > 9),
           JSON.stringify(shapes.filter(s => s.pinch <= 9).map(s => ({seed: s.seed, pinch: s.pinch}))));
-    check('the road never steps up more than a block at a time',
-          shapes.every(s => s.worstStep <= 1),
-          JSON.stringify(shapes.filter(s => s.worstStep > 1)));
+    /* Flat, and that is not a detail: a slope quantised to blocks is a staircase, and a
+       staircase at kart speed is a kart that bounces the whole way round. He looked at an
+       earlier version and said the road was bumpy. */
+    check('the road is perfectly flat, everywhere, on every seed',
+          shapes.every(s => s.worstStep === 0),
+          JSON.stringify(shapes.filter(s => s.worstStep > 0)
+                               .map(s => ({seed: s.seed, step: s.worstStep}))));
+    /* 175 is the floor; the old wobbly circle managed 110 whatever the seed. */
+    check(`every lap is a proper circuit rather than a ring ` +
+          `(${Math.min(...shapes.map(s => s.lap))} blocks at the shortest)`,
+          shapes.every(s => s.lap >= 175),
+          JSON.stringify(shapes.filter(s => s.lap < 190).map(s => ({seed: s.seed, lap: s.lap}))));
+    check('with corners of genuinely different sizes, none too tight for a kart',
+          shapes.every(s => s.tightest >= 4.2 && s.reach >= 6),
+          JSON.stringify(shapes.map(s => ({seed: s.seed, tightest: s.tightest,
+                                           reach: s.reach}))));
     const rs = shapes.filter(s => !s.missing);
-    note(`lap radius ranges ${Math.min(...rs.map(s => s.minR))} to ` +
-         `${Math.max(...rs.map(s => s.maxR))} blocks across ${rs.length} seeds`);
+    note(`lap length ${Math.min(...rs.map(s => s.lap))} to ` +
+         `${Math.max(...rs.map(s => s.lap))} blocks; tightest corner ` +
+         `${Math.min(...rs.map(s => s.tightest))} blocks of radius across ${rs.length} seeds`);
 
     // ---- 2: the road is actually laid, and is dry ----------------------------
     console.log('\n2. the circuit is built out of road, above the water');
@@ -152,12 +180,12 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
              tree beside the road, or a plank of the start arch, and reports the circuit
              as unpaved when it is not - the first version of this check did exactly
              that. */
-          /* Find the column's real driving surface first, then look up from it. The
-             column takes its height from whichever sample is nearest, which at a change
-             of gradient is the sample before or after this one - so the road can be a
-             block above the height sampled here. Measuring clearance from the sampled
-             height instead reported the road surface itself as an obstruction standing
-             in the road, which is a fine example of a test being confidently wrong. */
+          /* Find the column's real driving surface first, then look up from it, rather
+             than measuring clearance from the height the sample claims. An earlier version
+             measured from the sample and reported the road surface itself as an obstruction
+             standing in the road - a fine example of a test being confidently wrong - so
+             the block either side is still allowed for here even though a flat road should
+             not need it. If it ever does need it, section 1 fails first. */
           const isRoad = y2 => {
             const b2 = H.getBlock(x, y2, z);
             return b2 === ids.ROAD || b2 === ids.ROADLINE || b2 === ids.GRID;
@@ -192,8 +220,22 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
           if (kerbAt(p.x + px2 * off, p.z + pz2 * off) ||
               kerbAt(p.x - px2 * off, p.z - pz2 * off)) kerbs++;
         }
+        /* How much of the district the circuit takes up. A long lap in a 64-block world
+           covers a lot of it - that is arithmetic, not a fault - but if a layout ever
+           merged two corridors into one field of tarmac this is the number that would
+           say so. */
+        let paved = 0;
+        for (let x = 0; x < 64; x++) {
+          for (let z = 0; z < 64; z++) {
+            const b = H.getBlock(x, t.y, z);
+            if (b === ids.ROAD || b === ids.ROADLINE || b === ids.GRID || b === ids.KERB) paved++;
+          }
+        }
         const samples = Math.ceil(t.pts.length / 7);
-        out.push({seed: 3000 + i * 37, samples, road, wet, blocked, kerbs});
+        out.push({seed: 3000 + i * 37, samples, road, wet, blocked, kerbs,
+                  paved: +(paved / 4096).toFixed(3),
+                  /* what a ribbon that long and that wide has to cover */
+                  expect: +(H.lapLength() * (t.half * 2 + 2) / 4096).toFixed(3)});
       }
       return out;
     }, SEEDS);
@@ -204,10 +246,38 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
           built.every(b => b.wet === 0), JSON.stringify(built.filter(b => b.wet)));
     check('and nothing is standing in the road',
           built.every(b => b.blocked === 0), JSON.stringify(built.filter(b => b.blocked)));
+    /* Not quite every single point. The probe steps across the road from one sample and
+       lands a block or so off where the kerb actually is at the start arch, where the grid
+       replaces it. Measured: 96% to 100% of samples on every seed, so 90% is a bar that
+       would notice a missing kerb rather than one written to accommodate whatever the code
+       happens to do - an earlier version of this asked for 70% on the strength of a merged
+       corridor that the layout no longer produces, which is no bar at all. */
     check('the road is kerbed rather than just ending',
-          built.every(b => b.kerbs > b.samples * 0.8),
+          built.every(b => b.kerbs > b.samples * 0.9),
           JSON.stringify(built.map(b => ({seed: b.seed, kerbs: b.kerbs, of: b.samples}))));
-    note(`checked ${built[0].samples} points round each of ${SEEDS} circuits`);
+    const kerbPct = built.map(b => b.kerbs / b.samples);
+    note(`checked ${built[0].samples} points round each of ${SEEDS} circuits; ` +
+         `kerbed on ${(Math.min(...kerbPct) * 100).toFixed(0)}% to ` +
+         `${(Math.max(...kerbPct) * 100).toFixed(0)}% of them`);
+    /* The circuit is allowed to fill most of the district. A 230-block lap of 11-wide road
+       IS 60-odd per cent of a 64-block world, and that ceiling is the world's size rather
+       than anything about the layout, so what is checked is that the paved area matches
+       what a ribbon that long and that wide accounts for - no more, and not much less.
+
+       Worth being honest about how much this proves: on purpose I built a version whose
+       corridors ran eight blocks apart with a nine-block road, so they genuinely overlapped,
+       and this ratio only moved from 1.00 to 0.95. Overlapping a ribbon with itself barely
+       changes its area. The check above it - the kerb - is the one that noticed, and loudly:
+       33% of samples kerbed against a bar of 90%. This one is a sanity band against a
+       generator that pours tarmac somewhere it should not, not a merge detector. */
+    check('as much of the district is paved as the lap accounts for, and no more',
+          built.every(b => b.paved >= b.expect * 0.9 && b.paved <= b.expect * 1.1),
+          JSON.stringify(built.filter(b => b.paved < b.expect * 0.9 || b.paved > b.expect * 1.1)
+                              .map(b => ({seed: b.seed, paved: b.paved, expect: b.expect}))));
+    const pv = built.map(b => b.paved);
+    note(`the road and its kerbs cover ${(Math.min(...pv) * 100).toFixed(0)}% to ` +
+         `${(Math.max(...pv) * 100).toFixed(0)}% of a district: a long lap in a small ` +
+         `world, and within a tenth of what its length alone accounts for`);
 
     // ---- 3: he starts on the grid, in a kart --------------------------------
     console.log('\n3. he arrives on the start line');
@@ -236,12 +306,14 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
       for (let i = 0; i < n; i++) {
         H.loadThemeSeed('racing', 3000 + i * 37);
         if (!H.kart()) H.toggleKart();
-        /* Forty seconds of driving, steering for the centre line the way a person
-           does. One lap is about 140 blocks; at kart pace that is well inside it. */
-        const r = H.drive(40, () => H.autoSteer());
+        /* A minute of driving, steering for the centre line and squeezing the throttle
+           the way a person does. A lap is a bit over 200 blocks now - twice what the old
+           ring managed - and at kart pace a minute is comfortably more than one. */
+        const r = H.drive(60, () => H.autoSteer(), () => H.autoThrottle());
         out.push({seed: 3000 + i * 37, turned: r.turned, laps: r.laps,
                   offRoad: r.offRoadFrames, frames: r.frames,
-                  maxSpeed: r.maxSpeed, minY: r.minY});
+                  maxSpeed: r.maxSpeed, minY: r.minY, stalled: r.stalledFrames,
+                  lap: H.lapLength()});
         if (H.kart()) H.toggleKart();
       }
       return out;
@@ -249,7 +321,14 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
     check(`a full lap is driveable on all ${SEEDS} seeds`,
           laps.every(l => l.turned >= 1),
           JSON.stringify(laps.filter(l => l.turned < 1)
-                             .map(l => ({seed: l.seed, turned: l.turned}))));
+                             .map(l => ({seed: l.seed, turned: l.turned,
+                                         stalled: l.stalled, lap: l.lap}))));
+    /* Never wedged. Rolling slowly round a hairpin is fine; sitting still against
+       something is the one thing a five-year-old cannot get out of by himself. */
+    check('and he is never left sitting still against anything',
+          laps.every(l => l.stalled / l.frames < 0.06),
+          JSON.stringify(laps.map(l => ({seed: l.seed,
+                                         stuck: +(l.stalled / l.frames).toFixed(2)}))));
     check('and the lap counter notices',
           laps.every(l => l.laps >= 1),
           JSON.stringify(laps.filter(l => l.laps < 1).map(l => ({seed: l.seed, laps: l.laps}))));
@@ -260,7 +339,7 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
     check('and never falls out of the world',
           laps.every(l => l.minY > 0), JSON.stringify(laps.filter(l => l.minY <= 0)));
     const turns = laps.map(l => l.turned);
-    note(`laps driven per 40s: ${Math.min(...turns).toFixed(2)} to ` +
+    note(`laps driven per minute: ${Math.min(...turns).toFixed(2)} to ` +
          `${Math.max(...turns).toFixed(2)}; top speed ` +
          `${Math.max(...laps.map(l => l.maxSpeed)).toFixed(1)} blocks a second`);
 
@@ -307,7 +386,7 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
       H.loadThemeSeed('racing', 4242);
       if (!H.kart()) H.toggleKart();
       const before = H.starsFound();
-      const r = H.drive(45, () => H.autoSteer());
+      const r = H.drive(45, () => H.autoSteer(), () => H.autoThrottle());
       return {before, after: H.starsFound(), total: H.stars().length, turned: r.turned};
     });
     check('driving round collects the stars he drives through',
@@ -349,11 +428,11 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
       const H = window.__henrycraft;
       H.loadThemeSeed('racing', 4242);
       if (!H.kart()) H.toggleKart();
-      const forwards = H.drive(20, () => H.autoSteer());
+      const forwards = H.drive(20, () => H.autoSteer(), () => H.autoThrottle());
       const after = H.laps();
       /* Now spin round and go back the way he came. */
       H.turn(Math.PI);
-      const back = H.drive(20, () => -H.autoSteer());
+      const back = H.drive(20, () => -H.autoSteer(), () => H.autoThrottle());
       return {after, backLaps: H.laps(), forwards: forwards.turned, back: back.turned};
     });
     check('going back round the other way never takes a lap away',
