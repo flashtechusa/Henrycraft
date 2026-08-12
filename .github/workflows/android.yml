@@ -13,6 +13,7 @@ on:
       - 'tools/test-game.js'
       - 'tools/test-districts.js'
       - 'tools/test-portals.js'
+      - 'tools/test-racing.js'
       - 'tools/test-offline.js'
       - 'tools/test-multiplayer.js'
       - 'server/**'
@@ -103,6 +104,20 @@ jobs:
             echo ''
             echo '```'
             cat /tmp/districts.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Run the racing tests
+        run: |
+          set +e
+          node tools/test-racing.js | tee /tmp/racing.txt
+          rc=${PIPESTATUS[0]}
+          {
+            echo '## Racing circuit'
+            echo ''
+            echo '```'
+            cat /tmp/racing.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"

@@ -448,9 +448,13 @@ body.touch #hint{display:none}
     <div class="chip" id="districtChip">Home</div>
     <!-- Only there while sharing. Tap it for who. -->
     <button class="chip hide" id="peopleChip" title="Who is here">👥 <b><span id="peopleNum">1</span></b></button>
+    <!-- Only on a circuit, and only while driving. A number that goes up. -->
+    <div class="chip hide" id="lapChip">🏁 <b><span id="lapNum">1</span></b></div>
   </div>
 
   <div id="topRight">
+    <!-- Only in a racing district. Nothing new appears anywhere else. -->
+    <button class="chip icon blockbtn hide" id="kartBtn" title="Get in the kart">🏎️</button>
     <button class="chip icon blockbtn" id="btnView" title="Change view">🎥</button>
     <button class="chip icon blockbtn" id="btnSound" title="Sound">🔊</button>
     <button class="chip icon blockbtn" id="btnMenu" title="Menu">⚙️</button>
@@ -654,7 +658,10 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
     /* Portal interiors. Ordinary terrain blocks as far as the mesher is
        concerned, which is what makes a 21x21 portal one merged chunk mesh rather
        than 441 objects. */
-    PORTAL=30;
+    PORTAL=30,
+    /* The racing district. Appended once more, so every id above keeps its number
+       and every save written before today still loads. */
+    ROAD=31,KERB=32,ROADLINE=33,GRID=34;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -698,6 +705,13 @@ DEFS[MUSHSTEM] ={name:'Mushroom Stem', tiles:[33,33,33]};
    two portals to different districts do not look the same. Never placeable by
    hand - it only appears when a frame is lit. */
 DEFS[PORTAL]   ={name:'Portal',    tiles:[34,34,34], glow:true, portal:true};
+/* Racetrack. Theme terrain like the eight above, so the picker keeps its three rows
+   on a phone - a track is what a racing district is made of rather than something he
+   places by hand. Easy to add to the palette later if he wants to build his own. */
+DEFS[ROAD]     ={name:'Road',      tiles:[35,35,35]};
+DEFS[KERB]     ={name:'Kerb',      tiles:[36,36,36]};
+DEFS[ROADLINE] ={name:'Road Line', tiles:[37,37,37]};
+DEFS[GRID]     ={name:'Start Line',tiles:[38,38,38]};
 
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
              COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
@@ -781,7 +795,27 @@ var THEMES=[
    plant:'mushroom', plantDens:0.020,
    skyTop:0x7a56b8, skyMid:0xb18fd8, skyLow:0xd8c4ec, skyHaze:0xf4ecfb,
    fog:0xc9aee2, fogUnder:0x4a2f70, waterTint:0x8f5cc2,
-   hemiSky:0xf0e4ff, hemiGround:0x6a5a7a, sunCol:0xf6e8ff, sunInt:0.52}
+   hemiSky:0xf0e4ff, hemiGround:0x6a5a7a, sunCol:0xf6e8ff, sunInt:0.52},
+
+  /* A racing circuit. Gentle green country - low hills, hardly any water - because a
+     track wants room rather than scenery, and a lake where a corner should be is a
+     lake in the way. `track` is what tells generateWorld to lay a road round it. */
+  {key:'racing', name:'Racing Circuit', emoji:'🏁',
+   elevBase:6, elevAmp:10, noiseA:24, noiseB:60, ridge:0.30, bump:1.0,
+   /* Enough water for a pond or two beside the circuit - it is prettier, and every
+      district in this game has some. A thin percentile put the level exactly at the
+      height of the lowest ground, which leaves nowhere for water to actually go. */
+   waterPct:0.20, waterMin:5, waterMax:10,
+   surface:GRASS, sub:DIRT, deep:STONE, shore:SAND,
+   plant:'oak', plantDens:0.010,
+   track:true,
+   /* Its own weather, not a copy of the meadow's. He chooses a district by looking at a
+      card, so two districts that look identical are two districts he cannot tell apart -
+      the district tests measure this in CIE Lab and insist on it. A deeper blue sky over
+      a warm hazy horizon: a bright summer race day. */
+   skyTop:0x2b5fa0, skyMid:0x6fa8dc, skyLow:0xb8dcf0, skyHaze:0xeef6e8,
+   fog:0xd8e8b4, fogUnder:0x1f5f8a, waterTint:0x1f7fa0,
+   hemiSky:0xe8f6ff, hemiGround:0x86a05c, sunCol:0xfff4cc, sunInt:0.62}
 ];
 function themeByKey(k){
   for(var i=0;i<THEMES.length;i++) if(THEMES[i].key===k) return THEMES[i];
@@ -1098,6 +1132,40 @@ function buildAtlas(){
   });
   /* 34 portal - redrawn by animatePortals(); this is frame 0 */
   tile(34,function(x,r){ drawPortal(x,0); });
+  /* 35 road - dark asphalt, speckled so a long straight does not look like a
+     painted plane. Deliberately close in tone to stone but bluer, so a track reads
+     as a track from the air. */
+  tile(35,function(x,r){
+    fill(x,'#4a4e57');
+    speck(x,r,['#41454d','#53575f','#3a3e45','#5b5f67'],150);
+  });
+  /* 36 kerb - the red and white slabs on the outside of a corner. Angled, because
+     square blocks make a corner look like a staircase. */
+  tile(36,function(x,r){
+    fill(x,'#f2f2f2');
+    x.fillStyle='#d94b3f';
+    for(var i=-16;i<16;i+=8){
+      x.beginPath();
+      x.moveTo(i,0); x.lineTo(i+4,0); x.lineTo(i+4+6,16); x.lineTo(i+6,16);
+      x.closePath(); x.fill();
+    }
+    x.fillStyle='rgba(0,0,0,.10)'; x.fillRect(0,14,16,2);
+  });
+  /* 37 road with the centre line down it */
+  tile(37,function(x,r){
+    fill(x,'#4a4e57');
+    speck(x,r,['#41454d','#53575f','#3a3e45'],120);
+    x.fillStyle='#f0e8b0'; x.fillRect(7,0,2,16);
+  });
+  /* 38 the start line - chequered, so where a lap begins is unmistakable without
+     a word of writing. */
+  tile(38,function(x,r){
+    fill(x,'#f4f4f4');
+    x.fillStyle='#22242a';
+    for(var a=0;a<4;a++) for(var b=0;b<4;b++){
+      if((a+b)%2===0) x.fillRect(a*4,b*4,4,4);
+    }
+  });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
     fill(x,'#e6dcc2');
@@ -1329,6 +1397,16 @@ function generateWorld(){
     }
   }
 
+  /* the circuit, before anything is planted, so no tree grows in the middle of a
+     corner */
+  trackInfo=null;
+  if(T.track) layTrack(heights);
+
+  /* One funnel for "the world just changed", so the kart button and the lap counter are
+     right whether he arrived by district picker, by portal, or straight off the title
+     screen. */
+  paintKartButton();
+
   /* vegetation - one kind per theme, all growing from the same sampling as the
      original oak pass so density stays comparable */
   for(x=3;x<WX-3;x++) for(z=3;z<WZ-3;z++){
@@ -1339,6 +1417,194 @@ function generateWorld(){
     if(tt+9>=WY) continue;
     plant(x,tt,z,T.plant);
   }
+}
+
+/* ---------------- the racing circuit ----------------
+
+   A closed loop, laid over the ground rather than floating above it: the terrain under
+   the road is raised or cut to meet it, and feathered outwards over a few blocks so a
+   corner sits in the hillside instead of on top of it. Nothing is suspended, so there
+   is nothing to fall off and no scaffolding to draw.
+
+   The shape is a wobbly oval - a circle whose radius breathes twice and three times
+   round the lap - which is always closed, never crosses itself, and gives corners of
+   several different sizes from two numbers. The height breathes once round the lap, so
+   there is a hill and a dip rather than a flat ring.
+
+   It is derived entirely from the seed, so it comes back identical after a reload and
+   is the same circuit on both screens when two people race it. */
+var trackInfo=null;
+/* Nine blocks of road. Seven was enough to drive down and not enough to corner on: the
+   test driver put a wheel on the grass on a quarter of the lap, and a five-year-old is
+   not a better driver than the test. Wide is forgiving, and forgiving is the point. */
+var TRACK_HALF=4.5;
+var TRACK_FEATHER=5;             /* how far the ground is blended out to meet it */
+
+function trackShape(seed){
+  var r=mulberry32(seed^0x7ac31);
+  /* Amplitudes kept modest on purpose. Wound up too far, the loop pinches into a
+     figure of eight and the road crosses itself, which on a circuit means a corner
+     that leads into the side of another corner. */
+  /* r0 and the amplitudes are bounded so that the outermost point of the road, kerbs
+     included, still lands inside the world: 19 + 3.4 + 2.2 + 4.5 + 1 = 30.1, against a
+     limit of 31. Widening the road without pulling these in put the kerbs through the
+     edge of the world. */
+  return {cx:WX/2, cz:WZ/2,
+          r0:19, a1:1.9+r()*0.8, p1:r()*6.283,
+          a2:0.9+r()*0.7, p2:r()*6.283,
+          /* One gentle hill and dip per lap. Measured at a dozen one-block steps over a
+             140-block lap, which reads as a hill rather than as a staircase - three
+             blocks of rise stepped often enough to feel bumpy at kart speed. */
+          hAmp:2, hPhase:r()*6.283};
+}
+function trackRadius(T,a){
+  return T.r0+T.a1*Math.sin(2*a+T.p1)+T.a2*Math.sin(3*a+T.p2);
+}
+function trackPoint(T,a,base){
+  var rr=trackRadius(T,a);
+  return {x:T.cx+Math.cos(a)*rr, z:T.cz+Math.sin(a)*rr,
+          y:Math.round(base+T.hAmp*Math.sin(a+T.hPhase))};
+}
+
+function layTrack(heights){
+  var T=trackShape(seed);
+  /* Where the circuit sits. The middle of the land it is laid on, so it follows the
+     country rather than standing on an embankment across it - but never low enough to
+     get its feet wet, whatever the land is doing. */
+  var sorted=Array.prototype.slice.call(heights).sort(function(a,b){ return a-b; });
+  var median=sorted[(sorted.length/2)|0];
+  var base=Math.max(WATER_LEVEL+2+T.hAmp,median);
+  var N=1600, i, x, z;
+
+  /* Nearest-sample field. Rasterising the samples with a brush is far cheaper than
+     asking every column about every sample, and it gives the three things each column
+     needs at once: how far it is from the middle of the road, how high the road is
+     there, and which sample it belongs to - which is what dashes the centre line. */
+  var reach=TRACK_HALF+1+TRACK_FEATHER;
+  var dist=new Float32Array(WX*WZ), hOf=new Int16Array(WX*WZ), iOf=new Int32Array(WX*WZ);
+  dist.fill(1e9);
+  var pts=[];
+  for(i=0;i<N;i++){
+    var a=i/N*6.283185307;
+    var p=trackPoint(T,a,base);
+    pts.push(p);
+    var x0=Math.max(0,Math.floor(p.x-reach)), x1=Math.min(WX-1,Math.ceil(p.x+reach));
+    var z0=Math.max(0,Math.floor(p.z-reach)), z1=Math.min(WZ-1,Math.ceil(p.z+reach));
+    for(x=x0;x<=x1;x++) for(z=z0;z<=z1;z++){
+      var dx=x+0.5-p.x, dz=z+0.5-p.z;
+      var d=Math.sqrt(dx*dx+dz*dz);
+      var k=z*WX+x;
+      if(d<dist[k]){ dist[k]=d; hOf[k]=p.y; iOf[k]=i; }
+    }
+  }
+
+  /* Rebuild every column the road touches. */
+  for(x=0;x<WX;x++) for(z=0;z<WZ;z++){
+    var kk=z*WX+x, d2=dist[kk];
+    if(d2>reach) continue;
+    var roadY=hOf[kk], top, surf=null;
+    if(d2<=TRACK_HALF){
+      top=roadY;
+      /* A dashed line down the middle, dashed by which sample the column belongs to
+         rather than by its position, so the dashes follow the corners. */
+      surf=(d2<=0.75 && ((iOf[kk]/9)|0)%2===0) ? ROADLINE : ROAD;
+    } else if(d2<=TRACK_HALF+1){
+      top=roadY; surf=KERB;
+    } else {
+      /* Feathered: blended from the road height back to whatever the land was doing,
+         so there is no step to drive off. */
+      var t=(d2-(TRACK_HALF+1))/TRACK_FEATHER;
+      top=Math.round(roadY+(heights[kk]-roadY)*t);
+    }
+    top=clamp(top,2,WY-14);
+    heights[kk]=top;
+    for(var y=0;y<=top;y++){
+      var b;
+      if(y===0) b=BEDROCK;
+      else if(y===top) b=surf||theme.surface;
+      else if(y>top-4) b=surf?STONE:theme.sub;      /* a road wants something solid under it */
+      else b=theme.deep;
+      blocks[idx(x,y,z)]=b;
+    }
+    /* Nothing standing in the road, and no water lying on it. */
+    for(var yy=top+1;yy<Math.min(WY,top+8);yy++) blocks[idx(x,yy,z)]=AIR;
+  }
+
+  /* The start line, and something over it so it can be seen from a distance. Chequered
+     rather than written, because he cannot read a word of it. */
+  var startA=0, sp=trackPoint(T,startA,base);
+  /* Flatten the grid. Everywhere else the road may step a block as it follows the
+     country, but at the start line that step lands exactly where he is put down - and
+     standing with one foot on each level means standing inside the road, which is not a
+     dry place to spawn. Real circuits have a flat grid for the same reason. */
+  for(var fx2=Math.floor(sp.x)-7;fx2<=Math.floor(sp.x)+7;fx2++){
+    for(var fz2=Math.floor(sp.z)-7;fz2<=Math.floor(sp.z)+7;fz2++){
+      if(!inside(fx2,sp.y,fz2)) continue;
+      var fk=fz2*WX+fx2;
+      if(dist[fk]>TRACK_HALF+1) continue;
+      if(Math.hypot(fx2+0.5-sp.x,fz2+0.5-sp.z)>6) continue;
+      var fsurf=dist[fk]<=TRACK_HALF
+        ? ((dist[fk]<=0.75 && ((iOf[fk]/9)|0)%2===0)?ROADLINE:ROAD)
+        : KERB;
+      heights[fk]=sp.y;
+      for(var fy=0;fy<=sp.y;fy++){
+        blocks[idx(fx2,fy,fz2)]=fy===0?BEDROCK:(fy===sp.y?fsurf:(fy>sp.y-4?STONE:theme.deep));
+      }
+      for(var fa=sp.y+1;fa<Math.min(WY,sp.y+8);fa++) blocks[idx(fx2,fa,fz2)]=AIR;
+    }
+  }
+  /* Two directions, and getting them the wrong way round is not a cosmetic mistake.
+     ACROSS the road is the radial - straight out from the middle of the circuit. ALONG
+     it is the tangent, which is the way a lap goes.
+
+     The first version used the tangent for both, so the chequered line was painted as a
+     stripe down the road instead of a band across it, and the two pillars of the start
+     arch were built six blocks up the track and six blocks down it - one of them
+     squarely in the middle of the road. On several seeds the very first thing a kart did
+     was drive into its own start line and stop. */
+  var radx=Math.cos(startA), radz=Math.sin(startA);      /* across the road */
+  var tanx=-Math.sin(startA), tanz=Math.cos(startA);      /* the way the lap goes */
+  for(var o=-Math.ceil(TRACK_HALF);o<=Math.ceil(TRACK_HALF);o++){
+    for(var w=-1;w<=0;w++){
+      var gx=Math.round(sp.x+radx*o+tanx*w), gz=Math.round(sp.z+radz*o+tanz*w);
+      if(!inside(gx,sp.y,gz)) continue;
+      if(dist[gz*WX+gx]<=TRACK_HALF) blocks[idx(gx,sp.y,gz)]=GRID;
+    }
+  }
+  /* Two pillars and a lintel: an arch he drives under, which is how he knows a lap has
+     started without anybody telling him. Set beside the road, clear of the kerb. */
+  var side=Math.ceil(TRACK_HALF)+2;
+  for(var sgn=-1;sgn<=1;sgn+=2){
+    var px=Math.round(sp.x+radx*side*sgn), pz=Math.round(sp.z+radz*side*sgn);
+    for(var ph=1;ph<=5;ph++){
+      if(inside(px,sp.y+ph,pz)) blocks[idx(px,sp.y+ph,pz)]=BRICK;
+    }
+  }
+  for(var lo=-side;lo<=side;lo++){
+    var lx=Math.round(sp.x+radx*lo), lz=Math.round(sp.z+radz*lo);
+    if(inside(lx,sp.y+6,lz)) blocks[idx(lx,sp.y+6,lz)]=PLANKS;
+  }
+
+  trackInfo={cx:T.cx, cz:T.cz, base:base, shape:T, pts:pts,
+             half:TRACK_HALF, start:{x:sp.x, z:sp.z, y:sp.y},
+             /* which way round the lap goes, in the direction theta increases */
+             dir:{x:tanx, z:tanz}};
+}
+
+/* Is this spot on the road? Used by the kart, which is quicker on tarmac than on
+   grass - gently, because being slow is not a punishment. */
+function onRoadAt(x,y,z){
+  /* The block directly under his feet, not the top of the column. Reading the column
+     meant that driving under the start arch, or under a tree leaning over the kerb,
+     reported him as off the road - so he slowed to a crawl at the one place on the
+     circuit where he most wants to be going fast. */
+  /* The block whose top face he is standing on, found by looking a little way below his
+     feet rather than by arithmetic on the exact height. Collision leaves him a hair
+     under the boundary - y comes out as roadY+0.998 rather than roadY+1 - so
+     floor(y)-1 read the stone beneath the road on about one frame in six, and the kart
+     kept dropping to grass speed on a perfectly good straight. */
+  var b=getBlock(Math.floor(x),Math.floor(y-0.2),Math.floor(z));
+  return b===ROAD||b===ROADLINE||b===GRID;
 }
 
 /* One plant. Kept out of generateWorld so the shapes are readable. */
@@ -2381,6 +2647,36 @@ function placeStars(collected){
   stars=[];
   var rnd=mulberry32(starSeed^0x9e37);
   var tries=0;
+  /* On a circuit the stars go round the circuit, floating at the height of a kart's
+     head and spread evenly along the lap - so collecting them is driving, which is what
+     he asked for. Not hidden: seeing the next one ahead is the whole pleasure. */
+  if(trackInfo){
+    for(var si=0;si<STAR_GOAL;si++){
+      /* Offset from the start line so the first one is a little way ahead rather than
+         under his front wheels, and nudged side to side across the road so the line of
+         them weaves. */
+      var a=((si+0.6)/STAR_GOAL)*6.283185307;
+      var p=trackPoint(trackInfo.shape,a,trackInfo.base);
+      /* Weaving across the road, but never far from the line he will actually drive:
+         a star out by the kerb is a star he sails past, which reads as broken. */
+      var lean=Math.sin(si*2.1)*1.4;
+      var ox=-Math.sin(a)*lean, oz=Math.cos(a)*lean;
+      var sx=clamp(p.x+ox,2,WX-2), sz=clamp(p.z+oz,2,WZ-2);
+      var g=new THREE.Group();
+      var core=new THREE.Mesh(starGeo,starMat);
+      var glow=new THREE.Mesh(starGeo,glowMat); glow.scale.setScalar(1.7);
+      g.add(core,glow);
+      var sy=p.y+1.5;
+      g.position.set(sx,sy,sz);
+      var was=collected?!!collected[si]:false;
+      g.visible=!was;
+      scene.add(g);
+      stars.push({x:sx,y:sy,z:sz,mesh:g,done:was});
+    }
+    starsFound=stars.filter(function(s){return s.done;}).length;
+    updateStarHud();
+    return;
+  }
   while(stars.length<STAR_GOAL && tries<3000){
     tries++;
     var x=Math.floor(4+rnd()*(WX-8)), z=Math.floor(4+rnd()*(WZ-8));
@@ -2414,7 +2710,14 @@ function updateStars(dt,t){
     s.mesh.rotation.x=Math.sin(t*1.1+i)*0.25;
     s.mesh.position.y=s.y+Math.sin(t*2+i*1.3)*0.16;
     var dx=player.x-s.x, dy=(player.y+0.8)-s.mesh.position.y, dz=player.z-s.z;
-    if(dx*dx+dy*dy+dz*dz<1.9){
+    /* The reach grows with how fast he is going. A kart at full speed covers more than
+       a block between frames on the tablet, so a fixed radius let him drive straight
+       through a star without touching it - which reads as the star being broken. */
+    var moved=Math.hypot(player.vx,player.vz)*dt;
+    /* Generous in a kart, and generous on purpose. Threading a star at speed is not a
+       skill this game asks for; driving past one and having it count is the fun. */
+    var reach=(player.kart?2.3:1.38)+moved, reach2=reach*reach;
+    if(dx*dx+dy*dy+dz*dz<Math.max(1.9,reach2)){
       s.done=true; s.mesh.visible=false; starsFound++;
       burst(s.mesh.position,0xffd94a,26);
       sfx('star'); updateStarHud(); scheduleSave();
@@ -2453,7 +2756,12 @@ function updateParticles(dt){
 
 /* ---------------- player ---------------- */
 var PW=0.29, PH=1.5, EYE=1.34;
-var player={x:WX/2,y:20,z:WZ/2,vx:0,vy:0,vz:0,onGround:false,fly:false,walk:0,flyBoost:0};
+var player={x:WX/2,y:20,z:WZ/2,vx:0,vy:0,vz:0,onGround:false,fly:false,walk:0,flyBoost:0,
+            kart:false};
+/* How a kart drives. Fast enough to be exciting on a 64-block circuit, slow enough that
+   a corner can be judged by a five-year-old, and every number here is about how it
+   feels rather than about winning: there is nothing to win. */
+var KART_TOP=11.5, KART_GRASS=5.5, KART_ACCEL=3.6, KART_TURN=2.8;
 var yaw=0.6, pitch=-0.20, firstPerson=false, camDist=5.0, camNow=5.0;
 var CAM_MIN=2.0;   /* never closer than this - below it, look through his eyes instead */
 
@@ -2506,7 +2814,141 @@ function faceOpenGround(){
   }
   yaw=bestYaw;
 }
+/* ---------------- the kart ----------------
+
+   A body, four wheels and a little steering wheel, built once and moved about. Karts do
+   not collide with each other: a remote player cannot push, trap or bump anybody, which
+   is the same rule the rest of this game runs on. Racing here means racing beside
+   somebody, not into them.
+
+   There is nothing to win and nothing to lose. Laps count upwards, stars are collected
+   by driving through them, and coming last is not a thing that exists. */
+var kartGroup=null, kartWheels=null, lapTotal=0, lapCount=0, lapAngle=null;
+
+function buildKart(shirtHex){
+  var g=new THREE.Group();
+  function box(w,h,d,col,x,y,z){
+    var m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
+                         new THREE.MeshLambertMaterial({color:srgb(col)}));
+    m.position.set(x,y,z);
+    g.add(m);
+    return m;
+  }
+  /* Painted in the character's own shirt colour, so on a shared circuit you can tell at
+     a glance which kart is yours. */
+  box(0.86,0.26,1.30,shirtHex,0,0.30,0);
+  box(0.70,0.20,0.34,shirtHex,0,0.50,-0.34);          /* engine cowl behind the seat */
+  box(0.62,0.10,0.42,0x2a2d33,0,0.44,0.16);           /* seat pan */
+  box(0.30,0.06,0.30,0x1d1f24,0,0.62,0.40).rotation.x=-0.5;   /* steering wheel */
+  box(0.94,0.08,0.16,0x24262b,0,0.24,0.62);           /* front bumper */
+  var wheels=[];
+  [[-0.50,0.55],[0.50,0.55],[-0.50,-0.48],[0.50,-0.48]].forEach(function(w){
+    var t=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.16,10),
+                         new THREE.MeshLambertMaterial({color:srgb(0x22242a)}));
+    t.rotation.z=Math.PI/2;
+    t.position.set(w[0],0.22,w[1]);
+    g.add(t); wheels.push(t);
+  });
+  g.visible=false;
+  return {group:g, wheels:wheels};
+}
+function kartShirt(){
+  return LOOKS[localLookIndex()].shirt;
+}
+function ensureKart(){
+  if(kartGroup && kartGroup.userData.shirt===kartShirt()) return;
+  if(kartGroup) scene.remove(kartGroup);
+  var built=buildKart(kartShirt());
+  kartGroup=built.group; kartWheels=built.wheels;
+  kartGroup.userData.shirt=kartShirt();
+  scene.add(kartGroup);
+}
+function drawKart(dt,moving){
+  if(!player.kart){ if(kartGroup) kartGroup.visible=false; return; }
+  ensureKart();
+  kartGroup.visible=true;
+  kartGroup.position.set(player.x,player.y,player.z);
+  kartGroup.rotation.y=yaw+Math.PI;
+  for(var i=0;i<kartWheels.length;i++) kartWheels[i].rotation.x-=moving*dt*3.2;
+}
+
+/* In and out. One button with a kart on it, and no way to get it wrong: if there is
+   nowhere sensible to stand he simply stays in the kart. */
+function toggleKart(){
+  player.kart=!player.kart;
+  if(player.kart){
+    lapAngle=null;                 /* laps are counted from wherever he sets off */
+    sfx('place');
+    toast('🏎️ Off you go!',1600);
+  } else {
+    sfx('step');
+    toast('🚶 Out of the kart',1400);
+  }
+  paintKartButton();
+  scheduleSave();
+}
+function paintKartButton(){
+  var b=document.getElementById('kartBtn');
+  if(!b) return;
+  /* Only on a circuit. Nothing new appears anywhere else in the game. */
+  b.classList.toggle('hide',!trackInfo);
+  b.textContent=player.kart?'🚶':'🏎️';
+  b.title=player.kart?'Get out of the kart':'Get in the kart';
+  var lap=document.getElementById('lapChip');
+  if(lap){
+    lap.classList.toggle('hide',!(trackInfo&&player.kart));
+    document.getElementById('lapNum').textContent=String(lapCount+1);
+  }
+}
+
+/* Laps, counted by going round rather than by driving over a line - a line can be
+   missed at the edge of the road, and being told you have not done a lap you have just
+   done is exactly the sort of unfairness this game does not have.
+
+   Accumulated as an angle, so going backwards simply un-does progress instead of
+   counting a lap. */
+function updateLaps(){
+  if(!trackInfo||!player.kart){ lapAngle=null; return; }
+  var a=Math.atan2(player.z-trackInfo.cz,player.x-trackInfo.cx);
+  if(lapAngle===null){ lapAngle=a; lapTotal=0; return; }
+  var d=a-lapAngle;
+  while(d>Math.PI) d-=Math.PI*2;
+  while(d<-Math.PI) d+=Math.PI*2;
+  lapAngle=a;
+  lapTotal+=d;
+  var laps=Math.floor(Math.abs(lapTotal)/(Math.PI*2));
+  if(laps>lapCount){
+    lapCount=laps;
+    sfx('star');
+    toast('🏁 Lap '+(lapCount+1)+'!',2000);
+    burst(new THREE.Vector3(player.x,player.y+1.4,player.z),0xffd94a,22);
+    paintKartButton();
+  }
+}
+
 function findSpawn(){
+  /* On a circuit he starts on the start line, facing the way the lap goes. Being put
+     down in a field with the track somewhere over there is a worse first second. */
+  if(trackInfo){
+    var st=trackInfo.start;
+    var bx=Math.floor(st.x), bz=Math.floor(st.z);
+    /* Find the road under the start line rather than trusting the sampled height. The
+       column takes its height from whichever curve sample is nearest it, which can be a
+       block above - and putting him at the sampled height then stands him inside the
+       road. Searched from below so the arch overhead is ignored: reading the top of the
+       column would put him on the lintel. */
+    for(var gy=st.y-1;gy<=st.y+2;gy++){
+      if(!inside(bx,gy,bz)) continue;
+      if(isSolid(bx,gy,bz)&&!isSolid(bx,gy+1,bz)&&!isSolid(bx,gy+2,bz)){
+        player.x=st.x; player.y=gy+1.05; player.z=st.z;
+        player.vx=player.vy=player.vz=0;
+        /* Facing along the lap: yaw's forward is (-sin, -cos), so aim it down the
+           direction theta increases. */
+        yaw=Math.atan2(-trackInfo.dir.x,-trackInfo.dir.z);
+        return;
+      }
+    }
+  }
   for(var r=0;r<30;r++){
     for(var a=0;a<24;a++){
       var ang=a/24*6.283;
@@ -2529,9 +2971,22 @@ var input={fwd:0,strafe:0,jump:false,down:false};
 function updatePlayer(dt){
   var swim=inWater();
   var f=Math.max(-1,Math.min(1,input.fwd)), s=Math.max(-1,Math.min(1,input.strafe));
-  /* on a touchscreen the stick steers instead of strafing, so turning around
-     never depends on discovering the drag-to-look gesture */
-  if(isTouch){
+  /* A kart steers rather than strafes, and turns more the faster it is going, so it
+     cannot spin on the spot. The walking and swimming branches below are untouched -
+     this is an extra way of moving, not a change to the way he moves. */
+  var karting=!!player.kart;
+  if(karting){
+    var st=Math.max(-1,Math.min(1,input.strafe));
+    var rolling=Math.hypot(player.vx,player.vz);
+    /* Steering authority: hardly any when stopped, full by walking pace. Pointing the
+       kart while parked would let him turn on a sixpence, which looks wrong and makes
+       a corner harder to judge. */
+    var bite=0.35+0.65*Math.min(1,rolling/4.5);
+    yaw-=st*KART_TURN*bite*dt;
+    s=0;
+  } else if(isTouch){
+    /* on a touchscreen the stick steers instead of strafing, so turning around
+       never depends on discovering the drag-to-look gesture */
     if(Math.abs(s)>0.15) yaw-=s*2.3*dt;
     s=0;
   }
@@ -2540,6 +2995,14 @@ function updatePlayer(dt){
   var fx=-Math.sin(yaw), fz=-Math.cos(yaw);
   var rx= Math.cos(yaw), rz=-Math.sin(yaw);
   var speed=player.fly?9.5:(swim?3.2:5.0);
+  if(karting){
+    /* Quicker on tarmac than on the grass, and slower still in reverse. The grass is
+       not a punishment - it is a reason to enjoy the road - so it is a nudge rather
+       than a wall, and nothing about being off the track can hurt him or stop him. */
+    speed=onRoadAt(player.x,player.y,player.z)?KART_TOP:KART_GRASS;
+    if(swim) speed=Math.min(speed,3.2);
+    if(f<0) speed*=0.42;
+  }
   /* A lit portal holds on to whoever steps into it, the way deep water slows him
      down two lines above. Without this he cannot use one: he keeps his thumb on the
      stick, and no amount of damping applied after the fact can hold him, because
@@ -2552,6 +3015,9 @@ function updatePlayer(dt){
   var wishX=(fx*f+rx*s)*speed, wishZ=(fz*f+rz*s)*speed;
 
   var accel=player.onGround||player.fly?18:8;
+  /* A kart gathers speed instead of arriving at it, which is most of what makes going
+     fast feel fast. */
+  if(karting) accel=player.onGround?KART_ACCEL:2.2;
   player.vx+=(wishX-player.vx)*Math.min(1,accel*dt);
   player.vz+=(wishZ-player.vz)*Math.min(1,accel*dt);
 
@@ -2608,7 +3074,13 @@ function updatePlayer(dt){
   henry.rotation.y=yaw+Math.PI;
   henry.visible=!firstPerson;
   var amp=Math.min(1,moving/4.6);
-  if(player.fly){
+  if(player.kart){
+    /* Sitting in it: legs out in front, hands on the wheel. Cheap, and it is the
+       difference between driving a kart and standing on one. */
+    hParts.armL.rotation.z=0; hParts.armR.rotation.z=0;
+    hParts.armL.rotation.x=-1.15; hParts.armR.rotation.x=-1.15;
+    hParts.legL.rotation.x=-1.25; hParts.legR.rotation.x=-1.25;
+  } else if(player.fly){
     hParts.armL.rotation.x=0; hParts.armR.rotation.x=0;
     hParts.armL.rotation.z=1.25; hParts.armR.rotation.z=-1.25;
     hParts.legL.rotation.x=-0.35; hParts.legR.rotation.x=-0.2;
@@ -2619,6 +3091,7 @@ function updatePlayer(dt){
     hParts.armL.rotation.x=-sw*0.8; hParts.armR.rotation.x=sw*0.8;
   }
   hParts.head.rotation.x=clamp(pitch*0.45,-0.5,0.5);
+  drawKart(dt,moving);
 
   /* camera */
   var ex=player.x, ey=player.y+EYE, ez=player.z;
@@ -3205,6 +3678,37 @@ function themeThumb(T,w,h){
     box(px+1,gy-7,2,8,DEFS[MUSHSTEM].avg);
     box(px-3,gy-11,10,4,DEFS[MUSHCAP].avg);
   }
+  /* A circuit is what a racing district IS, so the card shows the track rather than the
+     scenery: a road curving away with a kerb along it and the chequered line across it.
+     He chooses a district by looking at these, so a card that looked like a meadow would
+     send him to the wrong place. */
+  if(T.track){
+    var ry=Math.round(h*0.60);
+    /* the road, in perspective: wide at the bottom, narrowing as it goes away */
+    for(var ryy=ry;ryy<h;ryy++){
+      var t2=(ryy-ry)/(h-ry);
+      var half=Math.round(3+t2*(w*0.42));
+      var mid=Math.round(w*0.5+Math.sin(t2*1.6)*w*0.16*(1-t2));
+      c.fillStyle=hex(DEFS[ROAD].avg);
+      c.fillRect(mid-half,ryy,half*2,1);
+      c.fillStyle=hex(DEFS[KERB].avg);
+      c.fillRect(mid-half-2,ryy,2,1); c.fillRect(mid+half,ryy,2,1);
+      /* dashes down the middle */
+      if(((ryy-ry)%6)<3 && t2>0.15){
+        c.fillStyle=hex(DEFS[ROADLINE].avg);
+        c.fillRect(mid-1,ryy,2,1);
+      }
+    }
+    /* the start line, chequered, across the near end */
+    var gy2=h-7;
+    for(var gxx=0;gxx<w;gxx+=4){
+      var t3=(gy2-ry)/(h-ry), hh=Math.round(3+t3*(w*0.42));
+      var mm=Math.round(w*0.5+Math.sin(t3*1.6)*w*0.16*(1-t3));
+      if(gxx<mm-hh||gxx>mm+hh) continue;
+      c.fillStyle=((gxx/4)|0)%2?'#f4f4f4':'#22242a';
+      c.fillRect(gxx,gy2,4,4);
+    }
+  }
   return cv;
 }
 
@@ -3478,6 +3982,7 @@ function setMuted(m){
   el('btnSound').textContent=m?'🔇':'🔊';
 }
 el('btnView').addEventListener('click',function(){ setView(!firstPerson); });
+el('kartBtn').addEventListener('click',function(){ toggleKart(); });
 el('btnSound').addEventListener('click',function(){ setMuted(!muted); });
 
 /* ---------------- overlays ---------------- */
@@ -4715,6 +5220,7 @@ function snapshot(){
     stars:stars.map(function(s){ return s.done?1:0; }),
     sel:selected,
     code:current&&current.code?current.code:null,
+    kart:!!player.kart,
     /* Codes this district used to be known by, so a portal bound to an old one still
        finds it after the code was shortened. */
     codes:current&&current.codes&&current.codes.length?current.codes.slice():null,
@@ -4803,6 +5309,11 @@ function enterDistrict(rec){
      whole migration. */
   portalsFromSave(rec.portals);
   spentFromSave(rec.spent);
+  /* Karts belong to a circuit. Arriving anywhere else puts him back on his feet, so he
+     is never driving a kart across a meadow he cannot get out of. */
+  player.kart=!!(trackInfo&&rec.kart);
+  lapCount=0; lapTotal=0; lapAngle=null;
+  paintKartButton();
   setFly(false);
   districtIndex.current=rec.slug;
   refreshDistrictHud();
@@ -6343,6 +6854,7 @@ function frame(){
     updateAnimals(dt);
     updateFish(dt,now);
     updateStars(dt,now);
+    updateLaps();
     animateFire(dt);
     updatePortals(dt);
     mpUpdate(dt);
@@ -6398,7 +6910,8 @@ window.__henrycraft={
        WATER:WATER,BEDROCK:BEDROCK,COAL:COAL,COPPER:COPPER,LAPIS:LAPIS,EMERALD:EMERALD,
        OBSIDIAN:OBSIDIAN,ENCHANT:ENCHANT,FIRE:FIRE,
        SNOW:SNOW,ICE:ICE,SANDSTONE:SANDSTONE,CACTUS:CACTUS,PINE:PINE,
-       MUSHCAP:MUSHCAP,MUSHCAP2:MUSHCAP2,MUSHSTEM:MUSHSTEM,PORTAL:PORTAL},
+       MUSHCAP:MUSHCAP,MUSHCAP2:MUSHCAP2,MUSHSTEM:MUSHSTEM,PORTAL:PORTAL,
+       ROAD:ROAD,KERB:KERB,ROADLINE:ROADLINE,GRID:GRID},
   DEFS:DEFS,
   PALETTE:PALETTE,
   ORE_BANDS:ORE_BANDS,
@@ -6411,7 +6924,14 @@ window.__henrycraft={
   waterColumn:waterColumn,
   selected:function(){ return selected; },
   selectBlock:selectBlock,
-  player:function(){ return {x:player.x,y:player.y,z:player.z}; },
+  player:function(){ return {x:player.x,y:player.y,z:player.z,
+                             vx:player.vx,vy:player.vy,vz:player.vz}; },
+  /* Where the stars are and how many he has, for the racing suite. */
+  stars:function(){ return stars.map(function(s){
+    return {x:+s.x.toFixed(2), y:+s.y.toFixed(2), z:+s.z.toFixed(2), done:!!s.done}; }); },
+  starsFound:function(){ return starsFound; },
+  turn:function(by){ yaw+=by; },
+  lookAt:function(){ pitch=-0.55; camDist=7.0; camNow=7.0; },
   movePlayer:function(x,y,z){ player.x=x; player.y=y; player.z=z; player.vx=player.vy=player.vz=0; },
   fish:function(){
     return fish.map(function(f){
@@ -6439,6 +6959,86 @@ window.__henrycraft={
   isGeneratedName:isGeneratedName,
   editMap:function(){ return JSON.parse(JSON.stringify(edits)); },
   spentFrames:function(){ return spentToSave(); },
+  /* ---- the racing circuit ---- */
+  track:function(){
+    if(!trackInfo) return null;
+    return {cx:trackInfo.cx, cz:trackInfo.cz, half:trackInfo.half,
+            base:trackInfo.base, start:trackInfo.start,
+            /* the centre line, as points, so a test can walk the whole lap */
+            pts:trackInfo.pts.map(function(p){ return {x:+p.x.toFixed(2),
+                                                       y:p.y, z:+p.z.toFixed(2)}; })};
+  },
+  onRoad:function(x,y,z){ return onRoadAt(x,y,z); },
+  /* Look at the whole circuit from above, for a screenshot. */
+  aerial:function(){
+    player.fly=true; player.kart=false;
+    player.x=WX/2; player.y=(trackInfo?trackInfo.base:14)+26; player.z=WZ/2+30;
+    player.vx=player.vy=player.vz=0;
+    yaw=0; pitch=-0.95;
+    paintKartButton();
+  },
+  /* One frame at a time, for working out why a drive goes wrong. */
+  driveStep:function(dt,steer){
+    var wasPlaying=playing; playing=true;
+    input.fwd=1; input.strafe=steer||0;
+    updatePlayer(dt); updateLaps();
+    input.fwd=0; input.strafe=0;
+    playing=wasPlaying;
+  },
+  kart:function(){ return !!player.kart; },
+  kartDebug:function(){
+    if(!kartGroup) return {built:false};
+    return {built:true, visible:kartGroup.visible, inScene:!!kartGroup.parent,
+            children:kartGroup.children.length,
+            at:{x:+kartGroup.position.x.toFixed(2),y:+kartGroup.position.y.toFixed(2),
+                z:+kartGroup.position.z.toFixed(2)}};
+  },
+  toggleKart:toggleKart,
+  laps:function(){ return lapCount; },
+  /* Drive, with the same input the stick fills in and the same updatePlayer that
+     collides - so if the track is not actually drivable he does not get round. */
+  drive:function(seconds,steerFn){
+    var wasPlaying=playing;
+    playing=true;
+    var dt=1/60, steps=Math.max(1,Math.round(seconds/dt));
+    var offRoad=0, best=0, minY=99, maxSpeed=0;
+    input.fwd=1; input.jump=false; input.down=false;
+    for(var i=0;i<steps;i++){
+      input.strafe=steerFn?steerFn(i*dt):0;
+      updatePlayer(dt);
+      updateLaps();
+      /* Stars are collected in the animation loop, so a drive that does not run this
+         collects nothing - which is exactly what the first version of this reported,
+         and it was the harness rather than the game. */
+      updateStars(dt,i*dt);
+      if(!onRoadAt(player.x,player.y,player.z)) offRoad++;
+      minY=Math.min(minY,player.y);
+      maxSpeed=Math.max(maxSpeed,Math.hypot(player.vx,player.vz));
+      best=Math.max(best,Math.abs(lapTotal));
+    }
+    input.fwd=0; input.strafe=0;
+    playing=wasPlaying;
+    return {laps:lapCount, turned:+(best/(Math.PI*2)).toFixed(3),
+            offRoadFrames:offRoad, frames:steps, minY:+minY.toFixed(2),
+            maxSpeed:+maxSpeed.toFixed(2),
+            at:{x:+player.x.toFixed(2), y:+player.y.toFixed(2), z:+player.z.toFixed(2)}};
+  },
+  /* Steer itself round: aim at the centre line a little way ahead, which is what a
+     person does. Proves the corners are takeable rather than that one hand-tuned
+     input happens to work. */
+  autoSteer:function(){
+    if(!trackInfo) return 0;
+    var a=Math.atan2(player.z-trackInfo.cz,player.x-trackInfo.cx);
+    /* Look further ahead the faster you are going, which is what a person does and what
+       makes a corner takeable rather than a series of late corrections. */
+    var spd=Math.hypot(player.vx,player.vz);
+    var ahead=trackPoint(trackInfo.shape,a+0.10+spd*0.016,trackInfo.base);
+    var want=Math.atan2(-(ahead.x-player.x),-(ahead.z-player.z));
+    var d=want-yaw;
+    while(d>Math.PI) d-=Math.PI*2;
+    while(d<-Math.PI) d+=Math.PI*2;
+    return clamp(-d*2.2,-1,1);
+  },
   /* Put a district into the state that stopped his son travelling: the record knows its
      join code, the index does not. Real histories reach it by having been shared in an
      earlier session, before the index was kept in step. */

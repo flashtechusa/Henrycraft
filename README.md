@@ -63,6 +63,49 @@ with a dice button to re-roll. The name can be typed over, but typing is never
 required. Deleting one is a small button in the corner of its card followed by a
 confirm, so a mis-tap cannot wipe a build.
 
+## The racing circuit
+
+A sixth kind of district: a **Racing Circuit**, with a go-kart and a track to drive it
+round. Make one from the district picker &mdash; ✚, then the 🏁 card.
+
+The circuit is generated, not drawn by hand, so every one is different: a closed loop
+whose radius breathes twice and three times round the lap, which gives corners of several
+sizes and can never cross itself. Nine blocks of road, red-and-white kerbs down both
+sides, a dashed line down the middle, and a chequered start line under a brick arch he
+drives through. The ground under the road is raised or cut to meet it and feathered out
+over five blocks, so the track sits in the country rather than on a bridge across it -
+nothing is suspended and there is nothing to fall off.
+
+**Getting in and out is one button**, the 🏎️ beside the camera, and it only appears in a
+racing district. The stick steers instead of strafing while driving, and turns more the
+faster you are going, so a kart cannot spin on the spot. Tarmac is quicker than grass -
+about twelve blocks a second against five and a half - but the grass is a reason to enjoy
+the road rather than a punishment: nothing about being off the track stops him, hurts him
+or takes anything away.
+
+**The ten stars go round the circuit** rather than being hidden, floating at kart height
+along the racing line, and collecting them is driving through them. The reach grows with
+speed, because at kart pace on a slow tablet a fixed radius can be driven clean through -
+which reads as a broken star rather than a near miss.
+
+**Laps count upwards** on a 🏁 chip at the top, and that is all they do. There is no
+timer, no position, no lap limit and no way to lose; going round the other way simply
+un-does progress rather than taking a lap away. Laps are counted as an angle swept about
+the middle of the circuit, not by driving over a line, because a line can be missed at
+the edge of the road - and being told you have not finished a lap you have just finished
+is exactly the sort of unfairness this game does not have.
+
+Everything else about a racing district is an ordinary district: he can dig it, build in
+it, fly over it, put portals in it and share it.
+
+`node tools/test-racing.js` covers it, and the checks that matter drive rather than look:
+a full lap on each of twenty seeds, with the real stick input through the real physics.
+That is what caught the bug worth mentioning - **the start arch was being built across
+the road instead of beside it**, because the "across" and "along" vectors were the same
+one, so on several seeds the first thing a kart did was drive into its own start line and
+stop. A screenshot of the finished track would have shown it; a test that only checked
+the road existed did not.
+
 ## Playing together
 
 Everything below is off until somebody turns it on. Alone is the default, and
