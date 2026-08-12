@@ -4048,6 +4048,28 @@ function leadsBack(q,fromSlug,fromRoom){
 function districtForRoom(p){
   var entry=districtWithCode(p.code);
   if(entry) return readJSON(districtKey(entry.slug));
+  /* Nothing in the index answers to that code, but this portal may still remember
+     where it goes from before it was shared. Trust that, and mend the index on the way
+     through - minting a second world for a place he already has is the thing to avoid,
+     and refusing to move at all is worse than either. */
+  if(p.dest){
+    return readJSON(districtKey(p.dest)).then(function(rec){
+      if(!rec) return createRoomDistrict(p);
+      if(rec.code!==p.code){
+        rec.codes=(rec.codes||[]).concat(rec.code?[rec.code]:[]);
+        rec.code=p.code;
+      }
+      districtIndex.list.forEach(function(d){
+        if(d.slug===p.dest){ d.code=rec.code; d.codes=rec.codes||null; }
+      });
+      return writeJSON(districtKey(p.dest),rec).then(function(){
+        return writeJSON(INDEX_KEY,districtIndex).then(function(){ return rec; });
+      });
+    });
+  }
+  return createRoomDistrict(p);
+}
+function createRoomDistrict(p){
   var themeKey=p.destTheme||'meadow';
   var rec=freshDistrict(nameForRoom(p.code,themeKey),themeKey);
   /* The seed comes from the portal, not from a dice roll here: it is what makes the
@@ -5540,7 +5562,9 @@ function mpPortalIn(rec,quiet){
        ever disagree, the room is right and this device is wrong. */
     have.code=f.dest.code; have.destSeed=f.dest.seed;
     have.destStarSeed=f.dest.starSeed; have.destTheme=f.dest.theme;
-    have.dest=null;
+    /* The local slug is kept, not thrown away. It is this device's own knowledge of
+       where the portal goes, it costs nothing, and it is the fallback that lets travel
+       work even if the code cannot be looked up - which is exactly what went wrong. */
     reindexPortals();
     return have;
   }
@@ -5619,18 +5643,25 @@ function mpAdoptLocalPortals(){
 function roomIdentityFor(slug){
   return readJSON(districtKey(slug)).then(function(rec){
     if(!rec) return null;
-    if(rec.code) return {code:rec.code, seed:rec.seed>>>0,
-                         starSeed:(rec.starSeed===undefined?rec.seed:rec.starSeed)>>>0,
-                         theme:rec.theme};
-    rec.code=makeJoinCode();
+    function identity(){
+      return {code:rec.code, seed:rec.seed>>>0,
+              starSeed:(rec.starSeed===undefined?rec.seed:rec.starSeed)>>>0,
+              theme:rec.theme};
+    }
+    /* Whether the code was minted just now or in some earlier session, the index has
+       to be carrying it by the time we hand it out.
+
+       Returning early when the record already had one was the bug that stopped his son
+       going through his own portals. The index is what travel searches; a code written
+       only into the record is a code travel cannot find, so the portal led to a place
+       the game could not open. */
+    var stamped=!!rec.code && districtWithCode(rec.code)!==null;
+    if(rec.code && stamped) return identity();
+    if(!rec.code) rec.code=makeJoinCode();
     return writeJSON(districtKey(slug),rec).then(function(ok){
       if(!ok) return null;             /* no code that is not written down */
       districtIndex.list.forEach(function(d){ if(d.slug===slug) d.code=rec.code; });
-      return writeJSON(INDEX_KEY,districtIndex).then(function(){
-        return {code:rec.code, seed:rec.seed>>>0,
-                starSeed:(rec.starSeed===undefined?rec.seed:rec.starSeed)>>>0,
-                theme:rec.theme};
-      });
+      return writeJSON(INDEX_KEY,districtIndex).then(function(){ return identity(); });
     });
   }).catch(function(){ return null; });
 }
@@ -6251,6 +6282,13 @@ window.__henrycraft={
      to find where a portal leads. */
   districtByCode:function(c){ var d=districtWithCode(c); return d?d.slug:null; },
   isGeneratedName:isGeneratedName,
+  /* Put a district into the state that stopped his son travelling: the record knows its
+     join code, the index does not. Real histories reach it by having been shared in an
+     earlier session, before the index was kept in step. */
+  loseIndexCode:function(slug){
+    districtIndex.list.forEach(function(d){ if(d.slug===slug) delete d.code; });
+    return writeJSON(INDEX_KEY,districtIndex);
+  },
   createDistrict:createDistrict,
   switchDistrict:switchDistrict,
 

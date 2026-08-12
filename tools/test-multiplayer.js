@@ -1379,6 +1379,68 @@ function requireNode22() {
       if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
     }
 
+    /* His son could not go through his own portals: "Could not open that place - try
+       again", standing right in the doorway.
+
+       The destination's record knew its join code; the index did not. The index is what
+       travel searches, so the portal pointed at a place the game could not find - and
+       the local slug that would have saved it had been thrown away the moment the room
+       confirmed the portal. Reproduced here exactly, by taking the code out of the
+       index and leaving it in the record. */
+    console.log('\nA portal whose destination the index has lost track of');
+    const pc = code();
+    const P1 = await newPlayer('P1');
+    const lost = await P1.evaluate(async c => {
+      const H = window.__henrycraft, ids = H.ids;
+      H.loadThemeSeed('meadow', 515);
+      const gy = H.surfaceY(30, 30);
+      for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
+        for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+      }
+      const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                              fill: ids.SAND});
+      for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
+        if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+      }
+      const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+      /* Give the destination a code the way an earlier session would have, then take it
+         out of the index - which is the state his tablet was in. */
+      await H.travel(lit.id);
+      const dest = H.districts().current;
+      const back = H.portals().filter(q => q.lit && q.isReturn)[0];
+      await H.travel(back.id);
+      H.mp.start(c);
+      const until = Date.now() + 20000;
+      while (H.mp.status() !== 'sharing' && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      /* Sharing adopts the portal and stamps a code on the destination. Now lose it. */
+      await new Promise(r => setTimeout(r, 1500));
+      await H.loseIndexCode(dest);
+      const p = H.portals().filter(q => q.lit && !q.isReturn)[0];
+      const before = H.districts().list.length;
+      const went = await H.travel(p.id);
+      const d = H.districts();
+      return {dest, went, landed: d.current, before, after: d.list.length,
+              hasCode: !!p.code, keptSlug: p.dest || null,
+              code: d.code};
+    }, pc);
+    check('the portal was shared and knows its room', lost.hasCode === true,
+          JSON.stringify(lost));
+    check('and it still remembers where it goes locally, as a fallback',
+          lost.keptSlug !== null, JSON.stringify(lost));
+    check('so he goes through it even when the index has lost the code',
+          lost.went === true && lost.landed === lost.dest, JSON.stringify(lost));
+    check('and no second copy of that world is made on the way',
+          lost.after === lost.before,
+          `${lost.before} districts before, ${lost.after} after`);
+    note(`index lost the code for ${lost.dest}: travelled anyway, ` +
+         `${lost.after} districts (was ${lost.before})`);
+    {
+      const pg = pages.find(p => p.label === 'P1');
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+
     /* A wake event landing while the socket is still shaking hands.
 
        This is the bug that stopped Henry's tablet connecting at all: "not open yet"

@@ -219,6 +219,15 @@ building becomes somewhere to visit together — with what he built still in it.
 somebody else gets there first with an empty copy, his blocks go up when he follows,
 by the same resync a reconnect uses. Nothing is merged and nothing is lost.
 
+**A portal knows two ways to find where it goes**, and needs only one of them. Its join
+code, which is what everybody in the room agrees on, and the local district it was bound
+to before it was ever shared. Keeping the second one is what stopped *"Could not open
+that place - try again"*: the destination's record knew its code but the index &mdash;
+which is what travel searches &mdash; did not, and the local slug that would have saved
+it was being discarded the moment the room confirmed the portal. Travel now falls back
+to it and mends the index on the way through, so a portal never leads somewhere the game
+cannot open, and never mints a second copy of a world he already has.
+
 **When a doorway cannot take everybody it takes nobody**, and says why with a picture
 of the frame crossed out. That happens if the sync server is older than this feature,
 or if a portal could not be offered to the room (no storage left to write its code).
