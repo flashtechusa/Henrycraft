@@ -5727,6 +5727,18 @@ function mpApply(x,y,z,b){
   if(b===PORTAL) return;                 /* never arrives from a sane client */
   if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)) return;
   if(!DEFS[b] && b!==AIR) return;
+  /* Never paint over the inside of a lit portal.
+
+     Portal blocks are deliberately not shared - each device fills in its own opening
+     from the portal record - so the room still remembers whatever the frame was filled
+     with before it was lit. Sand, grass, a rainbow. Coming back to a district replays
+     those blocks, and they landed inside the doorway: the portal went on working,
+     because the record still said lit, but it stopped looking like a portal. Which is
+     exactly what got reported.
+
+     These cells belong to the portal for as long as it is lit. Put it out and they are
+     ordinary blocks again, and the room's version applies as usual. */
+  if(portalCells[keyOf(x,y,z)]) return;
   mp.applying=true;
   setBlock(x,y,z,b);
   mp.applying=false;

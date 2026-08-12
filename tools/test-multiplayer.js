@@ -1379,6 +1379,66 @@ function requireNode22() {
       if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
     }
 
+    /* A portal that still looks like a portal after coming back.
+
+       The frame's filling is an ordinary block and is shared; the portal that replaces
+       it is not, because each device fills its own opening in from the record. So the
+       room still holds sand, or grass, or a rainbow for those cells - and replaying them
+       on arrival painted the inside of the doorway back to blocks. The portal kept
+       working, which is how it went unnoticed: it simply stopped looking like one. */
+    console.log('\nA lit portal keeps looking like a portal');
+    const kc = code();
+    const K1 = await newPlayer('K1');
+    const stillPortal = await K1.evaluate(async c => {
+      const H = window.__henrycraft, ids = H.ids;
+      H.loadThemeSeed('meadow', 313);
+      const gy = H.surfaceY(30, 30);
+      for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
+        for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+      }
+      /* Filled with the rainbow block, which is what he actually used. */
+      const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                              fill: ids.RAINBOW});
+      const inside = [];
+      for (let x = 29; x <= 30; x++) for (let y = gy; y < gy + 3; y++) inside.push([x, y, 30]);
+      H.mp.start(c);
+      const until = Date.now() + 25000;
+      while (H.mp.status() !== 'sharing' && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      await new Promise(r => setTimeout(r, 800));
+      H.tryLight(b.probe.x, b.probe.y, b.probe.z);
+      const lit = Date.now() + 15000;
+      while (!H.portals().some(q => q.lit) && Date.now() < lit) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      const before = inside.map(c2 => H.getBlock(c2[0], c2[1], c2[2]));
+      /* Exactly what arriving back replays: the room's memory of those cells. */
+      inside.forEach(c2 => H.mp.feed({type: 'edited', x: c2[0], y: c2[1], z: c2[2],
+                                      block: ids.RAINBOW, by: 'someone'}));
+      await new Promise(r => setTimeout(r, 300));
+      const after = inside.map(c2 => H.getBlock(c2[0], c2[1], c2[2]));
+      /* And once it is put out, those cells are ordinary blocks again. */
+      /* Put it out the way he does: break a block out of the frame. */
+      H.breakBlock(29, gy - 1, 30);
+      inside.forEach(c2 => H.mp.feed({type: 'edited', x: c2[0], y: c2[1], z: c2[2],
+                                      block: ids.RAINBOW, by: 'someone'}));
+      await new Promise(r => setTimeout(r, 300));
+      const afterOut = inside.map(c2 => H.getBlock(c2[0], c2[1], c2[2]));
+      return {portal: ids.PORTAL, rainbow: ids.RAINBOW, before, after, afterOut};
+    }, kc);
+    check('lighting it fills the doorway with portal',
+          stillPortal.before.every(b => b === stillPortal.portal), JSON.stringify(stillPortal.before));
+    check('and the room replaying what the frame was filled with does not paint over it',
+          stillPortal.after.every(b => b === stillPortal.portal), JSON.stringify(stillPortal.after));
+    check('but once the portal is out, those blocks are ordinary again',
+          stillPortal.afterOut.every(b => b === stillPortal.rainbow), JSON.stringify(stillPortal.afterOut));
+    note('a lit portal is not repainted by the room; an unlit frame is');
+    {
+      const pg = pages.find(p => p.label === 'K1');
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+
     /* A world with real building in it can be shared at all.
 
        The join used to carry the entire edit map, and the server drops any message over

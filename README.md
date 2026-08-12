@@ -230,6 +230,14 @@ building becomes somewhere to visit together — with what he built still in it.
 somebody else gets there first with an empty copy, his blocks go up when he follows,
 by the same resync a reconnect uses. Nothing is merged and nothing is lost.
 
+**A lit portal is never painted over.** The filling a frame is built with is an ordinary
+block and is shared; the portal that replaces it is not, because each device fills its
+own opening in from the record. So the room still remembers sand, or grass, or a rainbow
+for those cells &mdash; and replaying them on arrival painted the inside of the doorway
+back to blocks. The portal kept working, which is how it went unnoticed: it simply
+stopped looking like one. Those cells now belong to the portal for as long as it is lit,
+and go back to being ordinary blocks the moment it is put out.
+
 **A portal knows two ways to find where it goes**, and needs only one of them. Its join
 code, which is what everybody in the room agrees on, and the local district it was bound
 to before it was ever shared. Keeping the second one is what stopped *"Could not open
