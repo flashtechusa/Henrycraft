@@ -1573,6 +1573,100 @@ function requireNode22() {
       if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
     }
 
+    /* Racing a circuit together, which is what he wants a racing district for.
+
+       A racing district is 128 blocks across where every other kind is 64, and the size
+       comes from the theme rather than the save. So two devices on the same build agree
+       without a word being said about it - but only if the theme really does travel, and
+       only if the room's blocks can land in a world of that size. Both are worth a test:
+       a circuit is the one district where the two of them will be in the same place at
+       once on purpose. */
+    console.log('\nRacing the same circuit together');
+    const racecode = code();
+    const R1 = await newPlayer('R1');
+    const R2 = await newPlayer('R2');
+    const raceHost = await R1.evaluate(async c => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('racing', 24680);
+      /* Something built out past where the old 64-block world ended, so the check below
+         is about the bigger world and not just about sharing. */
+      const far = [[100, H.surfaceY(100, 100) + 1, 100], [110, H.surfaceY(110, 96) + 1, 96]];
+      far.forEach(c2 => H.setBlock(c2[0], c2[1], c2[2], H.ids.DIAMOND));
+      H.mp.start(c);
+      const until = Date.now() + 30000;
+      while (H.mp.status() !== 'sharing' && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      const t = H.track();
+      return {status: H.mp.status(), dims: H.dims(), far,
+              lap: H.lapLength(), start: t && t.start, pushes: t && t.pushes};
+    }, racecode);
+    check('a racing district can be shared', raceHost.status === 'sharing',
+          JSON.stringify(raceHost));
+    await R2.evaluate(c => window.__henrycraft.mp.join(c), racecode);
+    await waitFor(R2, () => window.__henrycraft.mp.status() === 'sharing');
+    /* waitFor answers yes or no, so the numbers are read afterwards rather than returned
+       from inside it - a mistake that cost a run: `true.dims` is not a helpful error. */
+    const joinerArrived = await waitFor(R2, w => {
+      const H = window.__henrycraft;
+      if (!H.track()) return false;
+      return w.far.every(c2 => H.getBlock(c2[0], c2[1], c2[2]) === H.ids.DIAMOND);
+    }, raceHost, 120000);
+    const raceJoiner = await R2.evaluate(() => {
+      const H = window.__henrycraft, t = H.track();
+      return {dims: H.dims(), lap: H.lapLength(), start: t && t.start,
+              pushes: t && t.pushes,
+              outside: H.mp.outside(), staleWho: H.mp.staleWho()};
+    });
+    check('and the other player gets the same circuit, 128 blocks and all',
+          joinerArrived && raceJoiner.dims.WX === 128 &&
+          raceJoiner.lap === raceHost.lap && raceJoiner.pushes === raceHost.pushes &&
+          JSON.stringify(raceJoiner.start) === JSON.stringify(raceHost.start),
+          JSON.stringify({host: raceHost, joiner: raceJoiner}));
+    /* Blocks from out past 64 arrived and landed, so nothing was quietly dropped. */
+    check('with nothing dropped for falling outside a smaller world',
+          joinerArrived && raceJoiner.outside === 0 && raceJoiner.staleWho === null,
+          JSON.stringify(raceJoiner));
+    note(`both drove the same ${raceHost.lap}-block circuit in a ` +
+         `${raceHost.dims.WX}-block district, start line at ` +
+         `${raceHost.start.x.toFixed(0)},${raceHost.start.z.toFixed(0)}`);
+
+    /* And the failure this guards against: a room whose world is bigger than the one this
+       device can build, which is what an older game on the tablet would look like. The
+       blocks arrive with coordinates it has no room for. Dropping them silently is how
+       "I could see him but he could not see me" happens, so it has to say so. */
+    const mismatch = await R2.evaluate(() => {
+      const H = window.__henrycraft;
+      const before = {outside: H.mp.outside(), staleWho: H.mp.staleWho()};
+      /* A block from the far corner of a world twice as wide again as this one. */
+      H.mp.feedEdit(200, 14, 200, H.ids.PLANKS);
+      const after = {outside: H.mp.outside(), staleWho: H.mp.staleWho(),
+                     line: H.mp.statusLine()};
+      return {before, after};
+    });
+    check('a block from outside this world is noticed rather than dropped in silence',
+          mismatch.after.outside === 1 && mismatch.after.staleWho === 'world',
+          JSON.stringify(mismatch));
+    check('and it says on the panel that this game is the old one, not the other one',
+          /this game is out of date/i.test(mismatch.after.line) &&
+          /reload this page/i.test(mismatch.after.line), JSON.stringify(mismatch));
+    note(`a block from beyond the world reads as: "${mismatch.after.line}"`);
+    /* And it must not latch: switching off and on again starts clean, which is the
+       mistake the first version of the stale banner made. */
+    const raceCleared = await R2.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.mp.stop();
+      await new Promise(r => setTimeout(r, 200));
+      return {outside: H.mp.outside(), staleWho: H.mp.staleWho()};
+    });
+    check('and going back to playing alone clears it rather than latching it',
+          raceCleared.outside === 0 && raceCleared.staleWho === null,
+          JSON.stringify(raceCleared));
+    for (const label of ['R1', 'R2']) {
+      const pg = pages.find(p => p.label === label);
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+
     /* His son could not go through his own portals: "Could not open that place - try
        again", standing right in the doorway.
 

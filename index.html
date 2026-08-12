@@ -642,8 +642,15 @@ if (typeof THREE === 'undefined') {
   return;
 }
 
-/* ---------------- world constants ---------------- */
+/* ---------------- world constants ----------------
+
+   WX and WZ are not constant any more: a racing district is bigger than a meadow,
+   because a lap that takes half a minute to drive is 400-odd blocks of road and that
+   simply does not fit in 64. Every district still says how big it is through its theme,
+   never through its save file - see setWorldSize. WY, CHUNK and WATER_LEVEL are the
+   same everywhere. */
 var WX=64, WY=40, WZ=64, CHUNK=16, WATER_LEVEL=8;
+var WORLD_DEFAULT=64;
 var NCX=WX/CHUNK, NCZ=WZ/CHUNK;
 var STAR_GOAL=10;
 
@@ -809,6 +816,17 @@ var THEMES=[
    surface:GRASS, sub:DIRT, deep:STONE, shore:SAND,
    plant:'oak', plantDens:0.010,
    track:true,
+   /* Twice as wide as everywhere else, which is four times the ground. He asked for a lap
+      that takes half a minute to a minute to get round; at kart speed that is 350 to 700
+      blocks of road, and a 64-block district cannot hold a quarter of it - the old
+      230-block lap already paved 60% of one. At 128 a 570-block lap covers about 38%,
+      which is a circuit in a landscape rather than a landscape of tarmac.
+
+      It costs four times the terrain to generate and mesh once, and only racing districts
+      pay that. Drawing it turned out to cost less than a meadow rather than more - a flat
+      road has far fewer faces showing than a hillside - which is measured rather than
+      assumed: see FOG_FAR, and section 9 of the racing tests. */
+   world:128,
    /* Its own weather, not a copy of the meadow's. He chooses a district by looking at a
       card, so two districts that look identical are two districts he cannot tell apart -
       the district tests measure this in CIE Lab and insist on it. A deeper blue sky over
@@ -1431,9 +1449,10 @@ function generateWorld(){
    gentle slope is a staircase. See layTrack.
 
    The shape is grown rather than dialled in, because a circle with a wobble in it is
-   still a circle: 210 to 240 blocks a lap with hairpins, an infield section and long
-   straights, checked for length, clearance and corner radius before it is built. See
-   trackShape and loopIsGood.
+   still a circle: 535 to 615 blocks a lap - 45 to 53 seconds to drive - with long
+   straights round the outside and switchbacks reaching into the middle, checked for
+   length, detour count, clearance and corner radius before it is built. See trackShape
+   and loopIsGood.
 
    It is derived entirely from the seed, so it comes back identical after a reload and
    is the same circuit on both screens when two people race it. */
@@ -1461,10 +1480,17 @@ var TRACK_FEATHER=3;
 /* Just above what a kart can physically turn at full speed - see KART_TURN. Anything
    tighter than this is rejected and the layout re-rolled. */
 var TRACK_MIN_CORNER=3.8;
-/* A lap this long is close to the ceiling for a 64-block world: the grown loop gets
-   210 to 240 blocks, against 110 for the ring it replaced. Bigger than this needs a
-   bigger world, which would change how every existing district generates - not today. */
-var TRACK_MIN_LAP=175;
+/* How long a lap should be, in blocks of road.
+
+   He asked for one that takes half a minute to a minute to get round. A kart does 11.5
+   blocks a second flat out and rather less through a hairpin, so call it 10 on average:
+   the window works out at 350 to 620 blocks, and the generator grows the loop until it
+   lands inside it rather than taking whatever the first shape happened to give.
+
+   The floor doubles as the guard against a lazy layout. The wobbly circle this replaced
+   managed 110 blocks whatever the seed, and the first grid version 230; neither could get
+   near this, which is exactly why the world had to get bigger. */
+var TRACK_MIN_LAP=350, TRACK_MAX_LAP=620;
 
 /* Corner cutting, twice. A loop grown on a grid turns ninety degrees at a time, and
    splining straight through those corners makes them far tighter than a kart can take -
@@ -1519,7 +1545,7 @@ function splineLoop(P,step){
 /* Would this loop make a circuit? */
 function loopIsGood(pts,length){
   var n=pts.length, i, j;
-  if(length<TRACK_MIN_LAP) return false;
+  if(length<TRACK_MIN_LAP||length>TRACK_MAX_LAP) return false;
   var edge=TRACK_HALF+2;
   for(i=0;i<n;i++){
     if(pts[i].x<edge||pts[i].z<edge||pts[i].x>WX-edge||pts[i].z>WZ-edge) return false;
@@ -1566,18 +1592,21 @@ function trackShape(seed){
      every corner was the same corner. He said it should be much bigger than a circle,
      and he was right about that too.
 
-     So the loop is grown on a coarse grid instead. Start with the ring of cells round
-     the edge of a 4x4 grid, then push a couple of its sides inwards through the middle -
-     the standard way of growing a random simple loop. Each push replaces one straight
-     edge with a three-sided detour, which lengthens the lap and, more to the point, puts
-     a hairpin and an infield section into it. The lap roughly doubles, and no two corners
-     are alike.
+     So the loop is grown on a coarse grid instead. Start with the ring of cells round the
+     edge, then push sides of it inwards through the middle - the standard way of growing a
+     random simple loop. Each push replaces one straight edge with a three-sided detour,
+     which lengthens the lap and, more to the point, puts a hairpin and a switchback into
+     it. Pushes keep going until the lap is inside the window he asked for, so the length
+     is aimed at rather than whatever the first shape happened to give.
 
-     The grid is coarse for a reason. It spans 48 blocks, so the loop lives between 8 and
-     56 and its kerbs stay clear of the edge of the world, and that makes cells 16 blocks -
-     comfortably more than the 11 the road and its kerbs take up, so two corridors running
-     side by side stay separate instead of merging into one wide expanse of tarmac. */
-  var G=4, area=48, cell=area/(G-1), ox=cx-area/2, oz=cz-area/2;
+     Cells are 16 blocks, comfortably more than the 11 the road and its kerbs take up, so
+     two corridors running side by side keep a strip of grass between them instead of
+     merging into one wide expanse of tarmac. The grid spans the world less a margin, so
+     the loop and its kerbs stay clear of the edge: 7 cells across a 128-block district,
+     which is 49 cells to weave through and the reason a lap can now be 450 blocks. */
+  var margin=8, area=WX-margin*2, cell=16, G=Math.round(area/cell)+1;
+  area=(G-1)*cell;
+  var ox=cx-area/2, oz=cz-area/2;
   function cellAt(c){ return {x:ox+c[0]*cell, z:oz+c[1]*cell}; }
   function key(c){ return c[0]+','+c[1]; }
 
@@ -1589,12 +1618,32 @@ function trackShape(seed){
     for(i=G-1;i>0;i--) cyc.push([i,G-1]);
     for(i=G-1;i>0;i--) cyc.push([0,i]);
 
-    /* Two pushes inwards. Each takes one edge of the loop and detours it through the two
-       cells beside it, which must both be free - so the loop never touches itself. */
+    /* Now push the sides of it inwards, to make the teeth of a comb.
+
+       A push takes one straight edge of the loop and detours it through the two cells
+       beside it, which must both be free - so the loop lengthens and never touches itself.
+
+       The important part is that each tooth is pushed repeatedly in the same direction
+       rather than once. Single pushes were the first attempt and they do not work: a push
+       moves a corridor inwards by exactly one cell, so scattering four of them round the
+       ring gave a perimeter road with a slightly wavy edge and the same empty field in the
+       middle - the same complaint he made about the circle, in a different shape. Driving
+       one tooth two to four cells deep is what puts a corridor 30 to 60 blocks into the
+       middle of the district and gives the hairpin at the end of it, which is what the
+       track he showed me is made of.
+
+       Length is the budget. The ring alone is 410 blocks of the 620 he can drive inside a
+       minute, every push adds a cell and a half of road, so there is room for about four to
+       seven of them: two or three teeth. Not a maze - three long fingers and the straights
+       between them. */
+    var wantPushes=4+((r()*4)|0);
     var used={};
     cyc.forEach(function(c){ used[key(c)]=1; });
     var pushes=0;
-    for(var tries=0;tries<40 && pushes<2;tries++){
+    var free=function(c){
+      return c[0]>=0&&c[1]>=0&&c[0]<G&&c[1]<G&&!used[key(c)];
+    };
+    for(var tries=0;tries<400 && pushes<wantPushes;tries++){
       var at=(r()*cyc.length)|0;
       var a=cyc[at], b=cyc[(at+1)%cyc.length];
       var dx=b[0]-a[0], dz=b[1]-a[1];
@@ -1605,16 +1654,28 @@ function trackShape(seed){
       for(var sd=0;sd<2;sd++){
         var nx=sides[sd][0], nz=sides[sd][1];
         var c1=[a[0]+nx,a[1]+nz], c2=[b[0]+nx,b[1]+nz];
-        if(c1[0]<0||c1[1]<0||c1[0]>=G||c1[1]>=G) continue;
-        if(c2[0]<0||c2[1]<0||c2[0]>=G||c2[1]>=G) continue;
-        if(used[key(c1)]||used[key(c2)]) continue;
+        if(!free(c1)||!free(c2)) continue;
         cyc.splice(at+1,0,c1,c2);
         used[key(c1)]=1; used[key(c2)]=1;
         pushes++;
+        /* Keep going the same way, so this becomes a finger reaching in rather than a
+           dent. The cell pair just inserted sits at at+1 and at+2, and pushing that pair
+           again inserts the next pair after it. */
+        var deep=1, want=2+((r()*3)|0), pos=at+1;
+        while(deep<want && pushes<wantPushes+2){
+          var e1=cyc[pos], e2=cyc[pos+1];
+          var f1=[e1[0]+nx,e1[1]+nz], f2=[e2[0]+nx,e2[1]+nz];
+          if(!free(f1)||!free(f2)) break;
+          cyc.splice(pos+1,0,f1,f2);
+          used[key(f1)]=1; used[key(f2)]=1;
+          pos=pos+1; deep++; pushes++;
+        }
         break;
       }
     }
-    if(pushes<2) continue;              /* not long enough to be worth building */
+    /* Fewer than four pushes means a shape too plain to be a circuit, whatever its
+       length. Re-roll rather than build it. */
+    if(pushes<4) continue;
 
     /* Cell centres, jittered a little so two circuits with the same pushes are still
        different circuits. */
@@ -1624,7 +1685,7 @@ function trackShape(seed){
     });
     var loop=splineLoop(chaikin(P,2),0.34);
     if(loopIsGood(loop.pts,loop.length)){
-      return {cx:cx, cz:cz, ctrl:P, pts:loop.pts, length:loop.length};
+      return {cx:cx, cz:cz, ctrl:P, pts:loop.pts, length:loop.length, pushes:pushes};
     }
   }
 
@@ -1637,7 +1698,9 @@ function trackShape(seed){
   for(j=G-1;j>0;j--) ring.push([0,j]);
   ring.forEach(function(c){ Q.push(cellAt(c)); });
   var fb=splineLoop(chaikin(Q,2),0.34);
-  return {cx:cx, cz:cz, ctrl:Q, pts:fb.pts, length:fb.length};
+  /* pushes 0 says out loud that this is the fallback: a plain ring, drivable but dull. The
+     racing tests insist it never happens on any seed. */
+  return {cx:cx, cz:cz, ctrl:Q, pts:fb.pts, length:fb.length, pushes:0};
 }
 
 /* A point a fraction of the way round the lap, and the way the lap is going there.
@@ -1958,6 +2021,11 @@ function hex(n){ return '#'+('000000'+(n>>>0).toString(16)).slice(-6); }
    as an sRGB-encoded texture, so three.js does the conversion on the GPU. */
 function applyTheme(T){
   theme=T;
+  /* Before anything else, and before the generator runs: how big this district is. Every
+     path that builds a world - opening a district, arriving through a portal, adopting a
+     world from somebody else, the test hook - comes through here, which is why it is the
+     one place that decides. */
+  setWorldSize(T.world||WORLD_DEFAULT);
 
   var c=skyCanvas.getContext('2d');
   var g=c.createLinearGradient(0,0,0,256);
@@ -2038,8 +2106,38 @@ var AO_LEVEL=[0.53,0.70,0.86,1.0];
 var PAD=0.03;
 
 var chunks=[];
-for(var ci=0;ci<NCX;ci++) for(var cj=0;cj<NCZ;cj++)
-  chunks.push({cx:ci,cz:cj,opaque:null,trans:null,glow:null,dirty:true});
+function makeChunks(){
+  chunks=[];
+  for(var ci=0;ci<NCX;ci++) for(var cj=0;cj<NCZ;cj++)
+    chunks.push({cx:ci,cz:cj,opaque:null,trans:null,glow:null,dirty:true});
+}
+makeChunks();
+
+/* How big a district is. Racing districts are wider than the rest, and this is the only
+   place that changes it: every world build goes through applyTheme, which calls this
+   before the generator runs.
+
+   Nothing about a save file changes with it. A district record holds its theme, its seed
+   and the blocks he has changed keyed by "x,y,z" - never a flat array whose length is the
+   size of the world - so a record written when racing districts were 64 blocks across
+   still loads, and everything he built is still at the coordinates he built it at. That
+   was the whole reason for doing it this way round. */
+function setWorldSize(n){
+  if(n===WX && blocks.length===WX*WY*WZ) return false;
+  WX=n; WZ=n;
+  NCX=WX/CHUNK; NCZ=WZ/CHUNK;
+  blocks=new Uint8Array(WX*WY*WZ);
+  /* The meshes belong to a world that no longer exists, and dropping the array without
+     disposing them leaks the geometry on the graphics card - which on his tablet is the
+     memory that runs out first. */
+  chunks.forEach(function(c){
+    ['opaque','trans','glow'].forEach(function(k){
+      if(c[k]){ scene.remove(c[k]); c[k].geometry.dispose(); c[k]=null; }
+    });
+  });
+  makeChunks();
+  return true;
+}
 
 function chunkAt(x,z){
   var cx=Math.floor(x/CHUNK), cz=Math.floor(z/CHUNK);
@@ -2156,6 +2254,19 @@ function rebuildAll(){ for(var i=0;i<chunks.length;i++) buildChunk(chunks[i]); }
 function flushDirty(){
   for(var i=0;i<chunks.length;i++) if(chunks[i].dirty) buildChunk(chunks[i]);
 }
+
+/* How far he can see. Named rather than written into the one line that sets the fog each
+   frame, so a screenshot of a whole circuit can lift it.
+
+   There is deliberately no distance culling to go with it. Turning off chunks the fog has
+   already swallowed was the obvious way to pay for a 128-block district, so I wrote it -
+   and measuring said it switched off nothing at all, because the fog reaches 118 blocks and
+   a racing district is only 128 across, so the whole world is inside it wherever he stands.
+   Measuring also said the bigger world is not the problem it looked like: from the driving
+   seat a racing district costs 86 draw calls and 17,800 triangles against a meadow's 156
+   and 46,300, because a flat road has far fewer faces showing than a hillside. The cost of
+   the bigger world is in generating and meshing it once, not in drawing it every frame. */
+var FOG_NEAR=46, FOG_FAR=118;
 
 function setBlock(x,y,z,id){
   if(!inside(x,y,z)) return false;
@@ -3311,7 +3422,7 @@ function updatePlayer(dt){
 
   var uw=eyeInWater();
   scene.fog.color.copy(srgb(uw?theme.fogUnder:theme.fog));
-  scene.fog.near=uw?0.2:46; scene.fog.far=uw?16:118;
+  scene.fog.near=uw?0.2:FOG_NEAR; scene.fog.far=uw?16:FOG_FAR;
 }
 
 /* ---------------- dig & build ---------------- */
@@ -5790,6 +5901,8 @@ var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
            our own room rather than meeting a rival copy of it. pongs counts answers
            to a ping, which is how a half-open socket is spotted after a sleep. */
         reunion:false, pongs:0, attempts:0, heard:0, dupReason:null, openTimer:null,
+        /* blocks the room sent that this world has no room for - see mpApply */
+        outside:0,
         /* Portals across a shared session. `portalsShared` is what the server told
            us it can do; `switching` and `arriving` mark the one arrival that keeps
            the session rather than ending it; `pendingReturn` is a way home waiting
@@ -5914,6 +6027,7 @@ function mpStart(code){
      turning up with a world of its own to protect. */
   mp.reunion=!!(current.code&&current.code===mp.code);
   mp.retry=0;
+  mp.outside=0;                  /* a fresh room, so a fresh count of what did not fit */
   if(!current.code || current.code!==mp.code){
     current.code=mp.code;
     scheduleSave();
@@ -5939,6 +6053,9 @@ function mpStop(quiet){
   mp.ever=false;
   mp.stale=false;
   mp.staleWho=null;
+  /* Reset with the rest of it. A count that survives being switched off is a banner that
+     never goes away, which is the mistake the stale flag made the first time round. */
+  mp.outside=0;
   mp.reunion=false;
   mp.portalsShared=false;
   mp.arriving=false;
@@ -6552,6 +6669,13 @@ function mpApply(x,y,z,b){
      These cells belong to the portal for as long as it is lit. Put it out and they are
      ordinary blocks again, and the room's version applies as usual. */
   if(portalCells[keyOf(x,y,z)]) return;
+  /* A block the room has and this world has no room for. That means the other device is
+     building a bigger world than this one from the same seed - a racing district on a
+     newer build is 128 blocks across where an older one made 64 - so the two of them are
+     not in the same place at all, however much the codes agree. Silently dropping it is
+     how "I could see him but he could not see me" happens, so it is counted and said out
+     loud instead: mpRefreshStale turns it into the out-of-date line on the panel. */
+  if(!inside(x,y,z)){ mp.outside++; mpRefreshStale(); return; }
   mp.applying=true;
   setBlock(x,y,z,b);
   mp.applying=false;
@@ -6604,6 +6728,13 @@ function mpRefreshStale(){
   var guessed=false;
   for(var id in mp.players) if(mp.players[id].guessed) guessed=true;
   mp.staleWho=guessed?(mp.portalsShared?'client':'server'):null;
+  /* Blocks arriving from outside this world mean the room is a bigger world than this
+     device knows how to build, which can only be a newer game at the other end - so it is
+     THIS game that is behind. Its own case rather than the 'client' one, because that
+     sentence is about avatars being guessed and would be the wrong explanation here; and
+     it outranks a guessed character, since a wrong shirt is cosmetic and being in a
+     different world is not. */
+  if(mp.outside>0) mp.staleWho='world';
   mp.stale=!!mp.staleWho;
 }
 function mpRemovePlayer(id){
@@ -6711,6 +6842,12 @@ function mpStatusLine(){
     if(mp.staleWho==='client'){
       return 'Playing with '+n+', but somebody\'s game is out of date, so they are '+
              'being drawn from a guess - ask them to reload it';
+    }
+    /* The other side is building a bigger world than this game knows how to. Said from
+       the reader's point of view, because the reader is the one who has to reload. */
+    if(mp.staleWho==='world'){
+      return 'Playing with '+n+', but this game is out of date and is showing a smaller '+
+             'world than theirs - reload this page to see the same place';
     }
     return n?('Playing with '+n+(n===1?' other person':' other people')):'Waiting for someone to join';
   }
@@ -7108,6 +7245,29 @@ window.__henrycraft={
   ORE_BANDS:ORE_BANDS,
   atlas:function(){ return {cols:ACOLS,rows:AROWS,tile:TP}; },
   dims:function(){ return {WX:WX,WY:WY,WZ:WZ,waterLevel:WATER_LEVEL}; },
+  chunkCount:function(){ return chunks.length; },
+  /* What this world actually costs to draw.
+
+     calls and triangles come from the renderer itself, after the last frame, so they count
+     what the graphics card was really given - frustum culling included. Counting the meshes
+     that exist instead measures the wrong thing: it would report a chunk behind him as
+     drawn when three.js had already thrown it away, which is how the first version of this
+     managed to make a bigger world look four times as expensive as it is. */
+  renderCost:function(){
+    var kept=0, tris=0;
+    chunks.forEach(function(c){
+      var any=false;
+      ['opaque','trans','glow'].forEach(function(k){
+        var m=c[k];
+        if(!m) return;
+        if(m.visible){ any=true; var ix=m.geometry.getIndex(); if(ix) tris+=ix.count/3; }
+      });
+      if(any) kept++;
+    });
+    return {chunks:chunks.length, keptChunks:kept, keptTriangles:tris,
+            calls:renderer.info.render.calls,
+            drawnTriangles:renderer.info.render.triangles};
+  },
   ready:function(){ return ready; },
   getBlock:getBlock,
   setBlock:setBlock,
@@ -7155,6 +7315,8 @@ window.__henrycraft={
     if(!trackInfo) return null;
     return {cx:trackInfo.cx, cz:trackInfo.cz, half:trackInfo.half,
             y:trackInfo.y, start:trackInfo.start,
+            /* how many detours were pushed into the loop; 0 means the plain fallback ring */
+            pushes:trackInfo.shape.pushes,
             /* the centre line, as points, so a test can walk the whole lap */
             /* y is the road's one height: the circuit is flat, so every point on it is at
                the same level and the samples do not carry one of their own. */
@@ -7162,13 +7324,25 @@ window.__henrycraft={
                                                        y:trackInfo.y, z:+p.z.toFixed(2)}; })};
   },
   onRoad:function(x,y,z){ return onRoadAt(x,y,z); },
-  /* Look at the whole circuit from above, for a screenshot. */
+  /* Look at the whole circuit from above, for a screenshot. High enough to see the whole
+     district, whatever size it is, and with the fog pushed
+     back out of the way - otherwise a 128-block circuit disappears into haze halfway
+     across. Both are for looking at the layout; neither is how the game plays. */
   aerial:function(){
     player.fly=true; player.kart=false;
-    player.x=WX/2; player.y=(trackInfo?trackInfo.y:14)+26; player.z=WZ/2+30;
+    player.x=WX/2; player.y=(trackInfo?trackInfo.y:14)+WX*0.42; player.z=WZ/2+WZ*0.47;
     player.vx=player.vy=player.vz=0;
     yaw=0; pitch=-0.95;
+    FOG_NEAR=WX*3; FOG_FAR=WX*6;
+    /* The clouds sit at 44 to 56, which is below this. Left on, they sail across the
+       picture and hide the thing being looked at. */
+    clouds.forEach(function(c){ c.visible=false; });
     paintKartButton();
+  },
+  /* Put the sky and the fog back where the game keeps them. */
+  groundLevelFog:function(){
+    FOG_NEAR=46; FOG_FAR=118;
+    clouds.forEach(function(c){ c.visible=true; });
   },
   /* One frame at a time, for working out why a drive goes wrong. */
   driveStep:function(dt,steer){
@@ -7253,6 +7427,19 @@ window.__henrycraft={
         ca=Math.hypot(A.x-C.x,A.z-C.z);
     var radius=area<1e-6?999:(ab*bc*ca)/(4*area);
     return clamp(radius/12,0.42,1);
+  },
+  /* Write a district record straight into storage and list it, so a test can plant one
+     exactly as an older build would have left it - a racing district from when they were
+     64 blocks across, say - and then open it through the ordinary switchDistrict path.
+     Writing the keys from the test instead does not work: the autosave rewrites the index
+     from memory a moment later and the planted entry disappears. */
+  plantDistrict:function(rec){
+    return writeJSON(districtKey(rec.slug),rec).then(function(){
+      districtIndex.list=districtIndex.list.filter(function(d){ return d.slug!==rec.slug; });
+      districtIndex.list.push({slug:rec.slug,name:rec.name,theme:rec.theme,
+                               created:rec.created,lastPlayed:rec.lastPlayed});
+      return writeJSON(INDEX_KEY,districtIndex).then(function(){ return rec.slug; });
+    });
   },
   /* Put a district into the state that stopped his son travelling: the record knows its
      join code, the index does not. Real histories reach it by having been shared in an
@@ -7675,6 +7862,11 @@ window.__henrycraft={
     stale:function(){ return mp.stale; },
     /* Which thing is out of date: 'server', 'client', or null. */
     staleWho:function(){ return mp.staleWho; },
+    /* How many blocks the room sent that this world had no room for. */
+    outside:function(){ return mp.outside; },
+    /* Feed one edit in as though the room had sent it, so a test can present a block from
+       a world bigger than this one without needing a second build to send it. */
+    feedEdit:function(x,y,z,b){ mpApply(x,y,z,b); },
     /* Is a patient reconnect still pending? Waking up must throw it away rather than
        leave him waiting fifteen seconds after picking the phone back up. */
     retryPending:function(){ return !!mp.timer; },

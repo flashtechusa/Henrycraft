@@ -57,7 +57,7 @@ Each district has one of six themes, fixed when it is created:
 | **Desert Dunes** | low sand dunes, cacti, a few small oases |
 | **Island Bay** | turquoise sea broken into islands, palms on the sand |
 | **Mushroom Hollow** | lilac sky, dark soil, giant red and purple mushrooms |
-| **Racing Circuit** | green country with a flat kart track cut through it &mdash; see below |
+| **Racing Circuit** | green country with a flat kart track cut through it, and four times the size &mdash; see below |
 
 New districts arrive already named &mdash; two friendly words like *Otter Bay* &mdash;
 with a dice button to re-roll. The name can be typed over, but typing is never
@@ -69,25 +69,46 @@ confirm, so a mis-tap cannot wipe a build.
 A sixth kind of district: a **Racing Circuit**, with a go-kart and a track to drive it
 round. Make one from the district picker &mdash; ✚, then the 🏁 card.
 
-The circuit is generated, not drawn by hand, so every one is different, and it is a
-proper circuit rather than a ring road: **a lap is 210 to 240 blocks**, with hairpins,
-an infield section and long straights. It is grown the way a random maze is grown &mdash;
-take the ring of cells round the edge of a coarse grid, then push a couple of its sides
-inwards through the middle, each push replacing a straight edge with a three-sided
-detour. Corners are then rounded off and the whole thing resampled as a closed spline,
-and the result is checked before it is built: long enough, inside the world, no two
-corridors closer together than the road is wide, and no corner tighter than a kart can
-take at speed. A layout that fails any of those is thrown away and another is grown.
+**A racing district is 128 blocks across**, twice everywhere else and four times the
+ground. That is not decoration: he asked for a lap that takes half a minute to a minute
+to drive, which at kart speed is 350 to 700 blocks of road, and a 64-block district cannot
+hold a quarter of it. The size comes from the theme, never from the save file &mdash; a
+district record holds its theme, its seed and the blocks he has changed keyed by
+`"x,y,z"`, so a racing district saved when they were 64 across still opens, with
+everything he built still at the coordinates he built it at. There is a test that plants
+exactly such a record and checks every block survives.
+
+The circuit is generated, not drawn by hand, so every one is different, and it is a proper
+circuit rather than a ring road: **a lap is 535 to 615 blocks and takes 45 to 53 seconds
+to get round**, with long straights round the outside and a run of switchbacks and
+hairpins reaching into the middle. It is grown the way a random maze is grown &mdash; take
+the ring of cells round the edge of a coarse grid, then push sides of it inwards, each push
+replacing a straight edge with a three-sided detour. Each detour is pushed two to four
+cells deep rather than once, which is what makes it a finger reaching into the middle
+instead of a dent in the edge; single pushes were the first attempt and gave a perimeter
+road with a wavy edge and an empty field inside, which is the same complaint he made about
+the circle wearing a different shape.
+
+Corners are then rounded off twice and the whole thing resampled as a closed spline, and
+the result is checked before it is built: the right length, at least four detours, inside
+the world, no two corridors closer together than the road is wide, and no corner tighter
+than a kart can take at speed. A layout that fails any of those is thrown away and another
+grown &mdash; up to sixty times.
 
 Nine blocks of road, red-and-white kerbs down both sides, a dashed line down the middle,
-and a chequered start line under a brick arch he drives through.
+and a chequered start line under a brick arch he drives through. Road and kerbs come to
+about 38% of the district, which leaves grass, trees and ponds between the corridors; at
+64 blocks across the same idea paved 60% and looked like a car park from the air.
 
-That length is the ceiling rather than a choice: a 230-block lap of 11-wide road covers
-about 60% of a 64-block district, which is arithmetic and not a fault. Seen from the air
-a circuit is now more tarmac than field; seen from the driving seat &mdash; which is where
-he sees it &mdash; it is a road with kerbs, grass and trees beyond them. Going longer
-means a bigger world for racing districts, which would mean touching the save format and
-doubling what his tablet has to draw, so it has not been done.
+**It costs less to draw than an ordinary district, which was a surprise.** I expected to
+have to earn the bigger world back and wrote distance culling for chunks the fog had
+already swallowed; measuring said it switched off nothing at all, because the fog reaches
+118 blocks and a district is 128 across. Measuring also said the culling was not needed:
+from the driving seat a circuit is **67 draw calls and 19,900 triangles against a meadow's
+156 and 46,300**, because a flat road has far fewer faces showing than a hillside. So the
+culling was deleted rather than kept as decoration. The real cost is building one &mdash;
+four times the terrain to generate and mesh, which measures 106ms against 53ms, once, on
+the loading screen.
 
 **The road is dead flat** &mdash; one height for the whole circuit, chosen from the middle
 of the ground it crosses and always above the water. The country either side is feathered
@@ -121,17 +142,44 @@ Teleporting across the circuit does not earn a lap either, because a jump longer
 kart could have driven is not credited.
 
 Everything else about a racing district is an ordinary district: he can dig it, build in
-it, fly over it, put portals in it and share it.
+it, fly over it, put portals in it and share it. **Two people share the same circuit**
+without anything being said about its size, because the size comes from the theme and the
+theme travels with the join &mdash; there is a test that puts two players on one circuit
+and checks they get the same 607-block lap, the same start line, and blocks built out past
+where the old 64-block world ended.
 
-`node tools/test-racing.js` covers it, and the checks that matter drive rather than look:
-a full lap on each of twenty seeds, with the real stick input through the real physics.
-It also measures the circuit rather than trusting it &mdash; every seed's lap length, its
-tightest corner, and the biggest height step anywhere on the road, which has to be zero.
-Driving is what caught the bug worth mentioning: **the start arch was being built across
-the road instead of beside it**, because the "across" and "along" vectors were the same
-one, so on several seeds the first thing a kart did was drive into its own start line and
-stop. A screenshot of the finished track would have shown it; a test that only checked
-the road existed did not.
+The one way that could go wrong is one device running an older game: same seed, same
+theme, a smaller world, and blocks arriving with coordinates it has no room for. Dropping
+those in silence is exactly how *"I could see him but he could not see me"* happens, so
+they are counted instead, and the panel says **"this game is out of date and is showing a
+smaller world than theirs — reload this page to see the same place."** Said from the
+reader's point of view, because the reader is the one who has to reload. It clears when
+sharing is switched off rather than latching, which is the mistake the first version of
+the out-of-date banner made.
+
+`node tools/test-racing.js` covers it in 45 checks, and the ones that matter drive rather
+than look: a lap and a half on each of twenty seeds, with the real stick input through the
+real physics, timed &mdash; **45 to 53 seconds a lap**, which is the thing he actually
+asked for. It measures the circuit rather than trusting it: every seed's lap length,
+tightest corner, detour count, paved fraction, and the biggest height step anywhere on the
+road, which has to be zero.
+
+Three bugs it caught are worth writing down, because each was invisible to the check that
+came before it:
+
+- **The start arch was built across the road instead of beside it**, because the "across"
+  and "along" vectors were the same one, so on several seeds the first thing a kart did was
+  drive into its own start line and stop. Driving found it; a test that checked the road
+  existed did not.
+- **A 500-block lap that was a plain rectangle.** Every length and corner check passed and
+  the shape was a ring road round the edge with an empty field inside. Length does not make
+  a circuit; the detours pushed through the middle do, so now they are counted and at least
+  four are required.
+- **Two of my own checks that measured nothing.** The kerb bar had been relaxed to 70% on
+  the strength of a merged corridor the layout no longer produced (it measures 97%, so the
+  bar is 90%), and the "drive off the track" fixture held the stick over for twelve seconds,
+  which drives in circles &mdash; it reported whatever speed the kart happened to stop at
+  and called it the speed of grass.
 
 ## Playing together
 

@@ -94,13 +94,16 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
            points a few blocks apart. A hairpin is welcome; something tighter than a kart
            can physically turn is not. */
         let tightest = 1e9;
+        /* The world is not 64 blocks any more - a racing district is wider than the rest,
+           so every bound here is asked for rather than assumed. */
+        const W = H.dims().WX;
         const N0 = t.pts.length, look = Math.round(6 / 0.34);
         for (let k = 0; k < N0; k++) {
           const p = t.pts[k], q = t.pts[(k + 1) % N0];
           const r = Math.hypot(p.x - t.cx, p.z - t.cz);
           minR = Math.min(minR, r); maxR = Math.max(maxR, r);
           if (p.x < t.half + 2 || p.z < t.half + 2 ||
-              p.x > 64 - t.half - 2 || p.z > 64 - t.half - 2) offWorld++;
+              p.x > W - t.half - 2 || p.z > W - t.half - 2) offWorld++;
           biggestStep = Math.max(biggestStep, Math.hypot(p.x - q.x, p.z - q.z));
           /* The road is flat now, so any height change at all is a fault. */
           worst = Math.max(worst, Math.abs(p.y - q.y));
@@ -130,7 +133,7 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
                   offWorld, closes, worstStep: +worst.toFixed(2),
                   biggestStep: +biggestStep.toFixed(2), pinch: +pinch.toFixed(1),
                   lap: H.lapLength(), tightest: +tightest.toFixed(1),
-                  reach: +(maxR - minR).toFixed(1)});
+                  reach: +(maxR - minR).toFixed(1), pushes: t.pushes});
       }
       return out;
     }, SEEDS);
@@ -151,15 +154,28 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
           shapes.every(s => s.worstStep === 0),
           JSON.stringify(shapes.filter(s => s.worstStep > 0)
                                .map(s => ({seed: s.seed, step: s.worstStep}))));
-    /* 175 is the floor; the old wobbly circle managed 110 whatever the seed. */
-    check(`every lap is a proper circuit rather than a ring ` +
-          `(${Math.min(...shapes.map(s => s.lap))} blocks at the shortest)`,
-          shapes.every(s => s.lap >= 175),
-          JSON.stringify(shapes.filter(s => s.lap < 190).map(s => ({seed: s.seed, lap: s.lap}))));
+    /* He asked for a lap that takes half a minute to a minute. At kart pace that is 350 to
+       620 blocks of road - see TRACK_MIN_LAP. The wobbly circle managed 110 whatever the
+       seed, and the first grid version 230, so this is the check that says the world had to
+       get bigger. Section 4 measures the time itself, by driving. */
+    check(`every lap is 350 to 620 blocks ` +
+          `(${Math.min(...shapes.map(s => s.lap))} to ${Math.max(...shapes.map(s => s.lap))})`,
+          shapes.every(s => s.lap >= 350 && s.lap <= 620),
+          JSON.stringify(shapes.filter(s => s.lap < 350 || s.lap > 620)
+                               .map(s => ({seed: s.seed, lap: s.lap}))));
     check('with corners of genuinely different sizes, none too tight for a kart',
           shapes.every(s => s.tightest >= 4.2 && s.reach >= 6),
           JSON.stringify(shapes.map(s => ({seed: s.seed, tightest: s.tightest,
                                            reach: s.reach}))));
+    /* The check that catches a dull circuit rather than a broken one, and it is here
+       because a seed slipped through without it: 500 blocks long, every length and corner
+       test passed, and the shape was a plain rectangle round the edge of the world with an
+       empty field in the middle. Length alone does not make a circuit - the detours pushed
+       through the middle do, and pushes counts them. Zero means the fallback ring. */
+    check('every circuit has at least four detours pushed through the middle of it',
+          shapes.every(s => s.pushes >= 4),
+          JSON.stringify(shapes.filter(s => s.pushes < 4)
+                               .map(s => ({seed: s.seed, pushes: s.pushes, lap: s.lap}))));
     const rs = shapes.filter(s => !s.missing);
     note(`lap length ${Math.min(...rs.map(s => s.lap))} to ` +
          `${Math.max(...rs.map(s => s.lap))} blocks; tightest corner ` +
@@ -224,18 +240,19 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
            covers a lot of it - that is arithmetic, not a fault - but if a layout ever
            merged two corridors into one field of tarmac this is the number that would
            say so. */
+        const W = H.dims().WX, area = W * W;
         let paved = 0;
-        for (let x = 0; x < 64; x++) {
-          for (let z = 0; z < 64; z++) {
+        for (let x = 0; x < W; x++) {
+          for (let z = 0; z < W; z++) {
             const b = H.getBlock(x, t.y, z);
             if (b === ids.ROAD || b === ids.ROADLINE || b === ids.GRID || b === ids.KERB) paved++;
           }
         }
         const samples = Math.ceil(t.pts.length / 7);
         out.push({seed: 3000 + i * 37, samples, road, wet, blocked, kerbs,
-                  paved: +(paved / 4096).toFixed(3),
+                  paved: +(paved / area).toFixed(3),
                   /* what a ribbon that long and that wide has to cover */
-                  expect: +(H.lapLength() * (t.half * 2 + 2) / 4096).toFixed(3)});
+                  expect: +(H.lapLength() * (t.half * 2 + 2) / area).toFixed(3)});
       }
       return out;
     }, SEEDS);
@@ -276,8 +293,8 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
                               .map(b => ({seed: b.seed, paved: b.paved, expect: b.expect}))));
     const pv = built.map(b => b.paved);
     note(`the road and its kerbs cover ${(Math.min(...pv) * 100).toFixed(0)}% to ` +
-         `${(Math.max(...pv) * 100).toFixed(0)}% of a district: a long lap in a small ` +
-         `world, and within a tenth of what its length alone accounts for`);
+         `${(Math.max(...pv) * 100).toFixed(0)}% of a district, within a tenth of what the ` +
+         `lap's own length accounts for (it was 57% to 64% before the world grew)`);
 
     // ---- 3: he starts on the grid, in a kart --------------------------------
     console.log('\n3. he arrives on the start line');
@@ -306,14 +323,18 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
       for (let i = 0; i < n; i++) {
         H.loadThemeSeed('racing', 3000 + i * 37);
         if (!H.kart()) H.toggleKart();
-        /* A minute of driving, steering for the centre line and squeezing the throttle
-           the way a person does. A lap is a bit over 200 blocks now - twice what the old
-           ring managed - and at kart pace a minute is comfortably more than one. */
-        const r = H.drive(60, () => H.autoSteer(), () => H.autoThrottle());
+        /* Ninety seconds of driving, steering for the centre line and squeezing the
+           throttle the way a person does - enough to get round a 500-block lap and out
+           the other side even on the slowest layout, which is what lets the time per lap
+           below be worked out by division rather than guessed at. */
+        const SECONDS = 90;
+        const r = H.drive(SECONDS, () => H.autoSteer(), () => H.autoThrottle());
         out.push({seed: 3000 + i * 37, turned: r.turned, laps: r.laps,
                   offRoad: r.offRoadFrames, frames: r.frames,
                   maxSpeed: r.maxSpeed, minY: r.minY, stalled: r.stalledFrames,
-                  lap: H.lapLength()});
+                  lap: H.lapLength(),
+                  /* seconds a lap, at the pace of a driver who knows the way round */
+                  spl: r.turned > 0 ? +(SECONDS / r.turned).toFixed(1) : null});
         if (H.kart()) H.toggleKart();
       }
       return out;
@@ -338,10 +359,18 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
                                          off: +(l.offRoad / l.frames).toFixed(2) }))));
     check('and never falls out of the world',
           laps.every(l => l.minY > 0), JSON.stringify(laps.filter(l => l.minY <= 0)));
-    const turns = laps.map(l => l.turned);
-    note(`laps driven per minute: ${Math.min(...turns).toFixed(2)} to ` +
-         `${Math.max(...turns).toFixed(2)}; top speed ` +
-         `${Math.max(...laps.map(l => l.maxSpeed)).toFixed(1)} blocks a second`);
+    /* The thing he actually asked for, measured by driving rather than by arithmetic on the
+       lap length: "a lap should take 30 seconds to a minute to complete". This is the pace
+       of a driver who knows the way round, so his own laps will be slower - that is the
+       right way round for a bar to be wrong. */
+    check('a lap takes between 30 seconds and a minute to get round',
+          laps.every(l => l.spl !== null && l.spl >= 30 && l.spl <= 60),
+          JSON.stringify(laps.filter(l => l.spl === null || l.spl < 30 || l.spl > 60)
+                             .map(l => ({seed: l.seed, seconds: l.spl, lap: l.lap}))));
+    const turns = laps.map(l => l.turned), spls = laps.map(l => l.spl);
+    note(`a lap takes ${Math.min(...spls)}s to ${Math.max(...spls)}s to drive; ` +
+         `top speed ${Math.max(...laps.map(l => l.maxSpeed)).toFixed(1)} blocks a second ` +
+         `(${Math.min(...turns).toFixed(2)} to ${Math.max(...turns).toFixed(2)} laps in 90s)`);
 
     // ---- 5: the stars are on the track -------------------------------------
     console.log('\n5. the stars are round the circuit, where a kart will find them');
@@ -396,31 +425,58 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
     // ---- 6: nothing here can hurt him --------------------------------------
     console.log('\n6. nothing about racing can hurt, trap or end anything');
     const safe = await page.evaluate(async () => {
-      const H = window.__henrycraft, ids = H.ids;
+      const H = window.__henrycraft;
       H.loadThemeSeed('racing', 4242);
       if (!H.kart()) H.toggleKart();
-      /* Drive straight off the track and keep going, into whatever is out there. */
-      const off = H.drive(12, () => 0.85);
+      /* Off the road on purpose: a quarter turn, then straight on into the country. The
+         first version of this held the stick over for twelve seconds and called it driving
+         off the track - it drove in circles, and reported whatever speed it happened to
+         end at. */
+      H.turn(Math.PI / 2);
+      const off = H.drive(8, () => 0, () => 1);
+      const at = H.player();
+      const grassSpeed = Math.hypot(at.vx, at.vz);
+      /* Whatever he has driven into out there - a tree, a hillside, the edge of the world -
+         he has to be able to get himself out of it. That is the property that matters, not
+         whether something can stop him: a tree stops him in a meadow too. Reverse, and see
+         whether the world lets go. */
+      H.drive(2.5, () => 0, () => -1);
+      const backAt = H.player();
+      const reversed = Math.hypot(backAt.x - at.x, backAt.z - at.z);
       const stillDriving = H.kart();
-      const p = H.player();
-      /* Off the road is slower and nothing else: no stop, no damage, no reset. */
-      const offRoadSpeed = Math.hypot(p.vx, p.vz);
-      /* And he can always get out, wherever he is. */
+      /* And he can always get out on foot, wherever he is. */
       H.toggleKart();
       const outNow = !H.kart();
       const p2 = H.player();
-      return {off, stillDriving, outNow, offRoadSpeed: +offRoadSpeed.toFixed(2),
-              inWorld: p2.x > 0 && p2.x < 64 && p2.z > 0 && p2.z < 64 && p2.y > 0,
+      return {off, stillDriving, outNow, reversed: +reversed.toFixed(2),
+              endSpeed: +grassSpeed.toFixed(2),
+              offRoadShare: +(off.offRoadFrames / off.frames).toFixed(2),
+              stuck: +(off.stalledFrames / off.frames).toFixed(2),
+              inWorld: p2.x > 0 && p2.x < H.dims().WX && p2.z > 0 &&
+                       p2.z < H.dims().WZ && p2.y > 0,
               stars: H.stars().length, laps: H.laps()};
     });
     check('driving off the circuit does not stop him or take anything away',
-          safe.stillDriving === true && safe.off.minY > 0, JSON.stringify(safe));
+          safe.stillDriving === true && safe.off.minY > 0 &&
+          safe.stars === 10 && safe.laps >= 0, JSON.stringify(safe));
+    /* The one that would matter to him: whatever he drives into, reversing gets him out. */
+    check('and whatever he drives into out there, he can reverse out of it',
+          safe.reversed > 2, JSON.stringify(safe));
     check('he can get out of the kart wherever he happens to be',
           safe.outNow === true && safe.inWorld === true, JSON.stringify(safe));
     check('and the lap count never goes backwards or below zero',
           safe.laps >= 0, JSON.stringify(safe));
-    note(`off the road he still rolls at ${safe.offRoadSpeed} blocks a second, ` +
-         `and nothing stops him`);
+    /* Most of that run was off the road, and he was moving for most of it. No speed is
+       claimed here on purpose: he leaves the road already carrying road speed, so the
+       fastest he goes during the run is a tarmac number wearing a grass hat, and the speed
+       he ends at is whatever a tree left him. Grass being slower than tarmac is measured
+       where it can be measured honestly - the drive round the lap in section 4, which never
+       exceeds 11.5, against 5.5 for grass in KART_GRASS. */
+    check('he spends that run off the road and keeps moving through it',
+          safe.offRoadShare > 0.5 && safe.stuck < 0.5, JSON.stringify(safe));
+    note(`driven off the road: ${(safe.offRoadShare * 100).toFixed(0)}% of the run on the ` +
+         `grass, stopped for ${(safe.stuck * 100).toFixed(0)}% of it, and reverses ` +
+         `${safe.reversed} blocks straight back out of whatever he met`);
 
     /* Reversing round the lap must not count laps - being given a lap for going
        backwards is confusing, and taking one away would be worse. */
@@ -482,6 +538,130 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
           !!after.pts && JSON.stringify(after.pts) === JSON.stringify(before.pts),
           JSON.stringify({was: before.pts, now: after.pts}));
     note(`circuit at ${before.cx},${before.cz} reloaded identical`);
+
+    // ---- 9: a bigger world, and only where it was asked for -----------------
+    console.log('\n9. a racing district is bigger, and nothing else changed size');
+    const sizes = await page.evaluate(() => {
+      const H = window.__henrycraft, out = {};
+      /* Switch back and forth, so the second visit to each theme proves the world is
+         resized both ways rather than only growing once. */
+      ['meadow', 'racing', 'snowy', 'racing', 'island', 'mushroom', 'desert', 'racing']
+        .forEach(k => {
+          H.loadThemeSeed(k, 7000);
+          const d = H.dims();
+          out[k] = {WX: d.WX, WZ: d.WZ, WY: d.WY, chunks: H.chunkCount(),
+                    /* the block at the far corner has to exist, which it cannot if the
+                       array was not reallocated with the world */
+                    corner: H.getBlock(d.WX - 1, 0, d.WZ - 1)};
+        });
+      return out;
+    });
+    check('a racing district is 128 blocks across',
+          sizes.racing.WX === 128 && sizes.racing.WZ === 128,
+          JSON.stringify(sizes.racing));
+    check('and every other theme is still exactly 64, as its saves expect',
+          ['meadow', 'snowy', 'island', 'mushroom', 'desert']
+            .every(k => sizes[k].WX === 64 && sizes[k].WZ === 64),
+          JSON.stringify(sizes));
+    check('the height of the world never changes, whatever the theme',
+          Object.keys(sizes).every(k => sizes[k].WY === sizes.meadow.WY),
+          JSON.stringify(sizes));
+    /* Bedrock at the far corner. If the block array had not been reallocated to the new
+       size, reading there would fall off the end and come back as air or undefined - which
+       is exactly the bug that would corrupt a world quietly rather than loudly. */
+    check('the far corner of every world is real ground, not off the end of the array',
+          Object.keys(sizes).every(k => sizes[k].corner > 0),
+          JSON.stringify(sizes));
+    check('and the chunk grid is rebuilt to match, both growing and shrinking',
+          sizes.racing.chunks === 64 && sizes.meadow.chunks === 16 &&
+          sizes.snowy.chunks === 16,
+          JSON.stringify(sizes));
+    note(`racing ${sizes.racing.WX}x${sizes.racing.WZ} in ${sizes.racing.chunks} chunks; ` +
+         `every other theme ${sizes.meadow.WX}x${sizes.meadow.WZ} in ` +
+         `${sizes.meadow.chunks}`);
+
+    /* What the bigger world costs on the device that matters, which is his tablet.
+
+       I expected to have to earn this back with distance culling and wrote some, and
+       measuring said it saved nothing: the fog reaches 118 blocks and a racing district is
+       128 across, so the whole world is inside the fog wherever he stands. Measuring also
+       said the culling was not needed, because a racing district is *cheaper* to draw than
+       a meadow - a flat road shows far fewer faces than a hillside does. So the check is
+       the honest version of what I set out to prove: driving round a circuit must not cost
+       more than standing in an ordinary district already does. */
+    const cost = await page.evaluate(async () => {
+      const H = window.__henrycraft;
+      const out = {};
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      for (const k of ['meadow', 'racing']) {
+        const t0 = performance.now();
+        H.loadThemeSeed(k, 4242);
+        const genMs = performance.now() - t0;
+        H.groundLevelFog();
+        document.getElementById('playBtn') && document.getElementById('playBtn').click();
+        if (k === 'racing' && !H.kart()) H.toggleKart();
+        /* Mid-circuit and pointing along the road, which is where he spends the lap -
+           measuring from the spawn point at the edge would flatter it. */
+        if (k === 'racing') H.drive(6, () => H.autoSteer(), () => H.autoThrottle());
+        H.lookAt();
+        await frame();
+        out[k] = Object.assign({genMs: Math.round(genMs)}, H.renderCost());
+      }
+      return out;
+    });
+    check('a racing district is no more expensive to draw than an ordinary one',
+          cost.racing.calls <= cost.meadow.calls &&
+          cost.racing.drawnTriangles <= cost.meadow.drawnTriangles,
+          JSON.stringify(cost));
+    /* Generating four times the terrain does cost four times as much, and that is the part
+       he can actually feel - once, on the loading screen. A second is the ceiling; over
+       that and a five-year-old thinks it is broken and taps something else. */
+    check('and building one takes well under a second, even at four times the ground',
+          cost.racing.genMs < 1000, JSON.stringify(cost));
+    note(`from the driving seat a circuit costs ${cost.racing.calls} draw calls and ` +
+         `${cost.racing.drawnTriangles} triangles, against ${cost.meadow.calls} and ` +
+         `${cost.meadow.drawnTriangles} standing in a meadow`);
+    note(`generating one takes ${cost.racing.genMs}ms against ${cost.meadow.genMs}ms ` +
+         `for a district a quarter the size`);
+
+    /* The one that would be unforgivable to get wrong.
+
+       He already has racing districts, saved when one was 64 blocks across. A record holds
+       its theme, its seed and the blocks he changed keyed by "x,y,z" - so growing the world
+       has to leave every one of those blocks exactly where he put it. The circuit under
+       them moves, because it is generated and the district is now four times the size; his
+       diamond tower does not.
+
+       This plants a record the way the old build would have left it and opens it through
+       the ordinary switchDistrict path, which reads it back out of storage. The blocks are
+       at 6,14,6 and 30,20,30 and 62,14,62 - the last one near the far corner of what used
+       to be the whole world. */
+    const BUILT = {'6,14,6': 11, '7,14,6': 11, '6,15,6': 11, '30,20,30': 10, '62,14,62': 8};
+    const oldSave = await page.evaluate(async built => {
+      const H = window.__henrycraft;
+      await H.plantDistrict({name: 'Old Circuit', slug: 'old-circuit', theme: 'racing',
+                             seed: 12345, starSeed: 12345, edits: built,
+                             p: null, stars: null, sel: null, v: 2, portals: [],
+                             created: '2026-08-01T00:00:00.000Z',
+                             lastPlayed: '2026-08-01T00:00:00.000Z'});
+      await H.switchDistrict('old-circuit');
+      const kept = {};
+      Object.keys(built).forEach(k => {
+        const [x, y, z] = k.split(',').map(Number);
+        kept[k] = H.getBlock(x, y, z);
+      });
+      return {wanted: built, kept, dims: H.dims(), slug: H.districts().current,
+              hasTrack: !!H.track(), editsNow: Object.keys(H.editMap()).length};
+    }, BUILT);
+    check('a racing district saved when the world was 64 blocks still opens',
+          oldSave.slug === 'old-circuit' && oldSave.hasTrack === true,
+          JSON.stringify(oldSave));
+    check('and it opens at the new size, without losing a single block he built',
+          oldSave.dims.WX === 128 &&
+          Object.keys(oldSave.wanted).every(k => oldSave.kept[k] === oldSave.wanted[k]),
+          JSON.stringify(oldSave));
+    note(`an old 64-block racing save opened at ${oldSave.dims.WX} blocks with all ` +
+         `${oldSave.editsNow} of its built blocks where he left them`);
 
     check('no page errors anywhere in the run', errs.length === 0, errs.slice(0, 3).join(' | '));
   } finally {
