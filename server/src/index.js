@@ -296,6 +296,11 @@ export class District {
              that braces - two capitalised words and nothing else gets stored. */
           name: safeDistrictName(offer.name),
         };
+        /* An older client puts its whole edit map in the offer. Still accepted, because
+           an older copy of the game may be open on a tablet somewhere - but the current
+           one deliberately does not: a join carrying a real world is bigger than
+           MAX_MSG_BYTES and gets dropped on the floor above, which left the game saying
+           "Connecting..." for ever. Blocks arrive as ordinary edits instead. */
         if (offer.edits && typeof offer.edits === 'object') {
           for (const [k, v] of Object.entries(offer.edits)) {
             if (this.edits.size >= EDIT_CAP) break;

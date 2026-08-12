@@ -153,6 +153,17 @@ on screen and waits &mdash; and if you accept, your own version is kept
 side-by-side as *&lt;name&gt; (mine)* rather than overwritten. Nothing is ever
 merged silently.
 
+**The join describes the world; it does not contain it.** It used to carry the whole
+edit map, and the server drops any message over 4,096 bytes &mdash; about 280 blocks. So
+a district a child had actually built in produced a join that was silently thrown away:
+no welcome, no error, *"Connecting…"* for ever. Six hundred blocks makes a 7,915-byte
+join, and every test in the suite had used a handful, which is why none of them caught
+it &mdash; and why starting a fresh world appeared to fix it. Blocks now go up after the
+welcome, through the same bounded queue that carries every other edit.
+
+A connect that is never answered also times out at 25 seconds now and starts again,
+whatever the reason. Nothing recovered from a socket that opened and then went quiet.
+
 **If the connection drops** the world carries on alone and reconnects in the
 background. A child is never shown an error dialog. When it comes back, the
 server's blocks arrive and anything built in the meantime is pushed up, so neither

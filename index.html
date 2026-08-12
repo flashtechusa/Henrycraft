@@ -5193,20 +5193,32 @@ function mpConnect(){
   mp.ws=ws;
   mpSetStatus(mp.retry?'reconnecting':'connecting');
   ws.onopen=function(){
-    /* The socket works, so the timer below has nothing left to catch. Cleared here
-       rather than when the welcome is processed: on a tablet drawing one frame a
-       second the welcome can sit in the queue for a while behind a frame, and killing
-       a perfectly good connection because the main thread was busy would cause the
-       very disconnection this is meant to prevent. */
-    mpClearOpenTimer();
+    /* Deliberately NOT clearing the connect timeout here.
+
+       A socket that opens and is then never answered is exactly what happened when the
+       join was too big to be accepted, and clearing the timer on open meant nothing
+       ever recovered from it. The timer is generous - long enough that a tablet drawing
+       one frame a second will have processed a welcome sitting behind a frame - and it
+       is cleared when the welcome actually arrives. */
     mp.retry=0;
+    /* The offer describes the world; it does not contain it.
+
+       It used to carry the whole edit map, and the server drops any message over
+       4096 bytes - about 280 blocks. So a district somebody had actually built in
+       produced a join that was silently thrown away: no welcome, no error, and the
+       game sat on "Connecting..." for ever. It looked like the server was down. It
+       was the size of a five-year-old's building.
+
+       That is also why starting a fresh world "fixed" it - a new world is small
+       enough to fit. The blocks now go up afterwards through the same bounded queue
+       that carries every other edit, 64 at a time. */
     mpSend({type:'join', playerName:mpMe.name, colour:mpMe.colour,
             look:localLookIndex(),
             offer:{seed:seed, starSeed:starSeed, theme:theme.key,
                    /* Only ever a name the game generated - see isGeneratedName. A name
                       typed over by hand is simply not sent. */
                    name:(current&&isGeneratedName(current.name))?current.name:null,
-                   edits:mpShareableEdits()}});
+                   blocks:Object.keys(edits).length}});
   };
   ws.onmessage=function(e){ mpMessage(e.data); };
   /* A connect that never finishes must not last for ever.
@@ -5224,7 +5236,7 @@ function mpConnect(){
     if(mp.status==='sharing'||mp.status==='choose') return;
     mpDropSocket();
     mpRetry();
-  },12000);
+  },25000);
   ws.onerror=function(){ /* onclose always follows; a child is shown nothing */ };
   ws.onclose=function(ev){
     mp.ws=null;
@@ -5316,7 +5328,7 @@ function mpProbe(){
     if(mp.wanted&&mp.ws===sock&&mp.pongs===was){
       try{ sock.close(4002,'no answer after waking'); }catch(e){}
     }
-  },12000);
+  },25000);
 }
 document.addEventListener('visibilitychange',function(){
   if(!document.hidden) mpWakeUp();
@@ -5387,6 +5399,10 @@ function mpSettleWorld(w){
        ask and no dialog to put in front of him. */
     mp.arriving=false;
     mp.accepted=true;
+    /* First one here, so this world becomes the room - and it has to be sent, since the
+       join no longer carries it. Missing this left a district he had built in arriving
+       empty for whoever followed him through. */
+    if(w.adopted) mpUploadEverything();
     if(!w.adopted && (w.seed>>>0)!==(seed>>>0)){
       /* Recorded so a test can say why a copy was kept aside rather than only that one
          was. A seed mismatch here means this device's record for that code describes a
@@ -5404,8 +5420,10 @@ function mpSettleWorld(w){
     return Promise.resolve(true);
   }
   if(w.adopted){
-    /* The server had never seen this district, so ours is now the shared one. */
+    /* The server had never seen this district, so ours is now the shared one - and
+       now it has to be sent, because the join deliberately did not carry it. */
     mp.accepted=true;
+    mpUploadEverything();
     mpSetStatus('sharing');
     mpPaintPanel();
     toast('🌍 Sharing this district',2400);
@@ -5438,6 +5456,20 @@ function mpSettleWorld(w){
   mpSetStatus('choose');
   mpShowServerCopy(w);
   return Promise.resolve(false);
+}
+
+/* Every block here, queued for the room. Bounded batches, so lighting a big portal or
+   sharing a world built over weeks does not stall a frame - and no single message ever
+   comes near the size limit that used to swallow the join. */
+function mpUploadEverything(){
+  var k,p,n=0;
+  for(k in edits){
+    if(edits[k]===PORTAL) continue;
+    p=k.split(',');
+    mpQueueEdit(+p[0],+p[1],+p[2],edits[k]);
+    n++;
+  }
+  return n;
 }
 
 function mpResync(w){
@@ -6282,6 +6314,7 @@ window.__henrycraft={
      to find where a portal leads. */
   districtByCode:function(c){ var d=districtWithCode(c); return d?d.slug:null; },
   isGeneratedName:isGeneratedName,
+  editMap:function(){ return JSON.parse(JSON.stringify(edits)); },
   /* Put a district into the state that stopped his son travelling: the record knows its
      join code, the index does not. Real histories reach it by having been shared in an
      earlier session, before the index was kept in step. */

@@ -1379,6 +1379,66 @@ function requireNode22() {
       if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
     }
 
+    /* A world with real building in it can be shared at all.
+
+       The join used to carry the entire edit map, and the server drops any message over
+       4096 bytes - about 280 blocks. So a district a child had actually built in
+       produced a join that was silently thrown away: no welcome, no error, "Connecting"
+       for ever. Every test in this file used a handful of blocks, which is why none of
+       them caught it - and why starting a fresh world appeared to fix it. */
+    console.log('\nA world with a lot built in it');
+    const bgc = code();
+    const B1 = await newPlayer('B1');
+    const B2 = await newPlayer('B2');
+    const big = await B1.evaluate(async c => {
+      const H = window.__henrycraft, ids = H.ids;
+      H.loadThemeSeed('meadow', 777);
+      /* Six hundred blocks: an evening's building, and comfortably past the point where
+         a join carrying them all is refused. */
+      let n = 0;
+      const where = [];
+      for (let x = 10; x < 40; x++) {
+        for (let z = 10; z < 30; z++) {
+          const y = H.surfaceY(x, z) + 1;
+          H.setBlock(x, y, z, ids.PLANKS);
+          /* The exact cells, remembered. Reading surfaceY again on the other side
+             returns the top of the block that has just arrived, so recomputing the
+             coordinate looks at the air above it - a mistake I have now made twice in
+             this file. */
+          if (where.length < 40) where.push([x, y, z]);
+          n++;
+        }
+      }
+      const wouldHaveBeen = JSON.stringify({type: 'join', playerName: 'Blue Fox',
+        colour: '#2f7fd6', offer: {seed: 1, starSeed: 1, theme: 'meadow',
+        edits: H.editMap()}}).length;
+      H.mp.start(c);
+      const until = Date.now() + 30000;
+      while (H.mp.status() !== 'sharing' && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      return {n, where, wouldHaveBeen, status: H.mp.status(), line: H.mp.statusLine()};
+    }, bgc);
+    check(`a district with ${big.n} blocks in it can be shared at all`,
+          big.status === 'sharing',
+          `status ${big.status} - "${big.line}"; an all-in-one join would have been ` +
+          `${big.wouldHaveBeen} bytes against a 4096 byte limit`);
+    await B2.evaluate(c => window.__henrycraft.mp.join(c), bgc);
+    await waitFor(B2, () => window.__henrycraft.mp.status() === 'sharing');
+    const arrivedBlocks = await waitFor(B2, w => {
+      const H = window.__henrycraft;
+      return w.every(c => H.getBlock(c[0], c[1], c[2]) === H.ids.PLANKS);
+    }, big.where, 120000);
+    check(`and everything he built arrives at the other player ` +
+          `(${big.where.length} cells checked)`, arrivedBlocks,
+          'the building had not arrived within two minutes');
+    note(`${big.n} blocks shared; an all-in-one join would have been ` +
+         `${big.wouldHaveBeen} bytes against a 4096 byte limit`);
+    for (const label of ['B1', 'B2']) {
+      const pg = pages.find(p => p.label === label);
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+
     /* His son could not go through his own portals: "Could not open that place - try
        again", standing right in the doorway.
 
