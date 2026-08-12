@@ -973,6 +973,96 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
        `dwell never started (max ${midSession.walked && midSession.walked.maxDwell}), ` +
        `travelled ${midSession.walked && midSession.walked.travelled}`);
 
+  /* ---- 12e: a broken way home can be lit again, and still leads home -------
+
+     He broke a block out of the return portal in a district he had travelled to, and
+     could not get back. The obsidian was still standing - the game had just forgotten
+     what the doorway was for, so lighting it again would have bound it somewhere new.
+     Which is worse than not working, because it looks like it worked. */
+  console.log('\n12e. a frame that used to be a portal leads where it led');
+  const relit = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 808);
+    const gy = H.surfaceY(30, 30);
+    for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
+      for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+    }
+    const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                            fill: ids.SAND});
+    for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
+      if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+    }
+    const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+    const wanted = lit.dest;
+    const districtsBefore = H.districts().list.length;
+
+    /* Break a block out of the frame, the way he did. */
+    H.breakBlock(29, gy - 1, 30);
+    const outNow = H.portals().filter(q => q.lit).length;
+    /* A frame with a hole in it must not relight - it should say a block is missing. */
+    const holed = H.tryLight(29, gy - 1 + 1, 30);
+    const holedHint = H.lastHint();
+    /* Put the obsidian back and strike the frame anywhere at all. */
+    H.setBlock(29, gy - 1, 30, ids.OBSIDIAN);
+    const handled = H.tryLight(29, gy - 1, 30);        /* the obsidian itself */
+    const back = H.portals().filter(q => q.lit)[0] || null;
+    const opening = [];
+    for (let x = 29; x <= 30; x++) for (let y = gy; y < gy + 3; y++) {
+      opening.push(H.getBlock(x, y, 30));
+    }
+    return {wanted, outNow, holed, holedHint, handled,
+            dest: back && back.dest, lit: !!back,
+            opening, portalId: ids.PORTAL,
+            districtsBefore, districtsAfter: H.districts().list.length};
+  });
+  check('breaking a block out of the frame puts the portal out',
+        relit.outNow === 0, JSON.stringify(relit));
+  check('a frame with a hole in it does not light, and says a block is missing',
+        relit.holed === true && relit.holedHint &&
+        (relit.holedHint.why === 'gap' || relit.holedHint.why === 'notObsidian'),
+        JSON.stringify(relit.holedHint));
+  check('mending it and striking the obsidian lights it again',
+        relit.handled === true && relit.lit === true &&
+        relit.opening.every(b => b === relit.portalId), JSON.stringify(relit));
+  check('and it leads exactly where it led before, not somewhere new',
+        relit.dest === relit.wanted,
+        `led to ${relit.wanted} before, ${relit.dest} now`);
+  check('so no new place is invented for it',
+        relit.districtsAfter === relit.districtsBefore,
+        `${relit.districtsBefore} districts before, ${relit.districtsAfter} after`);
+  note(`a broken frame lit again still leads to ${relit.dest}`);
+
+  /* And the memory survives being closed and reopened, which is when he would come
+     back to it. */
+  console.log('\n12f. and it still remembers after the game has been closed');
+  const remembered = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    const p = H.portals().filter(q => q.lit)[0];
+    const wanted = p.dest;
+    const key = p.key;
+    H.breakBlock(p.a0, p.y0 - 1, p.fixed);
+    await H.saveResult();
+    return {wanted, key, a0: p.a0, y0: p.y0, fixed: p.fixed,
+            spent: H.spentFrames().length};
+  });
+  await page.reload({waitUntil: 'load'});
+  await page.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready());
+  const mended = await page.evaluate(async w => {
+    const H = window.__henrycraft, ids = H.ids;
+    const kept = H.spentFrames().length;
+    H.setBlock(w.a0, w.y0 - 1, w.fixed, ids.OBSIDIAN);
+    H.tryLight(w.a0, w.y0 - 1, w.fixed);
+    const back = H.portals().filter(q => q.lit)[0] || null;
+    return {kept, dest: back && back.dest, lit: !!back};
+  }, remembered);
+  check('the frame is still remembered after a reload',
+        remembered.spent >= 1 && mended.kept >= 1,
+        JSON.stringify({before: remembered.spent, after: mended.kept}));
+  check('and lighting it then still leads home rather than somewhere new',
+        mended.lit === true && mended.dest === remembered.wanted,
+        `wanted ${remembered.wanted}, got ${mended.dest}`);
+  note(`after a reload a mended frame still leads to ${mended.dest}`);
+
   // ---- 13: storage failures must never be silent ---------------------------
   /* All three of these used to pass quietly and do the wrong thing. A device with
      no room left is the realistic case - a child who has been building for weeks -

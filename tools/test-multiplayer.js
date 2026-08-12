@@ -1379,6 +1379,80 @@ function requireNode22() {
       if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
     }
 
+    /* Breaking the way home, and mending it, while playing together.
+
+       This is what ended their evening: he broke a block out of the return portal in a
+       district they had travelled to and could not get back. Lighting it again has to
+       lead to the same room, not to a new place - and the room has to agree, or the two
+       of them are back to walking into different worlds. */
+    console.log('\nMending a broken way home while playing together');
+    const mc = code();
+    const M1 = await newPlayer('M1');
+    const mend = await M1.evaluate(async c => {
+      const H = window.__henrycraft, ids = H.ids;
+      H.loadThemeSeed('meadow', 616);
+      const gy = H.surfaceY(30, 30);
+      for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++) {
+        for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+      }
+      const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                              fill: ids.SAND});
+      for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++) {
+        if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+      }
+      H.mp.start(c);
+      let until = Date.now() + 25000;
+      while (H.mp.status() !== 'sharing' && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      H.tryLight(b.probe.x, b.probe.y, b.probe.z);
+      until = Date.now() + 20000;
+      while (!H.portals().some(q => q.lit) && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      const out = H.portals().filter(q => q.lit)[0];
+      if (!out) return {error: 'the portal never lit'};
+      const wanted = out.code;
+      await H.travel(out.id);
+      until = Date.now() + 25000;
+      while (H.mp.code() !== wanted && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      await new Promise(r => setTimeout(r, 1500));
+      const home = H.portals().filter(q => q.lit && q.isReturn)[0];
+      if (!home) return {error: 'no way home was built'};
+      const homeCode = home.code;
+      H.breakBlock(home.a0, home.y0 - 1, home.fixed);
+      const stranded = H.portals().filter(q => q.lit).length;
+      H.setBlock(home.a0, home.y0 - 1, home.fixed, ids.OBSIDIAN);
+      H.tryLight(home.a0, home.y0 - 1, home.fixed);
+      until = Date.now() + 20000;
+      while (!H.portals().some(q => q.lit && q.isReturn) && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      const again = H.portals().filter(q => q.lit && q.isReturn)[0] || null;
+      const districts = H.districts().list.length;
+      const went = again ? await H.travel(again.id) : false;
+      until = Date.now() + 25000;
+      while (H.mp.code() !== homeCode && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      return {wanted, homeCode, stranded, relitCode: again && again.code,
+              went, districts, endedAt: H.mp.code(), endedIn: H.districts().code};
+    }, mc);
+    check('breaking the way home puts it out, as it should',
+          mend.stranded === 0, JSON.stringify(mend));
+    check('mending it and striking the obsidian lights it again, bound to the same room',
+          !!mend.relitCode && mend.relitCode === mend.homeCode, JSON.stringify(mend));
+    check('and it takes him home, to the room the others are in',
+          mend.went === true && mend.endedAt === mend.homeCode &&
+          mend.endedIn === mend.homeCode, JSON.stringify(mend));
+    note(`a way home broken and mended still leads to ${mend.homeCode}`);
+    {
+      const pg = pages.find(p => p.label === 'M1');
+      if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+    }
+
     /* A portal that still looks like a portal after coming back.
 
        The frame's filling is an ordinary block and is shared; the portal that replaces

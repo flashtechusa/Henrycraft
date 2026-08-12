@@ -2752,6 +2752,25 @@ function touchesObsidian(x,y,z){
 var lastHint=null;
 function tryLightPortal(x,y,z){
   if(portalCells[keyOf(x,y,z)]) return true;          /* already lit */
+  /* Was this frame a portal before? Then it is that portal again, wherever he strikes
+     it, and whatever the opening happens to be filled with now. Asked before
+     analysePortal, or a refilled frame would be treated as a brand new one and bound
+     somewhere else. */
+  var was=spentFrameAt(x,y,z);
+  if(was && frameRingIntact(was)){ lastHint=null; return relightSpent(was); }
+  if(was){
+    /* The frame he is striking used to be a portal and now has a hole in it. Without
+       this he gets silence: the opening is empty, so there is nothing for analysePortal
+       to look at, and a child taps a doorway that does nothing and has no idea why.
+       Say the thing that is true - a block is missing - and show him which. */
+    var hole=null, ring=portalRing(was);
+    for(var ri=0;ri<ring.length;ri++){
+      if(getBlock(ring[ri].x,ring[ri].y,ring[ri].z)!==OBSIDIAN){ hole=ring[ri]; break; }
+    }
+    lastHint={why:'gap', at:hole};
+    portalHint(lastHint);
+    return true;
+  }
   var r=analysePortal(x,y,z);
   if(r.ok && mp.wanted && mp.portalsShared){
     /* Playing together, and the server can agree on a destination: ask it. Both
@@ -3832,6 +3851,86 @@ function createDistrictRecord(name,themeKey){
 
 function litPortalAt(x,y,z){ return portalCells[keyOf(x,y,z)]||null; }
 
+/* ---- frames that used to be portals ----
+
+   Henry broke a block out of his way home and could not get back. The obsidian was
+   still standing; the game had simply forgotten what the doorway was for, so relighting
+   it would have sent him somewhere new instead - which is worse than not working at all,
+   because it looks like it worked.
+
+   A frame therefore remembers where it went. Strike any part of it with Flint & Steel -
+   the opening or the obsidian, it does not matter which - and it goes back to leading
+   exactly where it led before. No new district, no new place on the server.
+
+   Kept per district and saved with it. Bounded, because a save that grows for ever is a
+   save that eventually fails to write. */
+var SPENT_MAX=32;
+var spentPortals={};
+function rememberSpent(p){
+  var k=portalFrameKey(p);
+  var keys=Object.keys(spentPortals);
+  if(keys.length>=SPENT_MAX && !spentPortals[k]) delete spentPortals[keys[0]];
+  spentPortals[k]={plane:p.plane, fixed:p.fixed, a0:p.a0, a1:p.a1, y0:p.y0, y1:p.y1,
+                   fill:p.fill, w:p.w, h:p.h, isReturn:!!p.isReturn,
+                   dest:p.dest||null, destTheme:p.destTheme||null,
+                   code:p.code||null, destSeed:p.destSeed, destStarSeed:p.destStarSeed};
+}
+/* Any remembered frame this cell belongs to, counting the obsidian as part of it: he
+   aims at whatever he can see, and after the opening is emptied the obsidian is all
+   there is left to aim at. */
+function spentFrameAt(x,y,z){
+  for(var k in spentPortals){
+    var f=spentPortals[k];
+    var hit=portalInterior(f).some(function(c){ return c.x===x&&c.y===y&&c.z===z; }) ||
+            portalRing(f).some(function(c){ return c.x===x&&c.y===y&&c.z===z; });
+    if(hit) return f;
+  }
+  return null;
+}
+function frameRingIntact(f){
+  var ring=portalRing(f);
+  for(var i=0;i<ring.length;i++){
+    if(getBlock(ring[i].x,ring[i].y,ring[i].z)!==OBSIDIAN) return false;
+  }
+  return true;
+}
+/* Light it again, bound where it was bound before. */
+function relightSpent(f){
+  var p={plane:f.plane, fixed:f.fixed, a0:f.a0, a1:f.a1, y0:f.y0, y1:f.y1,
+         fill:f.fill, w:f.w, h:f.h, isReturn:f.isReturn,
+         dest:f.dest, destTheme:f.destTheme||'meadow',
+         code:f.code||null, destSeed:f.destSeed, destStarSeed:f.destStarSeed};
+  if(p.code && mp.wanted && mp.portalsShared){
+    /* Tell the room, naming the destination rather than asking for a new one. */
+    mpRequestPortal(p,{code:p.code, seed:p.destSeed>>>0,
+                       starSeed:(p.destStarSeed===undefined?p.destSeed:p.destStarSeed)>>>0,
+                       theme:p.destTheme}, p.isReturn);
+    return true;
+  }
+  if(mp.wanted && !mp.portalsShared){
+    showHintPicture('notWhileTogether',HINT_WORDS.notWhileTogether);
+    return true;
+  }
+  delete spentPortals[portalFrameKey(p)];
+  var label=p.code?nameForRoom(p.code,p.destTheme):districtName(p.dest);
+  lightItUp(p,p.destTheme,label,false);
+  return true;
+}
+function spentToSave(){
+  var out=[],k;
+  for(k in spentPortals) out.push(spentPortals[k]);
+  return out;
+}
+function spentFromSave(list){
+  spentPortals={};
+  (list||[]).forEach(function(f){
+    if(!f||typeof f.a0!=='number') return;
+    f.plane=f.plane==='z'?'z':'x';
+    f.w=f.a1-f.a0+1; f.h=f.y1-f.y0+1;
+    spentPortals[portalFrameKey(f)]=f;
+  });
+}
+
 /* Which theme a filling means, and a random one if the filling is not on the list.
    Split out because a shared portal needs the answer before it has a destination:
    the theme goes up with the request and comes back in everybody's record, so both
@@ -3912,6 +4011,7 @@ function reindexPortals(){
 function extinguishPortal(p,quiet,fromRoom){
   if(!p.lit) return;
   p.lit=false;
+  rememberSpent(p);        /* so relighting this frame goes back where it went */
   portalInterior(p).forEach(function(c){
     if(getBlock(c.x,c.y,c.z)===PORTAL) setBlock(c.x,c.y,c.z,AIR);
   });
@@ -4620,6 +4720,9 @@ function snapshot(){
     codes:current&&current.codes&&current.codes.length?current.codes.slice():null,
     v:2,                       /* 2 adds portals; v1 records simply have none */
     portals:portalsToSave(),
+    /* Frames that used to be portals, so a broken one can be lit again and still lead
+       where it led. Absent from older records, which reads as none. */
+    spent:spentToSave(),
     created:current&&current.created?current.created:null,
     lastPlayed:null            /* stamped by saveCurrent, which has a clock */
   };
@@ -4699,6 +4802,7 @@ function enterDistrict(rec){
   /* v1 records have no portals field, which reads as an empty list - that is the
      whole migration. */
   portalsFromSave(rec.portals);
+  spentFromSave(rec.spent);
   setFly(false);
   districtIndex.current=rec.slug;
   refreshDistrictHud();
@@ -5548,9 +5652,14 @@ function mpDuplicateLocal(){
 
    PORTAL blocks themselves are still never shared; they are a local consequence of
    a record, and each device fills in its own opening. */
-function mpRequestPortal(p){
+function mpRequestPortal(p,dest,isReturn){
   var want=themeWanted(p);
-  if(!mpSend({type:'portal', frame:portalFrameOf(p), theme:want.theme})){
+  /* A named destination is a doorway that already knows where it goes - the way home
+     built on arrival, or a frame being lit again after being broken. Everything else
+     asks the room to decide. */
+  var msg={type:'portal', frame:portalFrameOf(p), theme:dest?dest.theme:want.theme};
+  if(dest){ msg.dest=dest; msg.isReturn=!!isReturn; }
+  if(!mpSend(msg)){
     /* Not connected this instant. Nothing has been lit and nothing is lost: the
        frame is still standing and striking it again in a moment works. */
     toast('🌀 Waiting for the others - try again in a moment',2600);
@@ -5588,6 +5697,8 @@ function litPortalWithKey(key){
 function mpPortalIn(rec,quiet){
   var f=mpSafePortal(rec);
   if(!f) return null;
+  /* Lit again, so it is no longer a frame that used to be one. */
+  delete spentPortals[portalFrameKey(f)];
   var have=litPortalWithKey(portalFrameKey(f));
   if(have){
     /* Already lit on this device. Take the room's destination anyway: if the two
@@ -6327,6 +6438,7 @@ window.__henrycraft={
   districtByCode:function(c){ var d=districtWithCode(c); return d?d.slug:null; },
   isGeneratedName:isGeneratedName,
   editMap:function(){ return JSON.parse(JSON.stringify(edits)); },
+  spentFrames:function(){ return spentToSave(); },
   /* Put a district into the state that stopped his son travelling: the record knows its
      join code, the index does not. Real histories reach it by having been shared in an
      earlier session, before the index was kept in step. */

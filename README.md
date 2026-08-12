@@ -230,6 +230,21 @@ building becomes somewhere to visit together — with what he built still in it.
 somebody else gets there first with an empty copy, his blocks go up when he follows,
 by the same resync a reconnect uses. Nothing is merged and nothing is lost.
 
+**A broken doorway is still a doorway.** Henry dug a block out of the way home in a
+district he had travelled to and could not get back &mdash; the obsidian was still
+standing, but the game had forgotten what the frame was for, so lighting it again would
+have bound it somewhere new. Which is worse than not working, because it looks like it
+worked.
+
+A frame now remembers where it led. Strike any part of it with Flint & Steel &mdash; the
+opening or the obsidian, it makes no difference &mdash; and it goes back to leading
+exactly where it led before: no new district, no new place on the server, and in a shared
+session the room is told the destination rather than asked for one. If a block really is
+missing it says so, with the picture of a gap, instead of the silence he used to get:
+with the opening emptied there is nothing for the frame checker to look at, so tapping it
+did nothing at all and gave no reason. The memory is saved with the district and survives
+the game being closed, bounded at 32 frames so a save cannot grow for ever.
+
 **A lit portal is never painted over.** The filling a frame is built with is an ordinary
 block and is shared; the portal that replaces it is not, because each device fills its
 own opening in from the record. So the room still remembers sand, or grass, or a rainbow
