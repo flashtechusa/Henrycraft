@@ -539,6 +539,229 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
           JSON.stringify({was: before.pts, now: after.pts}));
     note(`circuit at ${before.cx},${before.cz} reloaded identical`);
 
+    // ---- 8b: driving is not building ----------------------------------------
+    console.log('\n8b. the block cursor is gone while he is driving');
+    const cursor = await page.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('racing', 4242);
+      document.getElementById('playBtn').click();
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      /* What is on the screen, as a player would see it: is the picker showing, and what
+         does the line of key hints say? */
+      const shown = () => ({
+        palette: getComputedStyle(document.getElementById('palette')).display !== 'none',
+        hint: getComputedStyle(document.getElementById('hint')).display !== 'none',
+      });
+      if (H.kart()) H.toggleKart();
+      await frame();
+      const walking = H.aiming();
+      const chromeWalking = shown();
+      /* Dig with the cursor up, to be sure the road is diggable on foot at all - otherwise
+         the check below would pass on a road nothing can touch. */
+      const p = H.player();
+      const under = [Math.floor(p.x), Math.floor(p.y) - 1, Math.floor(p.z)];
+      const wasRoad = H.getBlock(under[0], under[1], under[2]);
+      H.digDown();
+      const dugOnFoot = H.getBlock(under[0], under[1], under[2]) !== wasRoad;
+      H.setBlock(under[0], under[1], under[2], wasRoad);
+
+      H.toggleKart();
+      await frame();
+      const driving = H.aiming();
+      const chromeDriving = shown();
+      /* Every way in: the wireframe box, the ghost block, digging what he is looking at,
+         placing a block, and digging straight down through the floor of the kart. */
+      const before = H.getBlock(under[0], under[1], under[2]);
+      H.digDown(); H.dig(); H.build();
+      const after = H.getBlock(under[0], under[1], under[2]);
+      H.toggleKart();
+      await frame();
+      const backOnFoot = H.aiming();
+      return {walking, driving, backOnFoot, dugOnFoot, dugWhileDriving: before !== after,
+              chrome: {walking: chromeWalking, driving: chromeDriving, back: shown()}};
+    });
+    check('on foot the cursor is there, as it always was',
+          cursor.walking.highlight === true && cursor.walking.canBuild === true,
+          JSON.stringify(cursor.walking));
+    check('and on foot he really can dig the road, so the next check means something',
+          cursor.dugOnFoot === true, JSON.stringify(cursor));
+    check('in the kart the wireframe box and the ghost block are both gone',
+          cursor.driving.highlight === false && cursor.driving.ghost === false,
+          JSON.stringify(cursor.driving));
+    /* Hiding the box while leaving digging on would be worse than leaving the box: an
+       invisible cursor taking a bite out of the road at eleven blocks a second. */
+    check('and nothing can be dug or placed from the driving seat',
+          cursor.driving.aim === false && cursor.driving.target === false &&
+          cursor.dugWhileDriving === false, JSON.stringify(cursor));
+    check('getting out gives the cursor straight back',
+          cursor.backOnFoot.highlight === true && cursor.backOnFoot.canBuild === true,
+          JSON.stringify(cursor.backOnFoot));
+    /* And with it the block picker. A row of blocks that cannot be placed is worse than no
+       row at all, and the key hints list digging, which is half wrong from the seat. */
+    check('the block picker and the key hints go away with the cursor, and come back',
+          cursor.chrome.walking.palette === true && cursor.chrome.driving.palette === false &&
+          cursor.chrome.back.palette === true &&
+          cursor.chrome.walking.hint === true && cursor.chrome.driving.hint === false &&
+          cursor.chrome.back.hint === true, JSON.stringify(cursor.chrome));
+    /* And the lap chips must sit clear of the buttons on the right at every size he might
+       hold the thing at, rather than under the one button he needs while driving. Letting
+       the top row wrap put five chips down the left of a 390-wide phone and across the
+       buttons, which is why they have a row of their own. */
+    const SIZES = [[1440, 900], [1024, 640], [900, 560], [820, 520], [390, 780]];
+    const fits = [];
+    /* In the kart, or there is nothing to measure: the row is properly hidden on foot now,
+       so its rectangle is all zeros and every comparison below quietly reads as a failure.
+       An earlier version of this check measured it on foot and passed - only because the
+       `hide` class had no rule behind it, so the row was on screen the whole time. */
+    await page.evaluate(() => {
+      const H = window.__henrycraft;
+      if (!H.kart()) H.toggleKart();
+    });
+    for (const [w, h] of SIZES) {
+      await page.setViewportSize({width: w, height: h});
+      fits.push(await page.evaluate(async wh => {
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const R = id => {
+          const b = document.getElementById(id).getBoundingClientRect();
+          return {left: Math.round(b.left), right: Math.round(b.right),
+                  top: Math.round(b.top), bottom: Math.round(b.bottom)};
+        };
+        /* The row above it, not the whole corner - the lap row lives inside topLeft now,
+           so measuring against topLeft would be measuring it against itself. */
+        const first = document.querySelector('#topLeft .hudrow').getBoundingClientRect();
+        const race = R('raceRow'), right = R('topRight');
+        return {size: wh, race, first: {bottom: Math.round(first.bottom),
+                                        right: Math.round(first.right)}, right,
+                /* Below the row above it, and finishing before the buttons begin. */
+                below: race.top >= Math.round(first.bottom) - 2,
+                clear: race.right <= right.left,
+                /* Whether the row above it already runs into the buttons. On a narrow
+                   phone it does, and always did - three chips do not fit in 390px beside
+                   four buttons. That is the existing HUD's problem, not the lap clock's,
+                   so the lap row is held to it rather than blamed for it. */
+                topClear: Math.round(first.right) <= right.left,
+                /* And one row, not a column: two chips side by side are ~44px tall. */
+                oneRow: race.bottom - race.top < 60};
+      }, `${w}x${h}`));
+    }
+    await page.setViewportSize({width: 900, height: 560});
+    await page.evaluate(() => {
+      const H = window.__henrycraft;
+      if (H.kart()) H.toggleKart();
+    });
+    /* And the row really is off the screen on foot, which is the other half of it. */
+    const rowOnFoot = await page.evaluate(() =>
+      getComputedStyle(document.getElementById('raceRow')).display === 'none');
+    check('the lap chips are not on screen at all while he is walking',
+          rowOnFoot === true, `raceRow display was not none on foot`);
+    check('the lap chips are one row, under the others, at every size',
+          fits.every(f => f.below && f.oneRow),
+          JSON.stringify(fits.filter(f => !(f.below && f.oneRow))));
+    /* Clear of the buttons wherever the row above it is - so the lap clock never introduces
+       an overlap the HUD did not already have. */
+    check('and clear of the buttons wherever the row above them is',
+          fits.every(f => !f.topClear || f.clear),
+          JSON.stringify(fits.filter(f => f.topClear && !f.clear)));
+    const narrow = fits.filter(f => !f.topClear).map(f => f.size);
+    note(`lap row measured at ${SIZES.map(s => s.join('x')).join(', ')}: one row, below the ` +
+         `others` + (narrow.length
+           ? `; at ${narrow.join(' and ')} the row above it already reaches the buttons, ` +
+             `which it did before there was a lap clock`
+           : `, always left of the buttons`));
+
+    // ---- 8c: timed laps -----------------------------------------------------
+    console.log('\n8c. laps are timed, and the times are honest');
+    const timed = await page.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('racing', 4242);
+      /* The game has to be running, or the chip is never repainted and the text read back
+         is whatever was last written on a lap boundary - which is how the first version of
+         this check managed to pass while reading a stale "0.0s". */
+      document.getElementById('playBtn').click();
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      if (!H.kart()) H.toggleKart();
+      const atStart = H.lapTimes();
+      /* Two laps, driven properly. */
+      H.drive(120, () => H.autoSteer(), () => H.autoThrottle());
+      await frame();
+      const after = H.lapTimes();
+      const laps = H.laps();
+      return {atStart, after, laps, lapLength: H.lapLength()};
+    });
+    check('the clock starts at nothing and runs while he drives',
+          timed.atStart.now === 0 && timed.atStart.last === null &&
+          timed.after.now > 0, JSON.stringify(timed));
+    check(`a completed lap is given a time (${timed.after.last}s)`,
+          timed.laps >= 2 && timed.after.last !== null && timed.after.last > 20 &&
+          timed.after.last < 90, JSON.stringify(timed));
+    /* The best has to be a real lap he did, and never slower than one. */
+    check('and his best is the quickest of them, not the last of them',
+          timed.after.best !== null && timed.after.best <= timed.after.last + 0.001,
+          JSON.stringify(timed.after));
+    check('the clock restarts for the next lap rather than running on',
+          timed.after.now < timed.after.last, JSON.stringify(timed.after));
+    /* And the chip agrees with the clock behind it - which is the part that would break
+       silently if the repaint stopped being called. Within a third of a second rather than
+       exactly: the clock is repainted ten times a second and goes on running afterwards, so
+       insisting on the same digits is insisting on a race being won. */
+    const shownNow = parseFloat(timed.after.shown.now);
+    check('and the chip shows the clock and his best, in seconds he can read',
+          timed.after.shown.hidden === false &&
+          Math.abs(shownNow - timed.after.now) < 0.3 &&
+          timed.after.shown.best === 'best ' + timed.after.best.toFixed(1) + 's',
+          JSON.stringify({shown: timed.after.shown, now: timed.after.now,
+                          last: timed.after.last, best: timed.after.best}));
+    note(`two laps driven: last ${timed.after.last}s, best ${timed.after.best}s, ` +
+         `chip reads "⏱ ${timed.after.shown.now} ${timed.after.shown.best}"`);
+
+    /* A lap he did not drive all of is shown but never becomes his best. Flying is the
+       case that matters: it stays allowed in a kart, because it is how he gets himself out
+       of anywhere, and it is not driving. */
+    const flown = await page.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('racing', 4242);
+      if (!H.kart()) H.toggleKart();
+      H.drive(120, () => H.autoSteer(), () => H.autoThrottle());
+      const honest = H.lapTimes();
+      /* Now fly part of a lap and finish it. */
+      H.setFly(true);
+      H.drive(4, () => H.autoSteer(), () => H.autoThrottle());
+      const midFlight = H.lapTimes();
+      H.setFly(false);
+      H.drive(120, () => H.autoSteer(), () => H.autoThrottle());
+      const afterFlying = H.lapTimes();
+      return {honest, midFlight, afterFlying};
+    });
+    check('flying marks the lap as not driven',
+          flown.midFlight.clean === false, JSON.stringify(flown.midFlight));
+    check('and a lap with flying in it never becomes his best',
+          flown.afterFlying.best === flown.honest.best, JSON.stringify(flown));
+    /* And the clean flag has to recover, or every lap after one flight is untimeable. */
+    check('the lap after that counts again',
+          flown.afterFlying.clean === true, JSON.stringify(flown.afterFlying));
+    note(`best stayed at ${flown.afterFlying.best}s through a flown lap`);
+
+    /* Getting out mid-lap must not leave a half-driven lap looking like a fast one. */
+    const walked = await page.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('racing', 4242);
+      if (!H.kart()) H.toggleKart();
+      H.drive(30, () => H.autoSteer(), () => H.autoThrottle());
+      const part = H.lapTimes();
+      H.toggleKart();                     /* out, halfway round */
+      H.drive(6, () => 0);                /* a walk about, which must not be timed */
+      const onFoot = H.lapTimes();
+      H.toggleKart();                     /* back in */
+      const backIn = H.lapTimes();
+      return {part, onFoot, backIn};
+    });
+    check('the clock does not run while he is out of the kart',
+          walked.onFoot.now === walked.part.now, JSON.stringify(walked));
+    check('and climbing back in starts a fresh lap rather than a fast half of one',
+          walked.backIn.now === 0 && walked.backIn.clean === true,
+          JSON.stringify(walked));
+    note(`out of the kart the clock held at ${walked.onFoot.now}s and restarted at 0`);
+
     // ---- 9: a bigger world, and only where it was asked for -----------------
     console.log('\n9. a racing district is bigger, and nothing else changed size');
     const sizes = await page.evaluate(() => {

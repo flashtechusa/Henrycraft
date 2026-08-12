@@ -125,14 +125,37 @@ about twelve blocks a second against five and a half - but the grass is a reason
 the road rather than a punishment: nothing about being off the track stops him, hurts him
 or takes anything away.
 
+**Driving is not building.** From the driving seat the wireframe box that shows where a
+block would go is gone, and so are the block picker and the keyboard crib &mdash; nothing
+can be dug or placed at all. Hiding the box while leaving digging switched on would have
+been worse than leaving the box: an invisible cursor quietly taking a bite out of the road
+at eleven blocks a second. A row of blocks that does nothing when tapped is the same
+mistake in a different place. It is one predicate, `canBuild()`, read by everything that
+decides what he would act on, so all of it stops together; getting out gives all of it
+straight back.
+
 **The ten stars go round the circuit** rather than being hidden, floating at kart height
 along the racing line, and collecting them is driving through them. The reach grows with
 speed, because at kart pace on a slow tablet a fixed radius can be driven clean through -
 which reads as a broken star rather than a near miss.
 
-**Laps count upwards** on a 🏁 chip at the top, and that is all they do. There is no
-timer, no position, no lap limit and no way to lose; going round the other way simply
-un-does progress rather than taking a lap away. Laps are counted as **distance travelled
+**Laps are counted and timed.** A 🏁 chip counts them upwards and a ⏱ chip beside it shows
+the clock for the lap he is on and the best he has ever done round this circuit &mdash; two
+numbers, on their own row under the rest of the HUD. Finishing a lap says its time out
+loud (*"🏁 Lap 3 &mdash; 48.6s"*, or *"🏆 Best lap!"*), which is when he cares about it, so
+the chip does not carry it as well.
+
+The clock counts driving seconds, not wall-clock ones: pausing, putting the tablet down or
+getting out to look at something does not run it on. Getting out abandons the lap in
+progress rather than pricing it &mdash; the lap counter already restarts from wherever he
+sets off, so climbing back in genuinely starts a fresh one. Flying is still allowed in a
+kart, because it is how he gets himself out of anywhere, but a lap with flying in it is
+shown and never becomes his best: he was not driving it. The best time is saved with the
+district, so it is still there tomorrow.
+
+There is still **no position, no lap limit, no target time and no way to lose.** A slow lap
+is a number and nothing else; the best time only ever moves the way he wants it to. Going
+round the other way un-does progress rather than taking a lap away. Laps are counted as **distance travelled
 along the road**, not by driving over a line and not as an angle about the middle: a line
 can be missed at the edge of the road, and an angle only works on a circle. On a circuit
 that doubles back on itself the angle sweeps forward and backward round the lap, so a lap
@@ -157,12 +180,14 @@ reader's point of view, because the reader is the one who has to reload. It clea
 sharing is switched off rather than latching, which is the mistake the first version of
 the out-of-date banner made.
 
-`node tools/test-racing.js` covers it in 45 checks, and the ones that matter drive rather
+`node tools/test-racing.js` covers it in 60 checks, and the ones that matter drive rather
 than look: a lap and a half on each of twenty seeds, with the real stick input through the
 real physics, timed &mdash; **45 to 53 seconds a lap**, which is the thing he actually
 asked for. It measures the circuit rather than trusting it: every seed's lap length,
 tightest corner, detour count, paved fraction, and the biggest height step anywhere on the
-road, which has to be zero.
+road, which has to be zero. It drives laps to check the clock and the best time behave,
+tries all three ways of digging from the driving seat and finds none of them work, and
+measures the HUD at five window sizes down to a 390-wide phone.
 
 Three bugs it caught are worth writing down, because each was invisible to the check that
 came before it:
@@ -175,11 +200,29 @@ came before it:
   the shape was a ring road round the edge with an empty field inside. Length does not make
   a circuit; the detours pushed through the middle do, so now they are counted and at least
   four are required.
-- **Two of my own checks that measured nothing.** The kerb bar had been relaxed to 70% on
+- **Three of my own checks that measured nothing.** The kerb bar had been relaxed to 70% on
   the strength of a merged corridor the layout no longer produced (it measures 97%, so the
-  bar is 90%), and the "drive off the track" fixture held the stick over for twelve seconds,
+  bar is 90%); the "drive off the track" fixture held the stick over for twelve seconds,
   which drives in circles &mdash; it reported whatever speed the kart happened to stop at
-  and called it the speed of grass.
+  and called it the speed of grass; and the lap-clock check read the chip's text without the
+  game running, so it passed against a stale `0.0s` written on the previous lap boundary.
+
+The lap clock also turned up a bug that had nothing to do with racing. **`hide` did not
+mean hidden**: the stylesheet had rules for `#picker.hide` and `.overlay.hide` and nothing
+else, so every chip carrying the class had been on screen permanently &mdash; the lap
+counter while walking, the kart button in a meadow, and *"who is here: 1"* while playing
+alone, which the comment beside it says explicitly must not happen. It is visible in a
+screenshot he sent me about something else entirely. One rule at the end of the sheet fixes
+it, and `test-game.js` now asserts the class resolves to `display:none` on a bare div and on
+a chip &mdash; a chip sets `display:flex` at the same specificity, so where the rule sits in
+the sheet is the only thing making it work.
+
+Two layouts of the lap chips were wrong before this one, and only measuring found either.
+Letting the top row of the HUD wrap put five chips down the left side of a 390-wide phone as
+a column, across the buttons on the right. Pinning the new row 62px down instead was wrong
+the moment the row above it grew. It is two stacked rows now, measured at five sizes &mdash;
+and where the row above already reaches the buttons on a narrow phone, which it did before
+there was a lap clock, that is reported rather than blamed on the clock.
 
 ## Playing together
 

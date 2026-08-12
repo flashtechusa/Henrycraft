@@ -390,6 +390,43 @@ function slope(pts) {
   check('fire can be dug away again', fire.dug && fire.fireLeft === 0,
         `dug=${fire.dug} fireCount=${fire.fireLeft}`);
 
+  /* `hide` has to mean hidden. There were rules for `#picker.hide` and `.overlay.hide` and
+     nothing else, so every chip carrying the class sat on screen permanently: the lap counter
+     while walking, and "who is here: 1" while playing alone, which the markup next to it says
+     explicitly must not happen. Nothing in the game said so, because nothing asked. Checked
+     on the class in general rather than on those two chips, so whatever is given the class
+     next inherits the answer. */
+  console.log('\n9. hidden means hidden');
+  const hidden = await page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.className = 'hide';
+    probe.textContent = 'x';
+    document.getElementById('ui').appendChild(probe);
+    const generic = getComputedStyle(probe).display;
+    probe.className = 'chip hide';
+    const asChip = getComputedStyle(probe).display;
+    probe.remove();
+    /* And the real ones, in the state where they must not show: alone, on foot, in a
+       district with no circuit in it. */
+    const H = window.__henrycraft;
+    H.loadThemeSeed('meadow', 11);
+    const off = {};
+    ['peopleChip', 'lapChip', 'timeChip', 'kartBtn', 'picker']
+      .forEach(id => { off[id] = getComputedStyle(document.getElementById(id)).display; });
+    return {generic, asChip, off};
+  });
+  check('an element with the hide class is not displayed',
+        hidden.generic === 'none', `display was ${hidden.generic}`);
+  /* A chip sets display:flex with the same specificity, so where the rule sits in the sheet
+     is the only thing making this work - exactly the sort of thing that breaks in silence. */
+  check('and a chip with the hide class is not displayed either',
+        hidden.asChip === 'none', `display was ${hidden.asChip}`);
+  check('nothing that should be out of sight in a plain district is on screen',
+        Object.keys(hidden.off).every(k => hidden.off[k] === 'none'),
+        JSON.stringify(hidden.off));
+  note(`the hide class resolves to display:none on a bare div and on a chip; ` +
+       `${Object.keys(hidden.off).length} chips checked off in a meadow`);
+
   await ctx.close();
 
   // ---- 8: layout at the three required sizes ------------------------------

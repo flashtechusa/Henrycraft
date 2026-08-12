@@ -63,9 +63,28 @@ body>canvas{display:block;position:fixed;inset:0}
   box-shadow:0 4px 0 rgba(0,0,0,.45);display:flex;align-items:center;gap:8px;
 }
 
+/* The lap he just did and his best, beside the running clock. Quieter than the clock on
+   purpose: the big number is the one that is moving, and the two behind it are there to
+   be glanced at rather than read. Hidden when there is nothing in them yet, so the chip
+   starts as just a clock. */
+.chip .dim{font-weight:700;font-size:.82em;opacity:.72;letter-spacing:.02em}
+.chip .dim:empty{display:none}
+
 /* ---------- HUD ---------- */
 #ui{position:fixed;inset:0;z-index:10;pointer-events:none}
-#topLeft{position:absolute;top:calc(env(safe-area-inset-top) + 12px);left:calc(env(safe-area-inset-left) + 12px);display:flex;gap:10px;align-items:center}
+/* Two rows, stacked, rather than one row that wraps.
+
+   Wrapping was the first attempt and it was worse: on a 390-wide phone every chip took a
+   line of its own, so five of them came down the left-hand side as a column and sat across
+   the buttons on the right. Stacking two named rows puts the racing chips under the others
+   at any width, with no offset to guess at - measuring one against a magic 62px was the
+   second attempt, and it was 8px wrong the moment the row above it grew. */
+#topLeft{position:absolute;top:calc(env(safe-area-inset-top) + 12px);left:calc(env(safe-area-inset-left) + 12px);
+  display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.hudrow{display:flex;gap:10px;align-items:center}
+/* Only two small chips, and only while driving - but kept narrow on a phone all the same,
+   where what is left beside the buttons is not much. */
+@media (max-width:480px){ #raceRow .chip{padding:6px 8px;letter-spacing:.02em} }
 #topRight{position:absolute;top:calc(env(safe-area-inset-top) + 12px);right:calc(env(safe-area-inset-right) + 12px);display:flex;gap:8px}
 #topRight .icon{padding:8px 10px;font-size:18px;min-width:44px;justify-content:center}
 #logo{font-size:15px;color:var(--sun);text-shadow:0 2px 0 var(--ink)}
@@ -102,6 +121,9 @@ body>canvas{display:block;position:fixed;inset:0}
 #touchUI{display:none}
 body.touch #touchUI{display:block}
 body.touch #palette{display:none}
+/* Hidden while he is driving - see paintKartButton. Its own class rather than the shared
+   `hide`, so getting out cannot leave either of them hidden by the other rule. */
+#palette.drivinghide,#hint.drivinghide{display:none}
 
 /* touch: one block button at the bottom, full picker only when asked for */
 #blockBtn{display:none}
@@ -437,19 +459,40 @@ body.touch #hint{display:none}
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important;transition:none!important}
 }
+
+/* `hide` means hidden, and until now it did not.
+
+   There were rules for `#picker.hide` and `.overlay.hide` and nothing else, so every chip
+   carrying the class was on screen the whole time: the lap counter while he was walking, and
+   "who is here: 1" while he was playing alone - which the markup beside it says explicitly
+   is not meant to happen. Both have been wrong since they were added, and a screenshot he
+   sent of something else is what showed it.
+
+   Last rule in the sheet on purpose. `.chip` sets display:flex and matches just as
+   specifically, so this has to come after everything it needs to beat. */
+.hide{display:none}
 </style>
 </head>
 <body>
 
 <div id="ui">
   <div id="topLeft">
+   <div class="hudrow">
     <div class="chip" id="logo">HENRY'S BLOCK</div>
     <div class="chip" id="starChip">⭐ <b><span id="starNum">0</span>/<span id="starTot">10</span></b></div>
     <div class="chip" id="districtChip">Home</div>
     <!-- Only there while sharing. Tap it for who. -->
     <button class="chip hide" id="peopleChip" title="Who is here">👥 <b><span id="peopleNum">1</span></b></button>
-    <!-- Only on a circuit, and only while driving. A number that goes up. -->
+   </div>
+   <!-- Both only on a circuit, and only while driving: the lap he is on, the clock for it,
+        and the best he has ever done here. The lap he has just finished is said in the toast
+        at the moment he finishes it, which is when he cares about it, so it is not carried
+        here as well. Nothing about any of it can be failed. -->
+   <div class="hudrow" id="raceRow">
     <div class="chip hide" id="lapChip">🏁 <b><span id="lapNum">1</span></b></div>
+    <div class="chip hide" id="timeChip">⏱ <b><span id="lapNow">0.0s</span></b><span
+         id="lapBest" class="dim"></span></div>
+   </div>
   </div>
 
   <div id="topRight">
@@ -3118,6 +3161,42 @@ function faceOpenGround(){
    by driving through them, and coming last is not a thing that exists. */
 var kartGroup=null, kartWheels=null, lapTotal=0, lapCount=0;
 
+/* Timed laps.
+
+   A clock, a time for the lap he just did, and the best he has ever done here - and
+   nothing else. No target time, no medal, no countdown, nothing that can be failed: a slow
+   lap is just a number, and the best time only ever moves the way he wants it to.
+
+   Counted in driving seconds rather than off the wall clock, so pausing the game, putting
+   the tablet down, or getting out to look at something does not run the clock on. lapClean
+   is what makes a time honest: any lap he did not drive the whole of - because he got out
+   halfway, or because he was put somewhere by a portal - is shown but never becomes his
+   best. bestLap is saved with the district, so it is still there tomorrow. */
+var lapTime=0, lastLap=null, bestLap=null, lapClean=true;
+/* Everything about laps, back to nothing. Called wherever a world is replaced, because a
+   time and a tally that outlive the circuit they were set on are nonsense. bestLap is a
+   property of the district's record, so whoever rebuilds the world puts it back. */
+function resetLaps(){
+  lapCount=0; lapTotal=0; lapIdx=null;
+  lapTime=0; lastLap=null; bestLap=null; lapClean=true;
+}
+function lapClock(t){
+  if(t===null||t===undefined) return '–';
+  var m=Math.floor(t/60), s=t-m*60;
+  return m>0 ? (m+':'+(s<10?'0':'')+s.toFixed(1)) : s.toFixed(1)+'s';
+}
+/* The running clock, ten times a second rather than sixty. It shows one decimal place, so
+   sixty repaints a second would write the same text five times out of six - and the whole
+   point of a chunked mesher is not to hand the browser work it can throw away. */
+var lapPaintAt=0;
+function paintLapClock(now){
+  if(!trackInfo||!player.kart) return;
+  if(now-lapPaintAt<0.1) return;
+  lapPaintAt=now;
+  var e=document.getElementById('lapNow');
+  if(e) e.textContent=lapClock(lapTime);
+}
+
 function buildKart(shirtHex){
   var g=new THREE.Group();
   function box(w,h,d,col,x,y,z){
@@ -3171,6 +3250,10 @@ function toggleKart(){
   player.kart=!player.kart;
   if(player.kart){
     lapIdx=null;                   /* laps are counted from wherever he sets off */
+    /* And timed from there too. Getting out throws away the progress towards a lap - see
+       updateLaps - so climbing back in genuinely does start a fresh one, which is why this
+       can call itself clean without lying. */
+    lapTime=0; lapClean=true;
     sfx('place');
     toast('🏎️ Off you go!',1600);
   } else {
@@ -3187,10 +3270,33 @@ function paintKartButton(){
   b.classList.toggle('hide',!trackInfo);
   b.textContent=player.kart?'🚶':'🏎️';
   b.title=player.kart?'Get out of the kart':'Get in the kart';
+  var driving=!!(trackInfo&&player.kart);
+  /* The row goes as well as the chips in it, or the gap it leaves pushes the top row's
+     shadow about while he is walking. */
+  var row=document.getElementById('raceRow');
+  if(row) row.classList.toggle('hide',!driving);
   var lap=document.getElementById('lapChip');
   if(lap){
-    lap.classList.toggle('hide',!(trackInfo&&player.kart));
+    lap.classList.toggle('hide',!driving);
     document.getElementById('lapNum').textContent=String(lapCount+1);
+  }
+  /* Nothing that offers building while he is driving. The block picker cannot place
+     anything from the driving seat now, and a row of blocks that does nothing when tapped
+     is worse than no row at all - so it goes, and the line of key hints goes with it,
+     because half of what it lists is digging. Both come straight back when he gets out. */
+  var pal=document.getElementById('palette');
+  if(pal) pal.classList.toggle('drivinghide',driving);
+  /* The line of key hints goes too. Half of what it lists is digging, and it sits across
+     the middle of the picture on a short window - which is exactly where the road is when
+     he is driving. It is a keyboard crib for a grown-up and it comes straight back. */
+  var hint=document.getElementById('hint');
+  if(hint) hint.classList.toggle('drivinghide',driving);
+  var tc=document.getElementById('timeChip');
+  if(tc){
+    tc.classList.toggle('hide',!driving);
+    document.getElementById('lapNow').textContent=lapClock(lapTime);
+    document.getElementById('lapBest').textContent=
+      bestLap===null?'':('best '+lapClock(bestLap));
   }
 }
 
@@ -3207,8 +3313,14 @@ function paintKartButton(){
    backwards un-does it rather than taking a lap away, and a jump too big to have been
    driven - being put somewhere by a portal, say - re-anchors instead of counting. */
 var lapIdx=null;
-function updateLaps(){
+function updateLaps(dt){
   if(!trackInfo||!player.kart){ lapIdx=null; return; }
+  /* The clock only runs from the driving seat, which is what the guard above already
+     means - so a lap cannot be padded out by getting out and wandering off. */
+  lapTime+=(dt||0);
+  /* Flying is allowed in a kart and always will be - it is how he gets himself out of
+     anywhere. It just means this lap is not a time: he is not driving it. */
+  if(player.fly) lapClean=false;
   var n=trackInfo.pts.length;
   var near=trackNearest(trackInfo.shape,player.x,player.z);
   if(lapIdx===null){ lapIdx=near.i; lapTotal=0; return; }
@@ -3221,9 +3333,18 @@ function updateLaps(){
   var laps=Math.floor(Math.abs(lapTotal)/n);
   if(laps>lapCount){
     lapCount=laps;
+    lastLap=lapTime;
+    /* Only a lap driven all the way round counts towards his best. */
+    var isBest=lapClean && (bestLap===null||lastLap<bestLap-0.05);
+    if(isBest){ bestLap=lastLap; scheduleSave(); }
+    lapTime=0;
+    lapClean=true;
     sfx('star');
-    toast('🏁 Lap '+(lapCount+1)+'!',2000);
-    burst(new THREE.Vector3(player.x,player.y+1.4,player.z),0xffd94a,22);
+    /* The time is the news, so the time is what the message leads with. A best gets a
+       different word and nothing more - no fanfare he has to sit through. */
+    toast((isBest?'🏆 Best lap! ':'🏁 Lap '+lapCount+' - ')+lapClock(lastLap),2400);
+    burst(new THREE.Vector3(player.x,player.y+1.4,player.z),
+          isBest?0xffd94a:0xffffff,isBest?30:22);
     paintKartButton();
   }
 }
@@ -3450,7 +3571,19 @@ function groundAhead(){
   }
   return null;
 }
-function aim(){ return rayHit()||groundAhead(); }
+/* Driving is not building.
+
+   While he is in a kart there is nothing to dig and nothing to place, and the wireframe
+   box that shows where a block would go is gone with it. He asked for the box to go, and
+   hiding it while leaving digging switched on would be worse than leaving it: an invisible
+   cursor that quietly takes a bite out of the road at 11 blocks a second. Getting out is
+   one button, and everything comes straight back.
+
+   Gated here and in buildTarget rather than inside rayHit, because these two are the
+   "what would I act on" questions - so the highlight, the ghost, digging, building and
+   lighting a portal all stop together, from one answer. */
+function canBuild(){ return !player.kart; }
+function aim(){ return canBuild() ? (rayHit()||groundAhead()) : null; }
 function placeCell(h){
   if(!h) return null;
   var bx=h.x+h.fx, by=h.y+h.fy, bz=h.z+h.fz;
@@ -3464,6 +3597,7 @@ function placeCell(h){
 /* if the block under the crosshair has nowhere to go - it would land inside him,
    or the space is already full - quietly use the ground ahead instead */
 function buildTarget(){
+  if(!canBuild()) return null;
   return placeCell(rayHit()) || placeCell(groundAhead());
 }
 function breakAt(x,y,z){
@@ -3482,6 +3616,7 @@ function dig(){
 }
 /* straight down through his own feet - this is how he gets underground */
 function digDown(){
+  if(!canBuild()) return;                 /* not from the driving seat */
   var x=Math.floor(player.x), z=Math.floor(player.z);
   var y=Math.floor(player.y+0.02)-1;
   while(y>0 && getBlock(x,y,z)===AIR) y--;
@@ -3490,6 +3625,7 @@ function digDown(){
 }
 /* upwards through the ceiling - with FLY, this is how he gets out of anywhere */
 function digUp(){
+  if(!canBuild()) return;                 /* nor from the driving seat */
   var x=Math.floor(player.x), z=Math.floor(player.z);
   var y=Math.floor(player.y+PH+0.05);
   var top=Math.min(WY-1,y+3);
@@ -5523,6 +5659,9 @@ function snapshot(){
     sel:selected,
     code:current&&current.code?current.code:null,
     kart:!!player.kart,
+    /* His best lap round this circuit. Absent from every record written before laps were
+       timed, and from every district that is not a circuit, both of which read as "none". */
+    best:(typeof bestLap==='number')?+bestLap.toFixed(2):null,
     /* Codes this district used to be known by, so a portal bound to an old one still
        finds it after the code was shortened. */
     codes:current&&current.codes&&current.codes.length?current.codes.slice():null,
@@ -5614,7 +5753,10 @@ function enterDistrict(rec){
   /* Karts belong to a circuit. Arriving anywhere else puts him back on his feet, so he
      is never driving a kart across a meadow he cannot get out of. */
   player.kart=!!(trackInfo&&rec.kart);
-  lapCount=0; lapTotal=0; lapIdx=null;
+  /* Lap count starts again on arrival - it is a tally for this visit - but his best time
+     belongs to the circuit, so it comes back out of the record. */
+  resetLaps();
+  bestLap=(trackInfo&&typeof rec.best==='number')?rec.best:null;
   paintKartButton();
   setFly(false);
   districtIndex.current=rec.slug;
@@ -6431,6 +6573,7 @@ function mpAdoptServerCopy(){
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
     placeStars(null); spawnAnimals(); spawnFish(); recountFire();
+    resetLaps();
     portals=[]; reindexPortals();
     /* The room's portals go back on straight away, or a district that was adopted
        comes up with no way out of it. */
@@ -7182,7 +7325,8 @@ function frame(){
     updateAnimals(dt);
     updateFish(dt,now);
     updateStars(dt,now);
-    updateLaps();
+    updateLaps(dt);
+    paintLapClock(now);
     animateFire(dt);
     updatePortals(dt);
     mpUpdate(dt);
@@ -7348,7 +7492,7 @@ window.__henrycraft={
   driveStep:function(dt,steer){
     var wasPlaying=playing; playing=true;
     input.fwd=1; input.strafe=steer||0;
-    updatePlayer(dt); updateLaps();
+    updatePlayer(dt); updateLaps(dt);
     input.fwd=0; input.strafe=0;
     playing=wasPlaying;
   },
@@ -7362,6 +7506,30 @@ window.__henrycraft={
   },
   toggleKart:toggleKart,
   laps:function(){ return lapCount; },
+  /* The clock, the lap he just did, his best here, and whether the lap in progress still
+     counts as driven. */
+  lapTimes:function(){
+    return {now:+lapTime.toFixed(2),
+            last:lastLap===null?null:+lastLap.toFixed(2),
+            best:bestLap===null?null:+bestLap.toFixed(2),
+            clean:lapClean,
+            shown:{now:document.getElementById('lapNow').textContent,
+                   best:document.getElementById('lapBest').textContent,
+                   /* Whether it is actually off the screen, not whether it carries the
+                      class that is supposed to put it there - that class had no rule behind
+                      it at all for a while, and asking about the class could not tell. */
+                   hidden:getComputedStyle(document.getElementById('timeChip'))
+                            .display==='none'}};
+  },
+  /* The three ways a block gets dug or placed, so a test can try all of them from the
+     driving seat and find that none of them does anything. */
+  dig:dig, build:build, digDown:digDown, setFly:setFly,
+  /* Is the game offering to dig or place anything right now? Both halves, because the
+     wireframe box and the ghost block are drawn from different answers. */
+  aiming:function(){
+    return {canBuild:canBuild(), aim:!!aim(), target:!!buildTarget(),
+            highlight:highlight.visible, ghost:ghost.visible};
+  },
   lapLength:function(){ return trackInfo?+trackInfo.length.toFixed(1):0; },
   /* Drive, with the same input the stick fills in and the same updatePlayer that
      collides - so if the track is not actually drivable he does not get round. */
@@ -7375,7 +7543,7 @@ window.__henrycraft={
       input.fwd=throttleFn?throttleFn(i*dt):1;
       input.strafe=steerFn?steerFn(i*dt):0;
       updatePlayer(dt);
-      updateLaps();
+      updateLaps(dt);
       /* Stars are collected in the animation loop, so a drive that does not run this
          collects nothing - which is exactly what the first version of this reported,
          and it was the harness rather than the game. */
@@ -7949,6 +8117,7 @@ window.__henrycraft={
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
     placeStars(null); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
+    resetLaps();
     return {theme:theme.key,seed:seed,waterLevel:WATER_LEVEL};
   },
   /* Is where Henry starts actually dry land he can stand on? */
@@ -7991,6 +8160,7 @@ window.__henrycraft={
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
     placeStars(null); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
+    resetLaps();
     return seed;
   },
   /* Histogram of every block id in the world, plus the lowest and highest y
