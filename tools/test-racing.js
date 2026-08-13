@@ -1192,6 +1192,53 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
          `${effects.out.triple.boost}s, a golden one ${effects.out.golden.boost}s, and a ` +
          `star ${effects.out.star.boost}s plus ${effects.out.star.star}s of fast grass`);
 
+    /* Where a message lands. He drove a lap with his son and told me the power-up messages
+       came up "very large in the middle of the screen and it blocks your view" - which they
+       did: the same 46-pixel toast that is right for a five-year-old pottering about is a
+       blindfold at fifteen blocks a second. */
+    console.log('\n8e2. messages get out of the way while he is driving');
+    const msgs = await page.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.loadThemeSeed('racing', 4242);
+      document.getElementById('playBtn').click();
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      if (H.kart()) H.toggleKart();
+      await frame();
+      H.say('On foot message');
+      await frame();
+      const walking = H.messages();
+      H.toggleKart();
+      await frame();
+      H.say('Driving message');
+      await frame();
+      const driving = H.messages();
+      /* A real item, through the real path, rather than a test poking the toast. */
+      H.giveItemNamed('golden');
+      await frame();
+      const item = H.messages();
+      H.toggleKart();
+      await frame();
+      H.say('Out again');
+      await frame();
+      const back = H.messages();
+      return {walking, driving, item, back};
+    });
+    check('on foot a message is the big one across the middle, as it always was',
+          msgs.walking.big.shown === true && msgs.walking.small.shown === false &&
+          parseFloat(msgs.walking.big.size) >= 26, JSON.stringify(msgs.walking));
+    check('in the kart it is the small one out of the way instead',
+          msgs.driving.small.shown === true && msgs.driving.big.shown === false &&
+          parseFloat(msgs.driving.small.size) <= 16, JSON.stringify(msgs.driving));
+    /* And a power-up says so through the same path, which is the one he complained about. */
+    check('and a power-up goes the same way rather than over the road',
+          msgs.item.small.shown === true && msgs.item.big.shown === false &&
+          /mushroom/i.test(msgs.item.small.text), JSON.stringify(msgs.item));
+    check('getting out puts messages back in the middle',
+          msgs.back.big.shown === true && msgs.back.small.shown === false,
+          JSON.stringify(msgs.back));
+    note(`driving messages are ${msgs.driving.small.size} in a chip under the clock, ` +
+         `against ${msgs.walking.big.size} across the middle on foot`);
+
     // ---- 8f: the book of lap times -------------------------------------------
     console.log('\n8f. every lap he has driven, in a list he can open');
     const book = await page.evaluate(async () => {

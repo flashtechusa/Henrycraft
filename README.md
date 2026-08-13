@@ -245,6 +245,21 @@ with the district, capped at twenty, and still there tomorrow. That answers a qu
 first version couldn't: the running clock told you the lap you were on and the toast told you
 the one you'd just done, but nothing kept the rest.
 
+**Two people see each other driving.** The kart flag travels with the position, so a driver
+is drawn in his own kart, seated, on the other screen. Without it only the position and
+heading ever crossed the wire and the kart was drawn from local state &mdash; so the other
+person saw somebody *sprinting* down the straight at fifteen blocks a second with his legs
+pumping, which is exactly what he reported after an evening of playing it. The kart is built
+per player in their own colour, thrown away when they leave, and it goes the moment they step
+out of it.
+
+**Messages get out of the way while driving.** The big 46-pixel line across the middle of the
+screen is right for a five-year-old pottering about &mdash; it is the whole picture and there
+is nothing to miss behind it. At fifteen blocks a second it is a blindfold: *"Golden
+mushroom!"* over the corner he is trying to take. In a kart every message goes to a small chip
+under the lap clock instead. One function routes them by where he is rather than by what they
+say, so nothing has to remember which to call.
+
 **Racing somebody shows who is in front.** A 🥇/🥈 chip while sharing a circuit, and the
 Playing-together panel becomes a live scoreboard — medals, names, and the lap each driver is
 on, refreshed twice a second while it's open.
@@ -252,7 +267,7 @@ on, refreshed twice a second while it's open.
 Position alone cannot answer "who is in front": it cannot tell the leader from somebody a
 whole lap behind. So the lap number and how far through it now travel with the move message
 and the Worker relays them, clamped server-side so no client can claim to be on lap 900.
-**This needs `npx wrangler deploy`** — until then the game says it does not know rather than
+**Both of these need `npx wrangler deploy`** — until then the game says it does not know rather than
 guessing, and the chip stays hidden. `curl https://sync.henrysgame.com/health` reports
 `standings=1` when it's live. Being shown 1st while losing is exactly the kind of unfairness
 this game does not do, so a missing answer is better than a wrong one.
@@ -287,7 +302,7 @@ reader's point of view, because the reader is the one who has to reload. It clea
 sharing is switched off rather than latching, which is the mistake the first version of
 the out-of-date banner made.
 
-`node tools/test-racing.js` covers it in 101 checks, and the ones that matter drive rather
+`node tools/test-racing.js` covers it in 105 checks, and the ones that matter drive rather
 than look: a lap and a half on each of twenty seeds, with the real stick input through the
 real physics, timed &mdash; **45 to 53 seconds a lap**, which is the thing he actually
 asked for. It measures the circuit rather than trusting it: every seed's lap length,

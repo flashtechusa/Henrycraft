@@ -1161,8 +1161,21 @@ function requireNode22() {
     await waitFor(S2, () => window.__henrycraft.mp.status() === 'sharing');
     const sharedPortal = await waitFor(S2, () =>
       window.__henrycraft.portals().some(q => q.lit && q.code), null, 25000);
+    /* Enough to tell WHY when it does not arrive, rather than only that it did not: which
+       room this device thinks it is in, whether it kept a copy of its own, and what the host
+       was offering at the time. */
+    const portalWhy = await S2.evaluate(() => {
+      const H = window.__henrycraft;
+      return {portals: H.portals(), status: H.mp.status(), code: H.districts().code,
+              slug: H.districts().current, dupReason: H.mp.dupReason(),
+              players: H.mp.players().length};
+    });
+    const hostWhy = await S1.evaluate(() => {
+      const H = window.__henrycraft;
+      return {portals: H.portals(), code: H.districts().code, slug: H.districts().current};
+    });
     check('and the other player sees it standing there, lit',
-          sharedPortal, JSON.stringify(await S2.evaluate(() => window.__henrycraft.portals())));
+          sharedPortal, JSON.stringify({joiner: portalWhy, host: hostWhy}));
 
     /* Both walk through. The world on the far side is his - the diamond has to be
        there when the other player arrives. */
@@ -1641,6 +1654,54 @@ function requireNode22() {
     note(`both drove the same ${raceHost.lap}-block circuit in a ` +
          `${raceHost.dims.WX}-block district, start line at ` +
          `${raceHost.start.x.toFixed(0)},${raceHost.start.z.toFixed(0)}`);
+
+    /* The bug he found by playing: the other person did not see you in a kart at all.
+
+       "it looks like you are running to the other person" - and it did, because the kart is
+       drawn from local state and only the position and heading ever travelled. So a driver
+       appeared on the other tablet as somebody sprinting down the straight at fifteen blocks
+       a second with his legs pumping. The kart flag travels now. */
+    console.log('\nSeeing each other in karts');
+    await R1.evaluate(() => {
+      const H = window.__henrycraft;
+      if (!H.kart()) H.toggleKart();
+      /* Move, so a move message actually goes out - it is only sent when something changed. */
+      H.drive(2, () => H.autoSteer(), () => H.autoThrottle());
+    });
+    const sawKart = await waitFor(R2, () => {
+      const k = window.__henrycraft.remoteKarts();
+      return k.length === 1 && k[0].kart === true && k[0].mesh === true;
+    }, null, 30000);
+    const seenKart = await R2.evaluate(() => window.__henrycraft.remoteKarts());
+    check('the other player is drawn in a kart, not running',
+          sawKart && seenKart[0].kart === true && seenKart[0].mesh === true &&
+          seenKart[0].inScene === true, JSON.stringify(seenKart));
+    /* Sitting in it, rather than mid-stride: the legs are the tell. */
+    check('and sitting in it, with his legs out in front rather than swinging',
+          seenKart[0].legs < -1, JSON.stringify(seenKart));
+    /* And it goes away again when he gets out, or he walks around towing a kart. */
+    await R1.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.toggleKart();
+      H.drive(1.5, () => 0, () => 1);
+      await new Promise(r => setTimeout(r, 400));
+    });
+    const gone = await waitFor(R2, () => {
+      const k = window.__henrycraft.remoteKarts();
+      return k.length === 1 && k[0].kart === false && k[0].mesh === false;
+    }, null, 30000);
+    const afterOut = await R2.evaluate(() => window.__henrycraft.remoteKarts());
+    check('and the kart goes away again when he gets out of it',
+          gone && afterOut[0].kart === false && afterOut[0].mesh === false,
+          JSON.stringify(afterOut));
+    note(`a driver is drawn in his own kart on the other screen, seated, and back on his ` +
+         `feet when he steps out`);
+    /* Back in the kart for the standings checks below. */
+    await R1.evaluate(() => {
+      const H = window.__henrycraft;
+      if (!H.kart()) H.toggleKart();
+      H.drive(1, () => H.autoSteer(), () => H.autoThrottle());
+    });
 
     /* The standings, which is what he asked for: who is in front.
 

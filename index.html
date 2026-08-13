@@ -494,6 +494,25 @@ body.touch #hint{display:none}
 }
 #toast.show{opacity:1}
 
+/* The same messages, said quietly, for somebody who is driving.
+
+   The big one across the middle of the screen is right when he is pottering about: it is
+   the whole picture and there is nothing to miss behind it. At fifteen blocks a second it
+   is a blindfold - "Golden mushroom!" in 46-pixel letters over the corner he is trying to
+   take. So while he is in a kart the message goes to a chip under the lap clock instead,
+   out of the way of the road and in the corner he is already reading. */
+#raceMsg{
+  position:absolute;top:calc(env(safe-area-inset-top) + 112px);
+  left:calc(env(safe-area-inset-left) + 12px);
+  background:var(--panel);border:3px solid var(--ink);border-radius:12px;
+  box-shadow:0 4px 0 rgba(0,0,0,.45);padding:7px 11px;
+  font-size:15px;font-weight:800;letter-spacing:.04em;color:var(--sun);
+  max-width:min(60vw,320px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  opacity:0;pointer-events:none;transition:opacity .2s
+}
+#raceMsg.show{opacity:1}
+@media (max-height:520px){ #raceMsg{top:calc(env(safe-area-inset-top) + 96px);font-size:13px} }
+
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important;transition:none!important}
 }
@@ -576,6 +595,8 @@ body.touch #hint{display:none}
   <div id="portalHelp"><canvas id="portalHelpPic"></canvas><small id="portalHelpWords"></small></div>
   <div id="portalRing"><svg viewBox="0 0 100 100"><circle class="bg" cx="50" cy="50" r="42"></circle><circle class="fg" cx="50" cy="50" r="42"></circle></svg><span>🌀</span></div>
   <div id="toast"></div>
+  <!-- The quiet version of the same thing, for while he is driving. See #raceMsg. -->
+  <div id="raceMsg"></div>
 </div>
 
 <div class="overlay" id="start">
@@ -4530,11 +4551,25 @@ function updateStarHud(){
   el('starTot').textContent=stars.length||STAR_GOAL;
 }
 var toastTimer=null;
+var raceMsgTimer=null;
 function toast(msg,ms){
+  /* Driving: the small chip under the lap clock. Everywhere else: the big one across the
+     middle. One function either way, so nothing has to remember which to call - every
+     message this game already sends is routed by where he is, not by what it says. */
+  if(player.kart && trackInfo){
+    var r=el('raceMsg');
+    r.textContent=msg; r.classList.add('show');
+    clearTimeout(raceMsgTimer);
+    raceMsgTimer=setTimeout(function(){ r.classList.remove('show'); },ms||1150);
+    /* And make sure the big one is not left showing from a moment ago. */
+    el('toast').classList.remove('show');
+    return;
+  }
   var t=el('toast');
   t.textContent=msg; t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer=setTimeout(function(){ t.classList.remove('show'); },ms||1150);
+  el('raceMsg').classList.remove('show');
 }
 function buildPalette(){
   var hosts=[el('palette'),el('pickerGrid')];
@@ -7375,6 +7410,7 @@ function mpAddPlayer(p){
   mp.players[p.id]={id:p.id, label:label, colour:mpSafeColour(p.colour), look:look,
                     lookIndex:idx, guessed:!told,
                     group:built.group, parts:built.parts,
+                    kart:false, kartMesh:null, wheels:null,
                     from:null, to:null, t:1, walk:0, speed:0};
   mpRefreshStale();
 }
@@ -7408,6 +7444,16 @@ function mpRemovePlayer(id){
   var p=mp.players[id];
   if(!p) return;
   scene.remove(p.group);
+  /* Their kart is built for them and belongs to them, so it is thrown away with them.
+     Somebody joining and leaving all afternoon would otherwise leave a kart's worth of
+     geometry on the graphics card every time. */
+  if(p.kartMesh){
+    p.kartMesh.traverse(function(o){
+      if(o.geometry) o.geometry.dispose();
+      if(o.material) o.material.dispose();
+    });
+    p.kartMesh=null; p.wheels=null;
+  }
   delete mp.players[id];
   mpRefreshStale();          /* they took their old game home with them */
 }
@@ -7435,6 +7481,37 @@ function mpMoved(m){
   if(Number.isFinite(m.lap)&&Number.isFinite(m.prog)){
     p.lap=Math.max(0,Math.floor(m.lap));
     p.prog=Math.max(0,Math.min(1,m.prog));
+  }
+  mpSetKart(p,m.kart===true);
+}
+
+/* Put a kart under a remote player, or take it away again.
+
+   The kart is built on demand rather than with the avatar: most players are not in one, and
+   a district that is not a circuit never has one at all. It is the same buildKart the local
+   one uses, painted in their own colour, so what the other screen shows is what he is
+   actually driving. */
+function mpSetKart(p,on){
+  if(on===!!p.kart) return;
+  p.kart=on;
+  if(on){
+    if(!p.kartMesh){
+      /* buildKart hands back {group, wheels}, and the group goes under theirs as a child -
+         so it inherits their position and their heading for nothing, and the interpolation
+         that already smooths their movement smooths the kart with it. */
+      var built=buildKart(p.look?p.look.shirt:0xffffff);
+      p.kartMesh=built.group;
+      p.wheels=built.wheels;
+      p.group.add(p.kartMesh);
+    }
+    p.kartMesh.visible=true;
+    /* Sitting in it: legs out in front, hands on the wheel. The same pose Henry gets, so a
+       kart looks like a kart from either seat. */
+    p.parts.armL.rotation.z=0; p.parts.armR.rotation.z=0;
+    p.parts.armL.rotation.x=-1.15; p.parts.armR.rotation.x=-1.15;
+    p.parts.legL.rotation.x=-1.25; p.parts.legR.rotation.x=-1.25;
+  } else if(p.kartMesh){
+    p.kartMesh.visible=false;
   }
 }
 
@@ -7486,6 +7563,10 @@ function mpUpdate(dt){
         m.lap=lapCount;
         m.prog=+lapProgress().toFixed(4);
       }
+      /* And whether he is in a kart, so the other screens draw one under him. Without it he
+         appeared on his son's tablet sprinting down the straight at fifteen blocks a second,
+         which is what it looks like when the pose is the only thing that travels. */
+      if(player.kart) m.kart=true;
       if(mpSend(m)) mp.last=now;
     }
     /* Block edits go out in bounded batches: lighting a 21x21 portal touches 441
@@ -7519,7 +7600,15 @@ function mpStepAvatars(dt){
     while(d<-Math.PI) d+=Math.PI*2;
     p.yawNow=a.yaw+d*k;
     p.group.rotation.y=p.yawNow+Math.PI;
-    /* the same walk swing Henry has, driven by how fast they are actually moving */
+    /* Sitting still in the kart, or the walk swing - never both. Leaving the swing running
+       under a seated pose is what made a driver look like he was running: legs pumping at
+       kart speed, which is the fastest anything in this game moves. */
+    if(p.kart){
+      if(p.wheels){
+        for(var w=0;w<p.wheels.length;w++) p.wheels[w].rotation.x-=p.speed*dt*3.2;
+      }
+      continue;
+    }
     var amp=Math.min(1,p.speed/4.6);
     p.walk+=p.speed*dt*2.3;
     var sw=Math.sin(p.walk*3.4)*0.85*amp;
@@ -8134,6 +8223,29 @@ window.__henrycraft={
     });
   },
   itemHeld:function(){ return itemHeld; },
+  /* What the other players look like from here: are they drawn in a kart, and is their
+     kart actually in the scene? */
+  remoteKarts:function(){
+    var out=[];
+    for(var id in mp.players){
+      var p=mp.players[id];
+      out.push({id:id, kart:!!p.kart,
+                mesh:!!(p.kartMesh&&p.kartMesh.visible),
+                inScene:!!(p.kartMesh&&p.kartMesh.parent===p.group),
+                legs:+p.parts.legL.rotation.x.toFixed(2),
+                speed:+p.speed.toFixed(2)});
+    }
+    return out;
+  },
+  /* Which message box a toast lands in, and what it says. */
+  messages:function(){
+    var big=document.getElementById('toast'), small=document.getElementById('raceMsg');
+    return {big:{shown:big.classList.contains('show'), text:big.textContent,
+                 size:getComputedStyle(big).fontSize},
+            small:{shown:small.classList.contains('show'), text:small.textContent,
+                   size:getComputedStyle(small).fontSize}};
+  },
+  say:function(msg){ toast(msg,4000); },
   itemsTaken:function(){ return itemsTaken; },
   /* Every lap he has driven here, and what the panel that lists them shows. */
   lapLog:function(){ return lapLog.map(function(l){ return {t:l.t, clean:l.clean}; }); },

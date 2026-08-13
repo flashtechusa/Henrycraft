@@ -148,7 +148,7 @@ export default {
          character 0 - which is Henry, so a room of four looks like four Henrys.
          `curl https://sync.henrysgame.com/health` tells you which one is deployed. */
       return new Response('ok look=1 characters=' + CHARACTER_NAMES.length +
-                          ' portals=1 standings=1',
+                          ' portals=1 standings=1 karts=1',
                           {headers: {'content-type': 'text/plain'}});
     }
 
@@ -346,9 +346,12 @@ export class District {
       const lapRaw = num(msg.lap), progRaw = num(msg.prog);
       const lap = lapRaw === null ? null : Math.max(0, Math.min(999, Math.floor(lapRaw)));
       const prog = progRaw === null ? null : Math.max(0, Math.min(1, progRaw));
+      // Whether they are in a kart, so the other screens draw them driving one rather than
+      // sprinting along the track at fifteen blocks a second. A flag and nothing else.
+      const kart = msg.kart === true;
       // Advisory only. Broadcast for drawing and for the standings; never applied to
       // anyone's physics, so a remote player cannot push, trap or move anybody.
-      this.broadcast({type: 'moved', id: att.id, x, y, z, yaw: yaw ?? 0, lap, prog}, ws);
+      this.broadcast({type: 'moved', id: att.id, x, y, z, yaw: yaw ?? 0, lap, prog, kart}, ws);
       return;
     }
 
