@@ -6604,6 +6604,11 @@ var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
         reunion:false, pongs:0, attempts:0, heard:0, dupReason:null, openTimer:null,
         /* blocks the room sent that this world has no room for - see mpApply */
         outside:0,
+        /* Asking the room again what doorways it has, and how many turned up that way.
+           lateportals above zero means the welcome did not deliver them and the second
+           chance did - which is a bug worth seeing rather than a success worth hiding, so
+           the tests watch it. */
+        askedPortals:0, latePortals:0, portalAsk:null,
         /* Portals across a shared session. `portalsShared` is what the server told
            us it can do; `switching` and `arriving` mark the one arrival that keeps
            the session rather than ending it; `pendingReturn` is a way home waiting
@@ -6757,6 +6762,8 @@ function mpStop(quiet){
   /* Reset with the rest of it. A count that survives being switched off is a banner that
      never goes away, which is the mistake the stale flag made the first time round. */
   mp.outside=0;
+  mp.askedPortals=0; mp.latePortals=0;
+  if(mp.portalAsk){ clearTimeout(mp.portalAsk); mp.portalAsk=null; }
   mp.reunion=false;
   mp.portalsShared=false;
   mp.arriving=false;
@@ -6976,6 +6983,15 @@ function mpMessage(raw){
   if(m.type==='full'){ mpFull(); return; }
   if(m.type==='welcome'){ mpWelcome(m); return; }
   if(m.type==='joined'){ mpAddPlayer(m.player); mpPaintPanel(); return; }
+  if(m.type==='portalsAll'){
+    /* The answer to "tell me again". Counted, because needing to ask means the welcome did
+       not do its job and that is something to find out about rather than paper over. */
+    var before=portals.filter(function(q){ return q.lit&&q.code; }).length;
+    mpPortalsIn(m.portals);
+    var after=portals.filter(function(q){ return q.lit&&q.code; }).length;
+    mp.latePortals+=Math.max(0,after-before);
+    return;
+  }
   if(m.type==='left'){ mpRemovePlayer(m.id); mpPaintPanel(); return; }
   mp.heard=Date.now();          /* proof the socket is alive, whatever this was */
   if(m.type==='pong'){ mp.pongs++; return; }
@@ -7006,6 +7022,7 @@ function mpWelcome(w){
     if(!settled) return;               /* he is being asked whose copy wins */
     mpAdoptRoomName(w.name);
     mpPortalsIn(w.portals);
+    mpAskPortalsLater();
     mpFlushPendingReturn();
     /* Everything already standing here becomes something they can walk through
        together. Idempotent: a portal that already has a code is left alone, so a
@@ -7249,6 +7266,31 @@ function mpPortalIn(rec,quiet){
   return p;
 }
 /* The whole set, as handed over in a welcome. */
+/* A moment after settling into a room, ask the room what doorways it has.
+
+   The welcome carries the list and normally that is that. But it is carried once, and there
+   was no way to ask again: a client that ended up without it stayed without it until it left
+   the room and came back. One player unable to see a portal that everybody else can see is
+   the shape of thing that ruins an evening, and it is not worth being clever about - the
+   question costs one small message and is asked exactly once a session.
+
+   Asked every time rather than only when holding none, because "none" is not the only way to
+   be wrong: a client can hold one of the room's three and never know about the other two, and
+   an unconditional question covers that for the same one message.
+
+   Deliberately not silent: latePortals counts the doorways that were NEW when the answer came
+   back, so it stays at zero in a healthy session even though the question is always asked -
+   and the tests insist on that. A self-healing mechanism that hides the fault it is
+   healing is how a bug lives for a year. */
+function mpAskPortalsLater(){
+  if(mp.portalAsk) return;
+  mp.portalAsk=setTimeout(function(){
+    mp.portalAsk=null;
+    if(mp.status!=='sharing') return;
+    mp.askedPortals++;
+    mpSend({type:'portals'});
+  },3000);
+}
 function mpPortalsIn(list){
   if(!Array.isArray(list)) return;
   var seen={};
@@ -8837,6 +8879,9 @@ window.__henrycraft={
     staleWho:function(){ return mp.staleWho; },
     /* How many blocks the room sent that this world had no room for. */
     outside:function(){ return mp.outside; },
+  /* How often this device had to ask the room again for its doorways, and how many turned
+     up that way. Both should be zero in a healthy session. */
+  portalAsks:function(){ return {asked:mp.askedPortals, late:mp.latePortals}; },
     /* Feed one edit in as though the room had sent it, so a test can present a block from
        a world bigger than this one without needing a second build to send it. */
     feedEdit:function(x,y,z,b){ mpApply(x,y,z,b); },

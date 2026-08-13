@@ -148,7 +148,7 @@ export default {
          character 0 - which is Henry, so a room of four looks like four Henrys.
          `curl https://sync.henrysgame.com/health` tells you which one is deployed. */
       return new Response('ok look=1 characters=' + CHARACTER_NAMES.length +
-                          ' portals=1 standings=1 karts=1',
+                          ' portals=1 standings=1 karts=1 reask=1',
                           {headers: {'content-type': 'text/plain'}});
     }
 
@@ -364,6 +364,22 @@ export class District {
       this.edits.set(k, b);                     // last write wins, as specified
       this.schedulePersist();
       this.broadcast({type: 'edited', x, y, z, block: b, by: att.id}, ws);
+      return;
+    }
+
+    /* "Tell me again what doorways this room has."
+
+       The welcome already carries them, and this is the second chance. There was no second
+       chance before: the list went out once, and a client that ended up without it - for any
+       reason at all - had no way to ask, so the doorway stayed invisible to that player until
+       they left the room and came back. One player being unable to see a portal everybody
+       else can see is exactly the shape of thing that ruins an evening.
+
+       Answered to the asker alone, and it is only ever a read. */
+    if (msg.type === 'portals') {
+      try {
+        ws.send(JSON.stringify({type: 'portalsAll', portals: [...this.portals.values()]}));
+      } catch (e) {}
       return;
     }
 

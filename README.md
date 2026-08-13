@@ -293,6 +293,27 @@ theme travels with the join &mdash; there is a test that puts two players on one
 and checks they get the same 607-block lap, the same start line, and blocks built out past
 where the old 64-block world ended.
 
+**A room's doorways can be asked for twice.** The list of portals rides in the welcome, and
+it used to ride there exactly once &mdash; a client that ended up without it had no way to
+ask, so the doorway stayed invisible to that player until they left the room and came back.
+One player unable to see a portal everybody else can see is the shape of thing that ruins an
+evening. Three seconds after settling into a room the game now asks the room what it has,
+every time, and takes whatever it did not already have.
+
+The asking is deliberately not silent. It counts what turns up that way, and the tests
+insist that number stays **zero** in the ordinary case &mdash; because a self-healing
+mechanism that hides the fault it is healing is how a bug lives for a year. There is a test
+that strips the portal list out of the welcome on the way in, exactly as if it had never
+arrived, and checks the game notices and asks.
+
+That went in while chasing an intermittent failure I have seen three times: the joining
+player receives no portals at all. I have not root-caused it, and I am not claiming the
+second chance is the fix &mdash; it is the thing that means Henry can still walk through the
+door while I find out. Two theories were tested and killed on the way: that the Worker's
+one-second write debounce was losing portal records (a portal survives the Worker being
+`SIGKILL`ed 150ms after it is minted), and that the joiner never connected at all (that was
+my own reproducer inventing invalid join codes, which the Worker refuses with a 400).
+
 The one way that could go wrong is one device running an older game: same seed, same
 theme, a smaller world, and blocks arriving with coordinates it has no room for. Dropping
 those in silence is exactly how *"I could see him but he could not see me"* happens, so

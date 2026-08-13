@@ -1150,6 +1150,77 @@ function requireNode22() {
           solo.atHome === solo.home && solo.built !== solo.home,
           JSON.stringify(solo));
 
+    /* The second chance, proved by taking the first one away.
+
+       The room's list of doorways rides in the welcome, and it used to ride there once: a
+       client that ended up without it had no way to ask, and the portal stayed invisible to
+       that player until they left the room and came back. This drops the list out of the
+       welcome on the way in - the same as it never arriving - and checks the game notices it
+       is holding none and asks. */
+    {
+      const D1 = await newPlayer('D1');
+      const D2 = await newPlayer('D2');
+      const cD = code();
+      await D1.evaluate(async c => {
+        const H = window.__henrycraft, ids = H.ids;
+        H.loadThemeSeed('meadow', 4141);
+        const gy = H.surfaceY(30, 30);
+        for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++)
+          for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+        const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                                fill: ids.SNOW});
+        for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++)
+          if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+        await H.light(b.probe.x, b.probe.y, b.probe.z);
+        H.mp.start(c);
+      }, cD);
+      await waitFor(D1, () => window.__henrycraft.portals().some(q => q.lit && q.code),
+                    null, 25000);
+      /* Cut the portal list out of the welcome before the game sees it. */
+      await D2.evaluate(() => {
+        const orig = WebSocket.prototype.addEventListener;
+        window.__droppedWelcomePortals = 0;
+        const D = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'data');
+        Object.defineProperty(MessageEvent.prototype, 'data', {
+          configurable: true,
+          get() {
+            const raw = D.get.call(this);
+            if (typeof raw !== 'string' || raw.indexOf('"welcome"') < 0) return raw;
+            try {
+              const m = JSON.parse(raw);
+              if (m.type === 'welcome' && m.portals && m.portals.length) {
+                window.__droppedWelcomePortals += m.portals.length;
+                m.portals = [];
+                return JSON.stringify(m);
+              }
+            } catch (_) {}
+            return raw;
+          },
+        });
+        void orig;
+      });
+      await D2.evaluate(c => window.__henrycraft.mp.join(c), cD);
+      const asked = await waitFor(D2, () => {
+        const H = window.__henrycraft;
+        return H.portals().some(q => q.lit && q.code);
+      }, null, 30000);
+      const how = await D2.evaluate(() => ({
+        dropped: window.__droppedWelcomePortals,
+        asks: window.__henrycraft.mp.portalAsks(),
+        portals: window.__henrycraft.portals().filter(q => q.lit && q.code).length,
+      }));
+      check('a welcome that loses the portal list is not the end of it',
+            asked && how.dropped > 0 && how.portals > 0, JSON.stringify(how));
+      check('the game asks the room again and the doorway turns up',
+            how.asks.asked === 1 && how.asks.late > 0, JSON.stringify(how));
+      note(`the welcome was stripped of ${how.dropped} portal(s) and the game asked for ` +
+           `them: ${how.asks.late} arrived the second way`);
+      for (const label of ['D1', 'D2']) {
+        const pg = pages.find(p => p.label === label);
+        if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
+      }
+    }
+
     /* Now somebody joins him. */
     await S1.evaluate(c => window.__henrycraft.mp.start(c), cS);
     await waitFor(S1, () => window.__henrycraft.mp.status() === 'sharing');
@@ -1176,6 +1247,18 @@ function requireNode22() {
     });
     check('and the other player sees it standing there, lit',
           sharedPortal, JSON.stringify({joiner: portalWhy, host: hostWhy}));
+    /* And it arrived in the welcome, first time, without the second chance being needed.
+
+       This is the check that keeps the self-healing honest. The room's doorways can now be
+       asked for again if a client ends up without them, which is right for him - a portal
+       that quietly starts working three seconds later is far better than one that never
+       does - but it would also hide the fault that made it necessary. If this ever fails
+       while the check above passes, the welcome path is broken and the fallback is carrying
+       it, which is exactly what I want to be told. */
+    const askedAtAll = await S2.evaluate(() => window.__henrycraft.mp.portalAsks());
+    check('and it came in the welcome, with nothing new turning up on the second ask',
+          askedAtAll.late === 0,
+          JSON.stringify({asks: askedAtAll, joiner: portalWhy}));
 
     /* Both walk through. The world on the far side is his - the diamond has to be
        there when the other player arrives. */
