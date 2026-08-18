@@ -359,9 +359,17 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
         nudge.destTheme === 'desert', String(nudge.destTheme));
   note(`finished-frame prompt: "${nudge.finished.words}"`);
 
-  // the wiring, not just the function: placing a block has to call it
+  /* The wiring, not just the function: placing a block has to call it.
+
+     Read to the end of build() rather than a fixed number of characters into it.
+     It used to take the first 900, which was enough until build() grew two lines
+     at the top for turning furniture - and then this failed with the call still
+     sitting there, four lines below the window. A magic length that happens to
+     reach far enough today is not a measurement. */
   const src = await page.evaluate(() => fetch(location.pathname).then(r => r.text()));
-  const buildFn = src.slice(src.indexOf('function build(){'), src.indexOf('function build(){') + 900);
+  const from = src.indexOf('function build(){');
+  const end = src.indexOf('\n}', from);
+  const buildFn = src.slice(from, end < 0 ? from + 2000 : end);
   check('placing a block actually runs that check',
         /maybePromptToLight\(c\.x,c\.y,c\.z\)/.test(buildFn),
         buildFn.slice(0, 200));

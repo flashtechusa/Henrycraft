@@ -323,12 +323,12 @@ function slope(pts) {
     }
     H.selectBlock(ids.BED);
 
-    // yaw 0 looks along +Z here: forward is (sin yaw, cos yaw)
-    out.placed = [[0, '+Z', [0, 1]], [Math.PI / 2, '+X', [1, 0]],
-                  [Math.PI, '-Z', [0, -1]], [-Math.PI / 2, '-X', [-1, 0]]]
+    // forward is (-sin yaw, -cos yaw), the same as rayHit: yaw 0 looks along -Z
+    out.placed = [[0, '-Z', [0, -1]], [Math.PI / 2, '-X', [-1, 0]],
+                  [Math.PI, '+Z', [0, 1]], [-Math.PI / 2, '+X', [1, 0]]]
       .map(([ang, label, want], i) => {
         const x = 26 + i * 4, z = 30;
-        H.movePlayer(x + 0.5, gy + 0.05, z - 2.5);
+        H.movePlayer(x + 0.5 - want[0] * 2.5, gy + 0.05, z + 0.5 - want[1] * 2.5);
         H.setYaw(ang);
         H.placeBed({x, y: gy, z});
         const head = [[1, 0], [-1, 0], [0, 1], [0, -1]]
@@ -441,8 +441,8 @@ function slope(pts) {
     /* A chair should end up looking at him, so a chair pushed against a wall has
        its back to the wall. Placed through the same call build() uses. */
     H.selectBlock(ids.CHAIR);
-    out.chairs = [[0, '+Z', [0, -1]], [Math.PI / 2, '+X', [-1, 0]],
-                  [Math.PI, '-Z', [0, 1]], [-Math.PI / 2, '-X', [1, 0]]]
+    out.chairs = [[0, 'he looks -Z', [0, 1]], [Math.PI / 2, 'he looks -X', [1, 0]],
+                  [Math.PI, 'he looks +Z', [0, -1]], [-Math.PI / 2, 'he looks +X', [-1, 0]]]
       .map(([ang, looking, want], i) => {
         const x = 24 + i * 3, z = 30;
         H.setYaw(ang);
@@ -548,7 +548,7 @@ function slope(pts) {
        spun round into the room. */
     for (let x = 28; x <= 36; x++) for (let y = gy; y < gy + 4; y++) H.setBlock(x, y, 30, ids.BRICK);
     H.movePlayer(32.5, gy + 0.05, 34.5);
-    H.setYaw(Math.PI);                            // looking along -Z, at the wall
+    H.setYaw(0);                                  // looking along -Z, at the wall
     H.placeBed({x: 32, y: gy, z: 31});            // the floor cell beside it
     out.flatWall = {head: H.getBlock(32, gy, 31) === ids.BEDHEAD,
                     foot: H.getBlock(32, gy, 32) === ids.BED,
@@ -560,7 +560,7 @@ function slope(pts) {
     for (let x = 40; x <= 46; x++) for (let y = gy; y < gy + 4; y++) H.setBlock(x, y, 40, ids.BRICK);
     for (let z = 40; z <= 46; z++) for (let y = gy; y < gy + 4; y++) H.setBlock(40, y, z, ids.BRICK);
     H.movePlayer(43.5, gy + 0.05, 43.5);
-    H.setYaw(Math.PI);
+    H.setYaw(0);                                  // looking along -Z, into the corner
     H.placeBed({x: 41, y: gy, z: 41});
     const cornerHead = H.getBlock(41, gy, 41) === ids.BEDHEAD ? [41, 41]
                      : (H.getBlock(41, gy, 41) === ids.BED ? headOf(41, 41) : null);
@@ -580,7 +580,7 @@ function slope(pts) {
 
     /* And in the open, with no wall anywhere, it still lies away from him. */
     H.movePlayer(50.5, gy + 0.05, 52.5);
-    H.setYaw(Math.PI);
+    H.setYaw(0);                                  // looking along -Z
     H.placeBed({x: 50, y: gy, z: 51});
     out.open = {foot: H.getBlock(50, gy, 51) === ids.BED, head: headOf(50, 51)};
     wipe(50, 51);
@@ -608,6 +608,42 @@ function slope(pts) {
     H.setBlock(46, gy, 54, ids.RUG);
     out.notTurned = {table: H.turnFurniture(46, gy, 50), brick: H.turnFurniture(46, gy, 52),
                      rug: H.turnFurniture(46, gy, 54), air: H.turnFurniture(46, gy + 3, 50)};
+
+    /* The same bed whichever way he faces. Two arrangements lay the right way and
+       scored the same, so the tie fell whichever way the candidate list happened to
+       be built: looking along +X or +Z left the bed where he pointed, and along -X
+       or -Z shifted it one cell back over the ground he was standing on. */
+    out.sameEitherWay = [[0, '-Z', [0, -1]], [Math.PI / 2, '-X', [-1, 0]],
+                         [Math.PI, '+Z', [0, 1]], [-Math.PI / 2, '+X', [1, 0]]]
+      .map(([ang, label, look], i) => {
+        const x = 24 + i * 4, z = 58;
+        // stand two and a half blocks back along the way he is looking
+        H.movePlayer(x + 0.5 - look[0] * 2.5, gy + 0.05, z + 0.5 - look[1] * 2.5);
+        H.setYaw(ang);
+        H.placeBed({x, y: gy, z});
+        return {label, footAtAimed: H.getBlock(x, gy, z) === ids.BED,
+                head: headOf(x, z)};
+      });
+
+    /* Something put on a rug should stand on the floor he pointed at, not a block
+       above it. A rug is a sixteenth of a block thick, so "on top of it" used to
+       mean the cell above - a table hovering with daylight under its legs. */
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++)
+      H.setBlock(36 + dx, gy, 48 + dz, ids.RUG);
+    H.movePlayer(36.5, gy + 0.05, 51.5);
+    H.setYaw(0);                                  // looking along -Z, at the carpet
+    H.setPitch(-0.55);
+    H.selectBlock(ids.TABLE);
+    H.build();
+    let carpetLeft = 0, tableCell = null;
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      if (H.getBlock(36 + dx, gy, 48 + dz) === ids.RUG) carpetLeft++;
+      if (H.getBlock(36 + dx, gy, 48 + dz) === ids.TABLE) tableCell = [36 + dx, 48 + dz];
+    }
+    let floating = false;
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++)
+      if (H.getBlock(36 + dx, gy + 1, 48 + dz) === ids.TABLE) floating = true;
+    out.onRug = {inRugCell: !!tableCell, tableCell, floating, carpetLeft};
     return out;
   });
   check('a bed built at a wall puts its head in the cell beside it, headboard to the wall',
@@ -625,6 +661,14 @@ function slope(pts) {
   check('turning a bed moves the head and leaves the foot where it is',
         walls.turnBed.footStayed && walls.turnBed.oldHeadGone && !!walls.turnBed.newHead,
         JSON.stringify(walls.turnBed));
+  check('the same bed however he is facing: the cell he pointed at is the foot',
+        walls.sameEitherWay.every(t => t.footAtAimed),
+        JSON.stringify(walls.sameEitherWay));
+  check('a table goes on the rug he pointed at, not a block above it',
+        walls.onRug.inRugCell && !walls.onRug.floating,
+        JSON.stringify(walls.onRug));
+  check('and the rest of the carpet is still there',
+        walls.onRug.carpetLeft === 8, `${walls.onRug.carpetLeft} of 8 squares left`);
   check('a table, a brick, a rug and thin air do not turn',
         !walls.notTurned.table && !walls.notTurned.brick &&
         !walls.notTurned.rug && !walls.notTurned.air,
@@ -647,8 +691,8 @@ function slope(pts) {
     /* Every family turns to face him, and every family is four different ids. */
     out.families = ['tv', 'bath', 'sink', 'toilet', 'chair'].map(key => {
       const ids4 = H.FAMILY[key];
-      const placed = [[0, [0, -1]], [Math.PI / 2, [-1, 0]],
-                      [Math.PI, [0, 1]], [-Math.PI / 2, [1, 0]]]
+      const placed = [[0, [0, 1]], [Math.PI / 2, [1, 0]],
+                      [Math.PI, [0, -1]], [-Math.PI / 2, [-1, 0]]]
         .map(([ang, want], i) => {
           H.setYaw(ang);
           const id = H.facingId(ids4[0]);

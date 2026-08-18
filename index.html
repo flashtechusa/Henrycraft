@@ -4761,12 +4761,23 @@ function groundAhead(){
    lighting a portal all stop together, from one answer. */
 function canBuild(){ return !player.kart; }
 function aim(){ return canBuild() ? (rayHit()||groundAhead()) : null; }
+/* Is this something a new block simply goes into, rather than beside? Water always
+   was. A rug is the other one: it is a sixteenth of a block lying on the floor, and
+   putting a table "on" it used to mean the cell above - so the table floated a whole
+   block up with daylight under its legs, which is what he saw. Building into the
+   rug's own cell puts the table on the floor where he pointed, and costs that one
+   square of carpet, which the table is standing on anyway. */
+function replaceable(id){
+  return id===AIR || id===WATER || !!(DEFS[id] && DEFS[id].walkThrough);
+}
 function placeCell(h){
   if(!h) return null;
-  var bx=h.x+h.fx, by=h.y+h.fy, bz=h.z+h.fz;
+  var bx,by,bz;
+  if(replaceable(h.block) && h.block!==AIR){ bx=h.x; by=h.y; bz=h.z; }
+  else { bx=h.x+h.fx; by=h.y+h.fy; bz=h.z+h.fz; }
   if(!inside(bx,by,bz)) return null;
   var cur=getBlock(bx,by,bz);
-  if(cur!==AIR && cur!==WATER) return null;
+  if(!replaceable(cur)) return null;
   var px0=player.x-PW, px1=player.x+PW, pz0=player.z-PW, pz1=player.z+PW;
   if(bx+1>px0 && bx<px1 && bz+1>pz0 && bz<pz1 && by+1>player.y && by<player.y+PH) return null;
   return {x:bx,y:by,z:bz};
@@ -4782,9 +4793,17 @@ function buildTarget(){
    built facing a wall ends up with its headboard against the wall. If that space is
    taken the other three directions are tried in turn, and if none of them is free he
    is told - rather than left with half a bed and no way to finish it. */
-/* Whichever of the four directions he is most nearly looking along. */
+/* Whichever of the four directions he is most nearly looking along.
+
+   Forward is MINUS sin and MINUS cos of yaw, which is what rayHit and groundAhead
+   have always used. faceOpenGround uses plus - but it is asking where there is room
+   *behind* him for the trailing camera to sit, which is the opposite question, and
+   I read it as the convention. With the sign the wrong way round every one of these
+   pointed backwards: a bed's headboard went to the wall behind him, and a chair
+   turned its back on him. The tests agreed, because I wrote them from the same
+   misreading. */
 function lookDir(){
-  var fx=Math.sin(yaw), fz=Math.cos(yaw);
+  var fx=-Math.sin(yaw), fz=-Math.cos(yaw);
   return Math.abs(fx)>Math.abs(fz) ? [fx>0?1:-1,0] : [0,fz>0?1:-1];
 }
 /* Where a bed can go, best first.
@@ -4818,6 +4837,13 @@ function bedPlacements(c){
     p.score = (!inside(bx,p.y,bz) || isSolid(bx,p.y,bz)) ? 8 : 0;
     if(p.dir[0]===look[0] && p.dir[1]===look[1]) p.score+=3;
     else if(p.dir[0]===-look[0] && p.dir[1]===-look[1]) p.score+=1;
+    /* and it grows away from him from the cell he pointed at, rather than backwards
+       over the ground he is standing on. Without this, two arrangements lying the
+       right way scored the same and the tie fell whichever way the candidate list
+       happened to be built - which put the bed one cell nearer him when he looked
+       along -X or -Z, and left it where he pointed when he looked along +X or +Z.
+       The same bed, built two different ways, depending on which way he faced. */
+    if(p.foot.x===c.x && p.foot.z===c.z) p.score+=1;
   });
   out.sort(function(a,b){ return b.score-a.score; });
   return out;
@@ -4837,8 +4863,7 @@ function facingId(id){
    placeCell asks about the first cell, asked again about the second. */
 function cellFree(bx,by,bz){
   if(!inside(bx,by,bz)) return false;
-  var cur=getBlock(bx,by,bz);
-  if(cur!==AIR && cur!==WATER) return false;
+  if(!replaceable(getBlock(bx,by,bz))) return false;
   var px0=player.x-PW, px1=player.x+PW, pz0=player.z-PW, pz1=player.z+PW;
   return !(bx+1>px0 && bx<px1 && bz+1>pz0 && bz<pz1 && by+1>player.y && by<player.y+PH);
 }
