@@ -2158,6 +2158,16 @@ function requireNode22() {
           /look=1/.test(worker.health) && /characters=14/.test(worker.health),
           worker.health);
 
+    /* And which build it is. The deploy workflow passes the pushed SHA in with
+       `--var COMMIT:...` and then refuses to call the deploy done until
+       sync.henrysgame.com reports that exact commit back - a stale Worker answers
+       "ok" just as cheerfully as a new one. Nothing sets COMMIT under `wrangler
+       dev`, so here it has to read `dev`: this is the check that the fallback
+       exists at all, which is what stops a local run from being mistaken for a
+       deployed one. */
+    check('/health names the build it came from', /\bcommit=dev\b/.test(worker.health),
+          worker.health);
+
     check('no page errors in any client', errs.length === 0, errs.slice(0, 3).join(' | '));
   } finally {
     for (const p of pages) { try { await p.ctx.close(); } catch (_) {} }

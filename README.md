@@ -267,9 +267,10 @@ on, refreshed twice a second while it's open.
 Position alone cannot answer "who is in front": it cannot tell the leader from somebody a
 whole lap behind. So the lap number and how far through it now travel with the move message
 and the Worker relays them, clamped server-side so no client can claim to be on lap 900.
-**Both of these need `npx wrangler deploy`** — until then the game says it does not know rather than
-guessing, and the chip stays hidden. `curl https://sync.henrysgame.com/health` reports
-`standings=1` when it's live. Being shown 1st while losing is exactly the kind of unfairness
+**Both of these need the Worker deployed** — which now happens on its own when `server/`
+changes on `main` (see *Deploying the server*). Until it is, the game says it does not know
+rather than guessing, and the chip stays hidden. `curl https://sync.henrysgame.com/health`
+reports `standings=1` when it's live. Being shown 1st while losing is exactly the kind of unfairness
 this game does not do, so a missing answer is better than a wrong one.
 
 The standings also feed the item weighting, which now measures "behind" in whole laps rather
@@ -605,8 +606,35 @@ case — an out-of-date server — is covered in full by 12c and 12d.
 ### Deploying the server
 
 The sync server is a Cloudflare Worker with one Durable Object per district, in
-`server/`. It is not deployed automatically and no account id or token is stored
-in this repository.
+`server/`. **It deploys itself** from `.github/workflows/deploy-worker.yml` on any
+push to `main` that touches `server/`, and no account id or token is stored in this
+repository &mdash; the workflow reads two GitHub secrets.
+
+On a push rather than on a timer: a timer would redeploy identical code all week
+and still be hours late on the one push that mattered. The path filter is the
+point of it &mdash; a change to `index.html` alone never restarts the live server,
+so a room of people playing is left alone.
+
+The workflow runs `tools/test-multiplayer.js` against the build **before**
+deploying it, and afterwards refuses to call the deploy done until
+`sync.henrysgame.com` reports back the exact commit that was pushed. A stale
+Worker answers `ok` just as cheerfully as a new one, so "it responded" is not
+proof; `commit=` is.
+
+**One-time setup.** In Cloudflare, *My Profile &rarr; API Tokens &rarr; Create Token*,
+from the **Edit Cloudflare Workers** template. Then in GitHub, *Settings &rarr;
+Secrets and variables &rarr; Actions &rarr; New repository secret*, twice:
+
+| secret | where it comes from |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | the token you just created |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard &rarr; Workers &amp; Pages, in the right-hand sidebar |
+
+If either is missing the workflow stops on its first step and says which one, rather
+than failing somewhere inside wrangler. Neither value is ever printed in the log.
+
+**By hand**, if you ever want to, or to publish the very first version before the
+secrets exist:
 
 ```
 cd server
@@ -615,7 +643,9 @@ npx wrangler login     # opens a browser once
 npx wrangler deploy
 ```
 
-That publishes to `sync.henrysgame.com` and creates the DNS record for it. The
+A hand deploy reports `commit=dev`, because only the workflow knows the SHA.
+
+Either way it publishes to `sync.henrysgame.com` and creates the DNS record. The
 free plan covers a family many times over: 100,000 requests a day, incoming
 WebSocket messages billed at 20:1, outgoing free.
 
@@ -629,14 +659,21 @@ exactly that.
 curl https://sync.henrysgame.com/health
 ```
 
-`ok look=1 characters=14 portals=1` is current. Anything shorter is an older Worker,
-and each missing marker costs a feature:
+Current is `ok look=1 characters=14 portals=1 standings=1 karts=1 reask=1` followed by
+`commit=` and the SHA it was built from (`commit=dev` after a hand deploy). Anything
+shorter is an older Worker, and each missing marker costs a feature:
 
-| `/health` says | what is missing | what you see |
-| --- | --- | --- |
-| `ok look=1 characters=14 portals=1` | nothing | everything works |
-| `ok look=1 characters=14` | `portals=1` | portals refuse during shared play, with a picture saying why |
-| `ok` | both | strangers with strangers' names, and no shared portals |
+| missing from `/health` | what you see |
+| --- | --- |
+| `karts=1` | somebody driving looks like they are running alongside you |
+| `standings=1` | no positions while racing together |
+| `reask=1` | a shared portal occasionally never turns up for the person joining |
+| `portals=1` | portals refuse during shared play, with a picture saying why |
+| `characters=14` | strangers with strangers' names |
+
+To see whether a particular change is live, compare the `commit=` to the SHA of the
+commit you expect &mdash; the deploy workflow does exactly that before it will go
+green.
 
 Plain `ok` is an older Worker that drops the
 character number, and the symptom is subtle rather than obvious: every player gets
@@ -645,7 +682,8 @@ a room of four looked like four Henrys. The game now falls back to the shirt col
 instead, keeps people distinct, and says so in the Playing-together panel with a red
 banner naming the fix. If somebody appears as a stranger with a stranger's name
 &mdash; *Silver Otter* instead of *Dad* &mdash; that banner is the whole answer.
-**Redeploy after any change under `server/`.**
+Any change under `server/` redeploys itself on push, so this table is a diagnosis
+tool for a deploy that failed rather than a chore to remember.
 
 The banner distinguishes two cases, and getting that wrong wasted a trip to the
 command line. A current server always sends a character number and advertises it by

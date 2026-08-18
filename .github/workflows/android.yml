@@ -16,7 +16,9 @@ on:
       - 'tools/test-racing.js'
       - 'tools/test-offline.js'
       - 'tools/test-multiplayer.js'
-      - 'server/**'
+      # Not 'server/**'. deploy-worker.yml runs the multiplayer suite as its
+      # deploy gate, and a Worker change cannot alter the APK, so listing it here
+      # only ran the same twenty minutes of tests twice on the same commit.
       - '.github/workflows/android.yml'
   # Publishing a Release triggers a build too. GitHub applies the paths filter
   # above to tag pushes as well, so a v* tag on a commit that touched nothing in

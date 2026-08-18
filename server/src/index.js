@@ -147,8 +147,14 @@ export default {
          an older one drops the character number, and every player is drawn as
          character 0 - which is Henry, so a room of four looks like four Henrys.
          `curl https://sync.henrysgame.com/health` tells you which one is deployed. */
+      /* And which commit it was built from. The deploy workflow passes the pushed
+         SHA in with `--var COMMIT:...`, so this answers "did my change actually go
+         live" with a yes or a no rather than "something is up". `dev` is what you
+         see under `wrangler dev`, where there is no commit to name. */
+      const commit = typeof env.COMMIT === 'string' && env.COMMIT ? env.COMMIT : 'dev';
       return new Response('ok look=1 characters=' + CHARACTER_NAMES.length +
-                          ' portals=1 standings=1 karts=1 reask=1',
+                          ' portals=1 standings=1 karts=1 reask=1' +
+                          ' commit=' + commit.slice(0, 40),
                           {headers: {'content-type': 'text/plain'}});
     }
 

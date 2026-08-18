@@ -1,0 +1,116 @@
+name: Deploy the sync Worker
+
+# Deploys server/ to sync.henrysgame.com so nobody has to remember to.
+#
+# On a push, not on a timer. A timer would redeploy identical code all week and
+# still be hours late on the one push that mattered; this fires when the Worker
+# actually changes and is done in about a minute. The path filter is the whole
+# point - a change to index.html alone never touches the live server, which is
+# what keeps a room of people playing from being restarted for no reason.
+#
+# Run workflow (workflow_dispatch) is there for the times you want to push the
+# same code out again by hand.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'server/**'
+      - '.github/workflows/deploy-worker.yml'
+  workflow_dispatch:
+
+# Two pushes in quick succession must not race each other onto the same Worker.
+# The later one waits and then wins; it never cancels the one already deploying,
+# because a half-applied Durable Object migration is not something to interrupt.
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # 22, not 20: wrangler refuses to start on anything below v22, and the
+      # multiplayer tests' raw socket clients use the global WebSocket, which
+      # Node 20 only has behind a flag.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install the Worker's dependencies
+        working-directory: server
+        run: npm ci
+
+      # Fail here, with a sentence you can act on, rather than three steps later
+      # inside wrangler's own error. Neither value is ever printed.
+      - name: Check the Cloudflare credentials are present
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${CLOUDFLARE_API_TOKEN:-}" ]  || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing - add them under Settings > Secrets and variables > Actions. See the Deploying the Worker section of README.md."
+            exit 1
+          fi
+          echo "both secrets are set"
+
+      - name: Install Playwright with Chromium
+        run: npm install --no-save playwright@1.56.1 && npx playwright install --with-deps chromium
+
+      # The gate. These run the real Worker under `wrangler dev`, so what is
+      # tested is the code about to be deployed. Deploying a Worker that has not
+      # passed them is worse than not deploying at all: the game in his hands
+      # keeps working with the old one.
+      - name: Run the multiplayer tests against this build
+        run: |
+          set +e
+          node tools/test-multiplayer.js | tee /tmp/mp.txt
+          rc=${PIPESTATUS[0]}
+          { echo '## Multiplayer tests (deploy gate)'; echo ''; echo '```'; cat /tmp/mp.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Deploy to sync.henrysgame.com
+        working-directory: server
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        # The commit goes in as a plain var so /health can name it below. There is
+        # no [vars] block in wrangler.toml, so this adds one rather than replacing
+        # anything.
+        run: npx wrangler deploy --var COMMIT:"${GITHUB_SHA}"
+
+      # Proof, not optimism. A stale Worker also answers "ok", so the check is
+      # that /health names the commit that was just pushed. Cloudflare takes a few
+      # seconds to swap it over, hence the retries.
+      - name: Check the new Worker is the one answering
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          for attempt in $(seq 1 12); do
+            body="$(curl -fsS --max-time 10 https://sync.henrysgame.com/health || true)"
+            echo "attempt $attempt: ${body:-<no answer>}"
+            case "$body" in
+              *"commit=$SHA"*)
+                { echo '## Deployed'; echo ''; echo '```'; echo "$body"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+                echo "sync.henrysgame.com is serving $SHA"
+                exit 0
+                ;;
+            esac
+            sleep 10
+          done
+          echo "::error::sync.henrysgame.com never reported commit=$SHA after two minutes. Last answer: ${body:-<no answer>}"
+          { echo '## Deploy did not take'; echo ''; echo '```'; echo "expected commit=$SHA"; echo "last answer: ${body:-<no answer>}"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
