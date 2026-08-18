@@ -722,7 +722,8 @@ body.touch #hint{display:none}
     <div class="pickhead">Furniture for a house</div>
     <canvas id="ideasFurn"></canvas>
     <small>Tap the block button, then <b>For a house</b>. A bed takes two blocks and
-      lies the way you are looking; two side by side make a double.</small>
+      puts its headboard against the wall. Press <b>BUILD</b> on a bed or a chair to
+      turn it round.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -854,7 +855,16 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
        the four by where he is looking. */
     TABLE=38,
     CHAIR=39,CHAIR1=40,CHAIR2=41,CHAIR3=42,
-    LAMP=43,RUG=44;
+    LAMP=43,RUG=44,
+    /* A television and a bathroom. All four of these have a front, so all four cost
+       a set of ids. Written out longhand rather than counted out by a loop: these
+       numbers are the save format, and a loop makes it far too easy to insert one
+       in the middle and quietly renumber everything after it. */
+    TV=45,TV1=46,TV2=47,TV3=48,
+    BATH=49,BATH1=50,BATH2=51,BATH3=52,
+    SINK=53,SINK1=54,SINK2=55,SINK3=56,
+    TOILET=57,TOILET1=58,TOILET2=59,TOILET3=60,
+    TILES=61;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -937,9 +947,19 @@ DEFS[RUG]      ={name:'Rug',     tiles:[49,49,49], prop:'rug', walkThrough:true}
    gets in. `family` names the set: it is what keeps three of them out of the picker
    and what tells the "every block has its own side tile" check that four chairs
    sharing one picture is the point rather than a slip. */
-FAMILY.chair=[CHAIR,CHAIR1,CHAIR2,CHAIR3];
-FAMILY.chair.forEach(function(id,dir){
-  DEFS[id]={name:'Chair', tiles:[47,45,51], prop:'chair', family:'chair', dir:dir};
+DEFS[TILES]    ={name:'Tiles',   tiles:[57,57,57]};
+/* Everything with a front, one set of four ids each. The `tiles` on each is the
+   picture in the drawer, which is why all four of a set share it. */
+[[ 'chair',  [CHAIR,CHAIR1,CHAIR2,CHAIR3],     'Chair',  [47,45,51]],
+ [ 'tv',     [TV,TV1,TV2,TV3],                 'TV',     [53,53,58]],
+ [ 'bath',   [BATH,BATH1,BATH2,BATH3],         'Bath',   [55,55,59]],
+ [ 'sink',   [SINK,SINK1,SINK2,SINK3],         'Sink',   [55,55,60]],
+ [ 'toilet', [TOILET,TOILET1,TOILET2,TOILET3], 'Toilet', [55,55,61]]
+].forEach(function(f){
+  FAMILY[f[0]]=f[1];
+  f[1].forEach(function(id,dir){
+    DEFS[id]={name:f[2], tiles:f[3], prop:f[0], family:f[0], dir:dir};
+  });
 });
 
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
@@ -947,7 +967,7 @@ var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,R
 /* The second drawer. Everything that furnishes a building rather than makes one
    goes here, so the row of blocks along the bottom stops growing every time he
    asks for something. */
-var FURNITURE=[FURNACE,BED,TABLE,CHAIR,LAMP,RUG];
+var FURNITURE=[FURNACE,BED,TABLE,CHAIR,LAMP,RUG,TV,BATH,SINK,TOILET,TILES];
 /* What the palette and the picker both show, one group at a time. Icons carry
    the meaning - he cannot read the labels yet. */
 var GROUPS=[{key:'blocks',    label:'Blocks',    icon:'🧱', ids:PALETTE},
@@ -1543,6 +1563,72 @@ function buildAtlas(){
     x.fillStyle='#8a6a47'; x.fillRect(7,8,2,6);
     x.fillStyle='#6e5336'; x.fillRect(5,14,6,2);
   });
+  /* 53 dark plastic - the television's case and stand, and the taps */
+  tile(53,function(x,r){
+    fill(x,'#33363d'); speck(x,r,['#2c2f35','#3c4048'],40);
+    x.fillStyle='#44484f'; x.fillRect(0,0,16,1);
+  });
+  /* 54 the screen - repainted on a timer by animateFire(); this is frame 0 */
+  tile(54,function(x,r){ drawTV(x,0); });
+  /* 55 porcelain - the bath, the sink and the toilet */
+  tile(55,function(x,r){
+    fill(x,'#f4f6f7'); speck(x,r,['#e9edef','#ffffff'],40);
+    x.fillStyle='#dde3e6'; x.fillRect(0,15,16,1);
+  });
+  /* 56 clean water, sitting still. Not the sea tile: that one is see-through and
+     animated, and a bath is neither. */
+  tile(56,function(x,r){
+    fill(x,'#79c6e8'); speck(x,r,['#6ab8dc','#8ed4f2'],40);
+    x.fillStyle='#a8ddf4'; x.fillRect(2,3,5,1); x.fillRect(9,9,4,1);
+  });
+  /* 57 bathroom tiles - a whole block of them, for the floor and the walls */
+  tile(57,function(x,r){
+    fill(x,'#dfe7ea');
+    x.fillStyle='#f4f8f9';
+    for(var a=0;a<16;a+=8) for(var b=0;b<16;b+=8) x.fillRect(a,b,7,7);
+    x.fillStyle='#c3ced3';
+    for(var i=0;i<16;i+=8){ x.fillRect(i+7,0,1,16); x.fillRect(0,i+7,16,1); }
+  });
+  /* 58-61: the drawer pictures for the four things with a front. Each is that
+     thing seen from the side, because none of their boxes is a whole cell wide and
+     no single face of one says what it is. */
+  /* 58 a television */
+  tile(58,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#33363d'; x.fillRect(1,2,14,10);
+    x.fillStyle='#4aa3ff'; x.fillRect(3,4,10,6);
+    x.fillStyle='#ffd447'; x.fillRect(5,5,3,3);
+    x.fillStyle='#5fd36a'; x.fillRect(9,7,3,2);
+    x.fillStyle='#33363d'; x.fillRect(7,12,2,2); x.fillRect(5,14,6,1);
+  });
+  /* 59 a bath */
+  tile(59,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#f4f6f7'; x.fillRect(1,5,14,8);
+    x.fillStyle='#79c6e8'; x.fillRect(3,7,10,4);
+    x.fillStyle='#dde3e6'; x.fillRect(1,12,14,1);
+    x.fillStyle='#33363d'; x.fillRect(13,3,2,2);
+    x.fillStyle='#f4f6f7'; x.fillRect(2,13,2,2); x.fillRect(12,13,2,2);
+  });
+  /* 60 a sink */
+  tile(60,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#f4f6f7'; x.fillRect(2,5,12,4);
+    x.fillStyle='#79c6e8'; x.fillRect(4,5,8,2);
+    x.fillStyle='#f4f6f7'; x.fillRect(6,9,4,6);
+    x.fillStyle='#dde3e6'; x.fillRect(5,15,6,1);
+    x.fillStyle='#33363d'; x.fillRect(7,2,2,3); x.fillRect(7,2,4,1);
+  });
+  /* 61 a toilet */
+  tile(61,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#f4f6f7'; x.fillRect(1,2,4,9);
+    x.fillStyle='#f4f6f7'; x.fillRect(5,6,9,4);
+    x.fillStyle='#79c6e8'; x.fillRect(7,6,5,1);
+    x.fillStyle='#dde3e6'; x.fillRect(5,6,9,1);
+    x.fillStyle='#f4f6f7'; x.fillRect(6,10,6,5);
+    x.fillStyle='#dde3e6'; x.fillRect(5,15,8,1);
+  });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
     fill(x,'#e6dcc2');
@@ -1616,6 +1702,26 @@ function drawFurnace(x,frame){
   for(var e=0;e<3;e++) x.fillRect(4+((f()*8)|0),13,1,1);
   x.fillStyle='#fff3bd';
   if(frame&1) x.fillRect(4+((f()*8)|0),6+((f()*3)|0),1,1);
+}
+
+/* What is on the television. Deliberately abstract: bands of colour sliding
+   across with a shape bouncing over them. There is nothing to read, nothing that
+   could startle him, and nothing that ever stops or goes wrong - which rules out
+   the obvious idea of showing something recognisable. */
+function drawTV(x,frame){
+  var cols=['#4aa3ff','#5fd36a','#ffd447','#ff7a59','#b98cff'];
+  for(var i=0;i<16;i++){
+    x.fillStyle=cols[(((i+frame*2)>>1)%cols.length+cols.length)%cols.length];
+    x.fillRect(0,i,16,1);
+  }
+  var bx=2+(((Math.sin(frame*0.8)*0.5+0.5)*9)|0);
+  var by=3+(((Math.cos(frame*0.6)*0.5+0.5)*8)|0);
+  x.fillStyle='#ffffff'; x.fillRect(bx,by,5,5);
+  x.fillStyle='#2b2b31'; x.fillRect(bx+1,by+1,1,1); x.fillRect(bx+3,by+1,1,1);
+  x.fillStyle='#ff7a59'; x.fillRect(bx+1,by+3,3,1);
+  /* faint scanlines, drifting, so it reads as a screen rather than a poster */
+  x.fillStyle='rgba(0,0,0,.13)';
+  for(var s=frame%3;s<16;s+=3) x.fillRect(0,s,16,1);
 }
 
 /* Portal shimmer. White-ish on purpose: the per-portal colour comes from the
@@ -2367,7 +2473,22 @@ var matGlow=new THREE.MeshBasicMaterial({map:atlasTex,vertexColors:true});
    256x256, so a re-upload at this rate costs nothing, and it avoids having to
    re-mesh chunks to swap UVs between frames. Skipped entirely when there is no
    fire in the world, which is the normal case. */
-var fireFrame=0, fireClock=0, fireCount=0, furnaceCount=0, furnaceFrame=0;
+/* Everything in the world that moves without anything being re-meshed. Each entry
+   is one tile of the atlas, repainted in place with the texture re-flagged; no
+   geometry is touched and no UVs are swapped. `every` is how many ticks it waits
+   between pictures, so a stove burns calmer than an open fire and a television
+   changes calmer still - a bedroom with all three in it should not flicker.
+
+   `n` is how many of that thing are in the world, kept straight by setBlock, so a
+   district with no fire and no television in it does no work at all. */
+var ANIM=[
+  {ids:[FIRE],    tile:23, every:1, frame:0, n:0, draw:function(x,f){ drawFire(x,f); }},
+  {ids:[FURNACE], tile:40, every:2, frame:0, n:0, draw:function(x,f){ drawFurnace(x,f); }},
+  {ids:FAMILY.tv, tile:54, every:3, frame:0, n:0, draw:function(x,f){ drawTV(x,f); }}
+];
+var ANIM_BY_ID={};
+ANIM.forEach(function(a){ a.ids.forEach(function(id){ ANIM_BY_ID[id]=a; }); });
+var fireClock=0, animTick=0;
 /* Repaint one tile of the atlas in place, in the same 16x16 coordinates the tile
    was originally drawn in. Lifted out of animateFire when the furnace became the
    second thing that moves. */
@@ -2381,29 +2502,31 @@ function repaintTile(c,i,fn){
   c.restore();
 }
 function animateFire(dt){
-  if(fireCount<=0 && furnaceCount<=0) return;
+  var live=false, i;
+  for(i=0;i<ANIM.length;i++) if(ANIM[i].n>0){ live=true; break; }
+  if(!live) return;
   fireClock+=dt;
-  if(fireClock<0.11) return;                 /* ~9 flickers a second */
+  if(fireClock<0.11) return;                 /* ~9 ticks a second */
   fireClock=0;
-  fireFrame=(fireFrame+1)&7;
-  var c=atlasCanvas.getContext('2d');
-  if(fireCount>0)    repaintTile(c,23,function(x){ drawFire(x,fireFrame); });
-  /* The furnace burns at half the rate of an open flame - a stove in a bedroom
-     should not be the busiest thing on screen. Its own counter rather than a slice
-     of the fire's, so it still gets all eight frames, just half as often; taking
-     every other bit of fireFrame would have given it four pictures and a visible
-     repeat. The tile is only touched on the ticks that change it. */
-  if(furnaceCount>0 && !(fireFrame&1)){
-    furnaceFrame=(furnaceFrame+1)&7;
-    repaintTile(c,40,function(x){ drawFurnace(x,furnaceFrame); });
+  animTick++;
+  var c=atlasCanvas.getContext('2d'), painted=false;
+  for(i=0;i<ANIM.length;i++){
+    var a=ANIM[i];
+    /* Each keeps its own eight-frame counter rather than taking every other bit of
+       a shared one, which would have given the slower ones four pictures and a
+       visible repeat. Nothing is repainted on the ticks it would not change on. */
+    if(a.n<=0 || (animTick % a.every)) continue;
+    a.frame=(a.frame+1)&7;
+    repaintTile(c,a.tile,(function(e){ return function(x){ e.draw(x,e.frame); }; })(a));
+    painted=true;
   }
-  atlasTex.needsUpdate=true;
+  if(painted) atlasTex.needsUpdate=true;
 }
 function recountFire(){
-  fireCount=0; furnaceCount=0;
+  ANIM.forEach(function(a){ a.n=0; });
   for(var i=0;i<blocks.length;i++){
-    if(blocks[i]===FIRE) fireCount++;
-    else if(blocks[i]===FURNACE) furnaceCount++;
+    var a=ANIM_BY_ID[blocks[i]];
+    if(a) a.n++;
   }
 }
 
@@ -2549,6 +2672,7 @@ var PAD=0.03;
    is not. */
 var BED_WOOD=45, BED_SHEET=44, BED_BLANKET=43, BED_PILLOW=46;
 var PALE_WOOD=47, LAMP_SHADE=48, RUG_TILE=49;
+var TV_BODY=53, TV_SCREEN=54, PORCELAIN=55, BATH_WATER=56;
 /* The four quarter turns, in the order a facing id counts them. Index 0 is +X,
    which is the direction every shape below is written lying along. */
 var FACE4=[[1,0],[0,1],[-1,0],[0,-1]];
@@ -2599,6 +2723,39 @@ var PROP_SHAPE={
   /* a rug: one flat square lying on the floor */
   rug:[
     [0,0,0,   16,1,16,  RUG_TILE]
+  ],
+  /* a television on a stand, screen looking along +X. The screen carries the glow
+     flag, so it is lit by itself the way a screen in a dark room is, and it is the
+     tile the animation repaints. */
+  tv:[
+    [4,0,6,   8,2,10,   TV_BODY],
+    [3,2,1,   6,14,15,  TV_BODY],
+    [6,3,2,   6.4,13,14, TV_SCREEN, 1]
+  ],
+  /* a bath: a floor, four sides and the water in it, with the taps at the +X end */
+  bath:[
+    [1,0,2,   15,3,14,  PORCELAIN],
+    [1,3,2,   3,8,14,   PORCELAIN],
+    [13,3,2,  15,8,14,  PORCELAIN],
+    [3,3,2,   13,8,4,   PORCELAIN],
+    [3,3,12,  13,8,14,  PORCELAIN],
+    [3,3,4,   13,7,12,  BATH_WATER],
+    [13,8,7,  15,10,9,  TV_BODY]
+  ],
+  /* a sink on a pedestal, front looking along +X so its back goes to the wall */
+  sink:[
+    [4,0,5,   9,9,11,   PORCELAIN],
+    [2,9,3,   12,13,13, PORCELAIN],
+    [3.5,12.6,4.5, 10.5,13,11.5, BATH_WATER],
+    [2,13,7,  4,16,9,   TV_BODY]
+  ],
+  /* a toilet, sat on looking along +X, cistern behind at -X */
+  toilet:[
+    [4,0,4,   12,5,12,  PORCELAIN],
+    [3,5,3,   13,9,13,  PORCELAIN],
+    [4.5,8.6,4.5, 11.5,9,11.5, BATH_WATER],
+    [3,9,3,   13,10,13, PORCELAIN],
+    [0,5,3,   3,14,13,  PORCELAIN]
   ]
 };
 
@@ -2876,11 +3033,10 @@ var FOG_NEAR=46, FOG_FAR=118;
 function setBlock(x,y,z,id){
   if(!inside(x,y,z)) return false;
   if(blocks[idx(x,y,z)]===id) return false;
-  /* Keep the flame counts straight so animateFire can idle when nothing is lit. */
-  if(blocks[idx(x,y,z)]===FIRE) fireCount--;
-  if(id===FIRE) fireCount++;
-  if(blocks[idx(x,y,z)]===FURNACE) furnaceCount--;
-  if(id===FURNACE) furnaceCount++;
+  /* Keep the counts straight so animateFire can idle when nothing is moving. */
+  var wasAnim=ANIM_BY_ID[blocks[idx(x,y,z)]], nowAnim=ANIM_BY_ID[id];
+  if(wasAnim) wasAnim.n--;
+  if(nowAnim) nowAnim.n++;
   blocks[idx(x,y,z)]=id;
   edits[x+','+y+','+z]=id;
   markDirty(x,y,z);
@@ -4631,14 +4787,40 @@ function lookDir(){
   var fx=Math.sin(yaw), fz=Math.cos(yaw);
   return Math.abs(fx)>Math.abs(fz) ? [fx>0?1:-1,0] : [0,fz>0?1:-1];
 }
-function bedDirs(){
-  var first=lookDir();
-  var all=[first];
+/* Where a bed can go, best first.
+
+   A bed is two blocks and the cell he aimed at is one of them. The other can be
+   any of the four neighbours, and either end can be the head - eight arrangements,
+   scored rather than tried in a fixed order.
+
+   The fixed order is what was wrong. Standing at a wall and aiming at the floor
+   beside it puts the head cell inside the wall, so the whole thing fell through to
+   "+X, +Z, -X, -Z, take the first free one", which has nothing to do with where the
+   wall is. In a corner two of the four were blocked and it took whichever of the
+   rest came first. Either way the headboard ended up pointing into the room.
+
+   So: something solid behind the headboard is worth more than everything else put
+   together, and the edge of the world counts as a wall. After that, lying the way
+   he is looking, and the foot on the side he is standing - the end he gets in at. */
+function bedPlacements(c){
+  var out=[];
   for(var i=0;i<4;i++){
-    var d=BED_SCAN[i];
-    if(d[0]!==first[0]||d[1]!==first[1]) all.push(d);
+    var e=BED_SCAN[i];
+    var ox=c.x+e[0], oz=c.z+e[1];
+    if(!cellFree(ox,c.y,oz)) continue;
+    /* the far cell is the head, or the aimed one is */
+    out.push({foot:{x:c.x,z:c.z}, head:{x:ox,z:oz}, y:c.y, dir:e});
+    out.push({foot:{x:ox,z:oz}, head:{x:c.x,z:c.z}, y:c.y, dir:[-e[0],-e[1]]});
   }
-  return all;
+  var look=lookDir();
+  out.forEach(function(p){
+    var bx=p.head.x+p.dir[0], bz=p.head.z+p.dir[1];
+    p.score = (!inside(bx,p.y,bz) || isSolid(bx,p.y,bz)) ? 8 : 0;
+    if(p.dir[0]===look[0] && p.dir[1]===look[1]) p.score+=3;
+    else if(p.dir[0]===-look[0] && p.dir[1]===-look[1]) p.score+=1;
+  });
+  out.sort(function(a,b){ return b.score-a.score; });
+  return out;
 }
 /* Which of a family's four ids to put down. A chair, a telly, anything with a
    front: he should end up looking at the front of it, so it is turned back towards
@@ -4661,16 +4843,58 @@ function cellFree(bx,by,bz){
   return !(bx+1>px0 && bx<px1 && bz+1>pz0 && bz<pz1 && by+1>player.y && by<player.y+PH);
 }
 function placeBed(c){
-  var dirs=bedDirs();
-  for(var i=0;i<dirs.length;i++){
-    var d=dirs[i];
-    if(!cellFree(c.x+d[0],c.y,c.z+d[1])) continue;
-    setBlock(c.x,c.y,c.z,BED);
-    setBlock(c.x+d[0],c.y,c.z+d[1],BEDHEAD);
+  var best=bedPlacements(c)[0];
+  if(!best){ toast('A bed needs two blocks of room!'); return false; }
+  setBlock(best.foot.x,best.y,best.foot.z,BED);
+  setBlock(best.head.x,best.y,best.head.z,BEDHEAD);
+  return true;
+}
+/* Which of the four FACE4 turns this direction is. */
+function dirIndex(d){
+  for(var i=0;i<4;i++) if(FACE4[i][0]===d[0] && FACE4[i][1]===d[1]) return i;
+  return 0;
+}
+/* Tapping BUILD on something that has a front turns it a quarter turn instead of
+   putting a block against it. It is the press he already knows, it needs no new
+   button on an already crowded pad, and it is the answer to a chair that came out
+   the wrong way round or a bed he wants along the other wall.
+
+   Only furniture with a front answers to it. Aiming at a wall, a floor, a table or
+   a rug and pressing BUILD still builds, so this cannot get in the way of building
+   a house around the furniture. */
+function turnBed(x,y,z,id){
+  var foot={x:x,z:z};
+  if(id===BEDHEAD){
+    var back=bedPartner(x,y,z,id);
+    if(back) foot={x:x+back[0], z:z+back[1]};
+  }
+  var dir=bedFacing(foot.x,y,foot.z,BED);
+  var oldH={x:foot.x+dir[0], z:foot.z+dir[1]};
+  var hadHead=getBlock(oldH.x,y,oldH.z)===BEDHEAD;
+  var from=dirIndex(dir);
+  for(var k=1;k<=3;k++){
+    var nd=FACE4[(from+k)&3];
+    var hx=foot.x+nd[0], hz=foot.z+nd[1];
+    /* the cell the head is leaving is not in the way of the head arriving */
+    var free=(hadHead && hx===oldH.x && hz===oldH.z) || cellFree(hx,y,hz);
+    if(!free) continue;
+    if(hadHead) setBlock(oldH.x,y,oldH.z,AIR);
+    setBlock(foot.x,y,foot.z,BED);
+    setBlock(hx,y,hz,BEDHEAD);
+    sfx('place');
     return true;
   }
-  toast('A bed needs two blocks of room!');
-  return false;
+  toast('No room to turn it!');
+  return true;
+}
+function turnFurniture(x,y,z){
+  var id=getBlock(x,y,z), def=DEFS[id];
+  if(!def) return false;
+  if(id===BED||id===BEDHEAD) return turnBed(x,y,z,id);
+  if(!def.family) return false;
+  setBlock(x,y,z,FAMILY[def.family][(def.dir+1)&3]);
+  sfx('place');
+  return true;
 }
 function breakAt(x,y,z){
   var b=getBlock(x,y,z);
@@ -4718,6 +4942,10 @@ function build(){
     var h=aim();
     if(h && tryLightPortal(h.x,h.y,h.z)) return;
   }
+  /* Turning a piece of furniture comes before placing anything, so a tap on a chair
+     turns the chair rather than putting a block on its seat. */
+  var t=aim();
+  if(t && turnFurniture(t.x,t.y,t.z)) return;
   var c=buildTarget();
   if(!c) return;
   if(selected===BED){ if(placeBed(c)) sfx('place'); return; }
@@ -8738,7 +8966,12 @@ window.__henrycraft={
        ROAD:ROAD,KERB:KERB,ROADLINE:ROADLINE,GRID:GRID,
        FURNACE:FURNACE,BED:BED,BEDHEAD:BEDHEAD,
        TABLE:TABLE,CHAIR:CHAIR,CHAIR1:CHAIR1,CHAIR2:CHAIR2,CHAIR3:CHAIR3,
-       LAMP:LAMP,RUG:RUG},
+       LAMP:LAMP,RUG:RUG,
+       TV:TV,TV1:TV1,TV2:TV2,TV3:TV3,
+       BATH:BATH,BATH1:BATH1,BATH2:BATH2,BATH3:BATH3,
+       SINK:SINK,SINK1:SINK1,SINK2:SINK2,SINK3:SINK3,
+       TOILET:TOILET,TOILET1:TOILET1,TOILET2:TOILET2,TOILET3:TOILET3,
+       TILES:TILES},
   FAMILY:FAMILY,
   propFacing:function(x,y,z,id){ return propFacing(x,y,z,id,DEFS[id]); },
   facingId:facingId,
@@ -8760,7 +8993,10 @@ window.__henrycraft={
     });
     return t;
   },
-  fireCounts:function(){ return {fire:fireCount, furnace:furnaceCount, frame:fireFrame}; },
+  fireCounts:function(){
+    return {fire:ANIM[0].n, furnace:ANIM[1].n, tv:ANIM[2].n,
+            frames:ANIM.map(function(a){ return a.frame; })};
+  },
   /* The real animation step, with the time handed to it rather than taken from the
      clock. Under a software rasteriser the render loop manages three or four frames
      a second, so a test that waits and watches is measuring the frame rate more
@@ -8837,7 +9073,7 @@ window.__henrycraft={
     });
   },
   animals:function(){ return animals.length; },
-  fireCount:function(){ return fireCount; },
+  fireCount:function(){ return ANIM[0].n; },
 
   /* ---- districts ---- */
   themes:function(){ return THEMES.map(function(t){ return JSON.parse(JSON.stringify(t)); }); },
@@ -9009,8 +9245,11 @@ window.__henrycraft={
   /* The three ways a block gets dug or placed, so a test can try all of them from the
      driving seat and find that none of them does anything. */
   dig:dig, build:build, digDown:digDown, setFly:setFly,
-  breakAt:breakAt, placeBed:placeBed,
+  breakAt:breakAt, placeBed:placeBed, turnFurniture:turnFurniture,
+  bedPlacements:function(c){ return bedPlacements(c); },
   setYaw:function(v){ yaw=v; },
+  setPitch:function(v){ pitch=v; },
+  aimAt:function(){ var h=aim(); return h?{x:h.x,y:h.y,z:h.z}:null; },
   /* Is the game offering to dig or place anything right now? Both halves, because the
      wireframe box and the ghost block are drawn from different answers. */
   aiming:function(){

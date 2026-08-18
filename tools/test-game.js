@@ -124,6 +124,11 @@ function slope(pts) {
     MUSHSTEM: 29, PORTAL: 30, ROAD: 31, KERB: 32, ROADLINE: 33, GRID: 34,
     FURNACE: 35, BED: 36, BEDHEAD: 37,
     TABLE: 38, CHAIR: 39, CHAIR1: 40, CHAIR2: 41, CHAIR3: 42, LAMP: 43, RUG: 44,
+    TV: 45, TV1: 46, TV2: 47, TV3: 48,
+    BATH: 49, BATH1: 50, BATH2: 51, BATH3: 52,
+    SINK: 53, SINK1: 54, SINK2: 55, SINK3: 56,
+    TOILET: 57, TOILET1: 58, TOILET2: 59, TOILET3: 60,
+    TILES: 61,
   };
   const ids = await page.evaluate(() => window.__henrycraft.ids);
   const moved = Object.keys(ID_TABLE).filter(k => ids[k] !== ID_TABLE[k])
@@ -252,7 +257,8 @@ function slope(pts) {
       /* named one by one rather than read back off FURNITURE, which would only
          prove the drawer renders whatever it is handed */
       wantFurniture: [H.ids.FURNACE, H.ids.BED, H.ids.TABLE, H.ids.CHAIR,
-                      H.ids.LAMP, H.ids.RUG],
+                      H.ids.LAMP, H.ids.RUG, H.ids.TV, H.ids.BATH, H.ids.SINK,
+                      H.ids.TOILET, H.ids.TILES],
       names: [H.DEFS[H.ids.FURNACE].name, H.DEFS[H.ids.BED].name],
       inPalette: [H.PALETTE.indexOf(H.ids.FURNACE), H.PALETTE.indexOf(H.ids.BED)],
       survived: [H.getBlock(20, 18, 20), H.getBlock(21, 18, 20)],
@@ -278,7 +284,7 @@ function slope(pts) {
   check('one tap opens the furniture drawer',
         drawers.open0 === 0 && drawers.open1 === 1,
         `open went ${drawers.open0} -> ${drawers.open1}`);
-  check('the furniture drawer shows the furnace, bed, table, chair, lamp and rug',
+  check('the furniture drawer shows all eleven pieces, in order',
         drawers.furnGrid.join(',') === drawers.wantFurniture.join(',') &&
         drawers.furnPal.join(',') === drawers.wantFurniture.join(','),
         `picker [${drawers.furnGrid}], palette [${drawers.furnPal}], ` +
@@ -491,7 +497,7 @@ function slope(pts) {
         new Set(room.chairs.map(c => c.id)).size === 4,
         'ids: ' + room.chairs.map(c => c.id).join(', '));
   check('only one chair is offered in the drawer, and the blocks row is untouched',
-        room.drawer.spares.length === 0 && room.drawer.furniture.length === 6 &&
+        room.drawer.spares.length === 0 && room.drawer.furniture.length === 11 &&
         room.drawer.blocks === 19,
         `spares in a drawer: [${room.drawer.spares}], furniture ${room.drawer.furniture.length}, ` +
         `blocks ${room.drawer.blocks}`);
@@ -507,6 +513,258 @@ function slope(pts) {
         room.solid.rug === false && room.solid.table === true &&
         room.canStand.onRug === true && room.canStand.onTable === false,
         JSON.stringify({solid: room.solid, stand: room.canStand}));
+
+  /* ---- 2g: the headboard goes against the wall, and things can be turned ----
+     He built a bed in a corner and the headboard ended up pointing into the room.
+     It was doing what it was told: the head went one step the way he was looking,
+     and when that cell was the wall it fell through to "+X, +Z, -X, -Z, take the
+     first free one" - an order with nothing to do with where the wall is. Now all
+     eight arrangements are scored, and something solid behind the headboard is
+     worth more than everything else put together. */
+  console.log('2g. a bed puts its headboard against the wall, and furniture turns');
+  const walls = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 12);
+    const gy = 24, out = {};
+    const room = (x0, z0, x1, z1) => {
+      for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+        for (let y = gy; y < gy + 6; y++) H.setBlock(x, y, z, ids.AIR);
+        H.setBlock(x, gy - 1, z, ids.PLANKS);
+      }
+    };
+    room(20, 20, 60, 60);
+    const headOf = (fx, fz) => {
+      for (const d of [[1, 0], [-1, 0], [0, 1], [0, -1]])
+        if (H.getBlock(fx + d[0], gy, fz + d[1]) === ids.BEDHEAD) return d;
+      return null;
+    };
+    const wipe = (x, z) => { for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++)
+      { const b = H.getBlock(x + dx, gy, z + dz); if (b === ids.BED || b === ids.BEDHEAD)
+        H.setBlock(x + dx, gy, z + dz, ids.AIR); } };
+
+    /* A flat wall along -Z, him standing in the room looking at it, aiming at the
+       floor cell right beside it. The head has to end up in that cell with the
+       headboard against the wall - not one step further into the wall, and not
+       spun round into the room. */
+    for (let x = 28; x <= 36; x++) for (let y = gy; y < gy + 4; y++) H.setBlock(x, y, 30, ids.BRICK);
+    H.movePlayer(32.5, gy + 0.05, 34.5);
+    H.setYaw(Math.PI);                            // looking along -Z, at the wall
+    H.placeBed({x: 32, y: gy, z: 31});            // the floor cell beside it
+    out.flatWall = {head: H.getBlock(32, gy, 31) === ids.BEDHEAD,
+                    foot: H.getBlock(32, gy, 32) === ids.BED,
+                    behind: H.getBlock(32, gy, 30) === ids.BRICK};
+    wipe(32, 31);
+
+    /* A corner: walls along -Z and -X meeting at (40,40). He aims at the cell in
+       the corner. The headboard has to be against one of the two walls. */
+    for (let x = 40; x <= 46; x++) for (let y = gy; y < gy + 4; y++) H.setBlock(x, y, 40, ids.BRICK);
+    for (let z = 40; z <= 46; z++) for (let y = gy; y < gy + 4; y++) H.setBlock(40, y, z, ids.BRICK);
+    H.movePlayer(43.5, gy + 0.05, 43.5);
+    H.setYaw(Math.PI);
+    H.placeBed({x: 41, y: gy, z: 41});
+    const cornerHead = H.getBlock(41, gy, 41) === ids.BEDHEAD ? [41, 41]
+                     : (H.getBlock(41, gy, 41) === ids.BED ? headOf(41, 41) : null);
+    out.corner = {
+      inCorner: H.getBlock(41, gy, 41) === ids.BEDHEAD,
+      /* whichever way it lies, the cell beyond the head must be a wall */
+      backedOnWall: (() => {
+        for (let x = 39; x <= 44; x++) for (let z = 39; z <= 44; z++) {
+          if (H.getBlock(x, gy, z) !== ids.BEDHEAD) continue;
+          const f = H.propFacing(x, gy, z, ids.BEDHEAD);
+          return H.getBlock(x + f[0], gy, z + f[1]) === ids.BRICK;
+        }
+        return false;
+      })(),
+    };
+    wipe(41, 41);
+
+    /* And in the open, with no wall anywhere, it still lies away from him. */
+    H.movePlayer(50.5, gy + 0.05, 52.5);
+    H.setYaw(Math.PI);
+    H.placeBed({x: 50, y: gy, z: 51});
+    out.open = {foot: H.getBlock(50, gy, 51) === ids.BED, head: headOf(50, 51)};
+    wipe(50, 51);
+
+    /* Turning. Four presses on a chair bring it back to where it started. */
+    H.setYaw(0);
+    const chair0 = H.facingId(ids.CHAIR);
+    H.setBlock(55, gy, 55, chair0);
+    const spin = [];
+    for (let i = 0; i < 4; i++) { H.turnFurniture(55, gy, 55); spin.push(H.getBlock(55, gy, 55)); }
+    out.spin = {ids: spin, distinct: new Set(spin).size, backToStart: spin[3] === chair0};
+
+    /* Turning a bed moves the head and leaves the foot where it is. */
+    H.setBlock(50, gy, 45, ids.BED); H.setBlock(51, gy, 45, ids.BEDHEAD);
+    H.turnFurniture(50, gy, 45);
+    out.turnBed = {footStayed: H.getBlock(50, gy, 45) === ids.BED,
+                   oldHeadGone: H.getBlock(51, gy, 45) !== ids.BEDHEAD,
+                   newHead: headOf(50, 45)};
+    wipe(50, 45);
+
+    /* Nothing without a front answers to it, so building a house around the
+       furniture still builds. */
+    H.setBlock(46, gy, 50, ids.TABLE);
+    H.setBlock(46, gy, 52, ids.BRICK);
+    H.setBlock(46, gy, 54, ids.RUG);
+    out.notTurned = {table: H.turnFurniture(46, gy, 50), brick: H.turnFurniture(46, gy, 52),
+                     rug: H.turnFurniture(46, gy, 54), air: H.turnFurniture(46, gy + 3, 50)};
+    return out;
+  });
+  check('a bed built at a wall puts its head in the cell beside it, headboard to the wall',
+        walls.flatWall.head && walls.flatWall.foot && walls.flatWall.behind,
+        JSON.stringify(walls.flatWall));
+  check('a bed built in a corner backs its headboard onto one of the two walls',
+        walls.corner.backedOnWall, JSON.stringify(walls.corner));
+  check('in the open it still lies away from him, as it did',
+        walls.open.foot && !!walls.open.head &&
+        walls.open.head[0] === 0 && walls.open.head[1] === -1,
+        JSON.stringify(walls.open));
+  check('four presses turn a chair right round and back',
+        walls.spin.distinct === 4 && walls.spin.backToStart,
+        JSON.stringify(walls.spin));
+  check('turning a bed moves the head and leaves the foot where it is',
+        walls.turnBed.footStayed && walls.turnBed.oldHeadGone && !!walls.turnBed.newHead,
+        JSON.stringify(walls.turnBed));
+  check('a table, a brick, a rug and thin air do not turn',
+        !walls.notTurned.table && !walls.notTurned.brick &&
+        !walls.notTurned.rug && !walls.notTurned.air,
+        JSON.stringify(walls.notTurned));
+
+  /* ---- 2f: the telly and the bathroom --------------------------------------
+     Four more things with a front, so the four-ids-per-family machinery is
+     exercised by five families rather than one, and a screen that moves - the third
+     animated tile, which is what turned two variables into a table. */
+  console.log('2f. a telly that faces him and plays, and a bath, sink and toilet');
+  const bathroom = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 33);
+    const gy = 24, out = {};
+    for (let x = 20; x <= 50; x++) for (let z = 20; z <= 50; z++) {
+      for (let y = gy; y < gy + 6; y++) H.setBlock(x, y, z, ids.AIR);
+      H.setBlock(x, gy - 1, z, ids.PLANKS);
+    }
+
+    /* Every family turns to face him, and every family is four different ids. */
+    out.families = ['tv', 'bath', 'sink', 'toilet', 'chair'].map(key => {
+      const ids4 = H.FAMILY[key];
+      const placed = [[0, [0, -1]], [Math.PI / 2, [-1, 0]],
+                      [Math.PI, [0, 1]], [-Math.PI / 2, [1, 0]]]
+        .map(([ang, want], i) => {
+          H.setYaw(ang);
+          const id = H.facingId(ids4[0]);
+          const x = 25 + i, z = 25 + ids4[0] % 7;
+          H.setBlock(x, gy, z, id);
+          const f = H.propFacing(x, gy, z, id);
+          return {id, ok: f[0] === want[0] && f[1] === want[1]};
+        });
+      return {key, distinct: new Set(placed.map(p => p.id)).size, count: ids4.length,
+              allFace: placed.every(p => p.ok)};
+    });
+
+    // shapes: tv 3 boxes, bath 7, sink 4, toilet 5, and tiles is an ordinary cube
+    const delta = (id, group) => {
+      H.setBlock(44, gy, 44, ids.AIR);
+      const before = H.chunkTriangles(group);
+      H.setBlock(44, gy, 44, id);
+      const d = H.chunkTriangles(group) - before;
+      H.setBlock(44, gy, 44, ids.AIR);
+      return d;
+    };
+    out.tris = {tv: delta(ids.TV), bath: delta(ids.BATH), sink: delta(ids.SINK),
+                toilet: delta(ids.TOILET), tvGlow: delta(ids.TV, 'glow'),
+                bathGlow: delta(ids.BATH, 'glow')};
+    H.setBlock(44, gy, 44, ids.BATH);
+    const bathSolid = H.isSolidAt(44, gy, 44);
+    H.setBlock(44, gy, 44, ids.TILES);
+    out.solid = {bath: bathSolid, tiles: H.isSolidAt(44, gy, 44)};
+    H.setBlock(44, gy, 44, ids.AIR);
+
+    /* A fresh world before the animation, because the placing above left four
+       tellies standing in the last one - and "no telly anywhere" is exactly the
+       claim the idle check is making. The first version of this measured its own
+       leftovers and reported nine pictures where the answer had to be one. */
+    H.loadThemeSeed('meadow', 34);
+    const gy2 = H.surfaceY(30, 30);
+    const idle = [];
+    for (let i = 0; i < 30; i++) { H.tickFire(0.12); idle.push(H.atlasTile(54)); }
+
+    /* The screen, stepped by hand at a known rate. Counted the same way the
+       furnace's was, and for the same reason - waiting and watching measures the
+       frame rate rather than the picture.
+
+       Only samples that follow an actual repaint count, and each frame number is
+       checked to draw the same picture every time round. Counting every sample
+       reported nine pictures for eight frames: the ninth was what buildAtlas left
+       on the tile, which differs from the animation's own frame 0 by exactly one
+       unit of green on the scanline rows. Canvas rounds an alpha fill differently
+       over transparent than over existing pixels, and the screen is the only tile
+       here drawn with an alpha pass. 1/255 of green - not visible, not worth
+       chasing, and not a ninth frame. */
+    H.setBlock(30, gy2, 30, ids.TV);
+    const seen = {}, clash = [];
+    let last = H.fireCounts().frames[2];
+    for (let i = 0; i < 90; i++) {
+      H.tickFire(0.12);
+      const f = H.fireCounts().frames[2];
+      if (f === last) continue;                    // nothing was repainted
+      last = f;
+      const pic = H.atlasTile(54);
+      if (seen[f] === undefined) seen[f] = pic;
+      else if (seen[f] !== pic) clash.push(f);
+    }
+    out.screen = {idleFrames: new Set(idle).size,
+                  litFrames: Object.keys(seen).length,
+                  distinct: new Set(Object.values(seen)).size,
+                  clash};
+
+    /* And it runs slower than an open fire on purpose, so a room with both in it
+       is not two things flashing. Over the same ticks, from the same standing
+       start, the fire should get through three times as many pictures. */
+    H.loadThemeSeed('meadow', 34);
+    H.setBlock(30, gy2, 30, ids.TV);
+    H.setBlock(31, gy2, 30, ids.FIRE);
+    let fireChanges = 0, tvChanges = 0;
+    let lastFire = H.atlasTile(23), lastTv = H.atlasTile(54);
+    for (let i = 0; i < 90; i++) {
+      H.tickFire(0.12);
+      const f = H.atlasTile(23), t = H.atlasTile(54);
+      if (f !== lastFire) { fireChanges++; lastFire = f; }
+      if (t !== lastTv) { tvChanges++; lastTv = t; }
+    }
+    out.rate = {fireChanges, tvChanges};
+    out.counts = H.fireCounts();
+    return out;
+  });
+  check('all five families are four ids each, and all four turn to face him',
+        bathroom.families.every(f => f.count === 4 && f.distinct === 4 && f.allFace),
+        JSON.stringify(bathroom.families));
+  check(`tv 3 boxes, bath 7, sink 4, toilet 5 ` +
+        `(${bathroom.tris.tv}/${bathroom.tris.bath}/${bathroom.tris.sink}/${bathroom.tris.toilet})`,
+        bathroom.tris.tv === 36 && bathroom.tris.bath === 84 &&
+        bathroom.tris.sink === 48 && bathroom.tris.toilet === 60,
+        JSON.stringify(bathroom.tris));
+  check('the screen alone is self-lit, and the bath is not',
+        bathroom.tris.tvGlow === 12 && bathroom.tris.bathGlow === 0,
+        `tv ${bathroom.tris.tvGlow} glow triangles, bath ${bathroom.tris.bathGlow}`);
+  check('a bath and a tiled floor are both walked into',
+        bathroom.solid.bath === true && bathroom.solid.tiles === true,
+        JSON.stringify(bathroom.solid));
+  check('with no telly in the world its tile is never touched',
+        bathroom.screen.idleFrames === 1,
+        `${bathroom.screen.idleFrames} different pictures while idle`);
+  check(`a telly plays eight pictures, and the same one each time round ` +
+        `(${bathroom.screen.litFrames} frames, ${bathroom.screen.distinct} pictures)`,
+        bathroom.screen.litFrames === 8 && bathroom.screen.distinct === 8 &&
+        bathroom.screen.clash.length === 0,
+        JSON.stringify(bathroom.screen));
+  check(`a fire gets through three pictures to the telly's one ` +
+        `(${bathroom.rate.fireChanges} against ${bathroom.rate.tvChanges})`,
+        bathroom.rate.tvChanges > 0 &&
+        bathroom.rate.fireChanges === bathroom.rate.tvChanges * 3,
+        JSON.stringify(bathroom.rate));
+  check('the counts follow what is in the world', bathroom.counts.tv === 1 &&
+        bathroom.counts.fire === 1 && bathroom.counts.furnace === 0,
+        JSON.stringify(bathroom.counts));
 
   /* ---- 2d: the furnace fire moves -----------------------------------------
      Same trick as Flint & Steel: one tile of the atlas is repainted on a timer and
