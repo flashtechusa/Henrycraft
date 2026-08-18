@@ -1202,24 +1202,28 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
       H.loadThemeSeed('racing', 4242);
       document.getElementById('playBtn').click();
       const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      /* Read the moment the message is said, with no frame in between. A message
+         clears itself after 1150ms of wall clock, while `frame()` waits two animation
+         frames - so on a runner drawing a frame and a half a second the wait outlives
+         the thing it is waiting for, and the check reports a message that never showed.
+         It did show: the failure had the right text in the right chip at the right
+         size, with the class already gone. Nothing here needs a frame anyway, because
+         toast() sets the class and the kart flag synchronously. The frames that remain
+         are after toggleKart, which repaints the HUD. */
       if (H.kart()) H.toggleKart();
       await frame();
       H.say('On foot message');
-      await frame();
       const walking = H.messages();
       H.toggleKart();
       await frame();
       H.say('Driving message');
-      await frame();
       const driving = H.messages();
       /* A real item, through the real path, rather than a test poking the toast. */
       H.giveItemNamed('golden');
-      await frame();
       const item = H.messages();
       H.toggleKart();
       await frame();
       H.say('Out again');
-      await frame();
       const back = H.messages();
       return {walking, driving, item, back};
     });

@@ -269,6 +269,32 @@ function requireNode22() {
     check('and a block placed by B arrives at A', aSaw,
           'A sees ' + await A.evaluate(s => window.__henrycraft.getBlock(s.x, s.y, s.z), spot2));
 
+    /* A bed is two blocks and which way it points is read off where the other half
+       is, so it is the one thing here that only works if both edits arrive. Half a
+       bed would still be a bed on the far side - lying the default way, pointing
+       somewhere nobody chose - which is why the direction is checked and not just
+       that something turned up. */
+    const bedSpot = await B.evaluate(() => {
+      const H = window.__henrycraft, y = H.surfaceY(28, 28) + 1;
+      H.setBlock(28, y, 28, H.ids.AIR); H.setBlock(28, y, 29, H.ids.AIR);
+      H.movePlayer(28.5, y, 26.5);
+      H.setYaw(0);                              // looking along +Z
+      H.placeBed({x: 28, y: y, z: 28});
+      return {x: 28, y: y, z: 28, foot: H.ids.BED, head: H.ids.BEDHEAD,
+              facing: H.bedFacing(28, y, 28, H.ids.BED)};
+    });
+    const bedWhole = await waitFor(A, s =>
+      window.__henrycraft.getBlock(s.x, s.y, s.z) === s.foot &&
+      window.__henrycraft.getBlock(s.x, s.y, s.z + 1) === s.head, bedSpot);
+    const bedFacingA = bedWhole
+      ? await A.evaluate(s => window.__henrycraft.bedFacing(s.x, s.y, s.z, s.foot), bedSpot)
+      : null;
+    check('a bed B lays down arrives at A whole, and lying the same way',
+          bedWhole && bedFacingA && bedFacingA[0] === bedSpot.facing[0] &&
+          bedFacingA[1] === bedSpot.facing[1],
+          `whole=${bedWhole} B laid it ${JSON.stringify(bedSpot.facing)}, ` +
+          `A sees ${JSON.stringify(bedFacingA)}`);
+
     // each sees the other's avatar, and it glides rather than teleporting
     const rosterA = await A.evaluate(() => ({
       players: window.__henrycraft.mp.players(),

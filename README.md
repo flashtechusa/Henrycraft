@@ -705,11 +705,38 @@ enchanting table, and Flint &amp; Steel.
 **Furniture, in a second drawer.** Henry asked for a furnace and a bed to put
 inside the houses he builds. Rather than make the row of blocks longer again, the
 picker grew two tabs — 🧱 **Blocks** and 🛏️ **For a house** — and the furniture
-lives behind the second one. They are ordinary blocks: nothing cooks in the
-furnace, nobody has to sleep in the bed, and both dig away like anything else.
-Two beds side by side make a double. The blocks row is pinned at nineteen by a
-test that writes the number out rather than reading it back, so the next thing he
-asks for goes in a drawer too.
+lives behind the second one. The blocks row is pinned at nineteen by a test that
+writes the number out rather than reading it back, so the next thing he asks for
+goes in a drawer too.
+
+**The bed is a bed.** The first one was a single cube with a red top, and it read
+as a cake — he said so. So it is built the way Minecraft's is: **two blocks laid
+end to end**, and shorter than a block, with a wooden frame on four legs, a
+mattress, a blanket over that, a pillow and a headboard. It goes down in one press
+and lies the way he is looking, pillow end furthest from him, so a bed built facing
+a wall ends up with its headboard at the wall. Digging either half takes the other
+with it. Two side by side make a double.
+
+Which way a bed points is **not stored anywhere** — each half reads it off the fact
+that its other half is next door. Two block ids instead of eight, nothing extra in
+the save file, and the single-block beds he built before this change still load: they
+come up as a lone foot, which is a bed frame with a mattress on it and nothing to
+fix. The two halves scan their neighbours in opposite orders, which is what stops two
+beds pushed end to end from pairing across the join.
+
+A bed is the first thing in the game that is **not a cube**. `buildChunk` builds it
+out of the twelve little boxes listed in `BED_SHAPE`, written in sixteenths of a
+block the way Minecraft's own models are, and a quarter turn at a time covers the
+other three directions. It is still solid to walk into and stand on, so there is a
+quarter of a block of daylight under his feet on top of one — the alternative is
+teaching the collision code about part-height blocks, and that is physics.
+
+**The furnace burns.** Its mouth is repainted on a timer, the same way Flint &
+Steel's flame is: one tile of the atlas redrawn and re-uploaded, nothing re-meshed,
+and nothing at all happening in a world with no furnace in it. Half the rate of an
+open fire, with its own eight-frame counter, so a stove in a bedroom is not the
+busiest thing on screen. Both are ordinary blocks otherwise: nothing cooks, nobody
+sleeps, and both dig away like anything else.
 
 **Ore to dig for.** Coal and copper are common in the upper rock, lapis sits
 mid-depth, gold a bit deeper, and diamond, emerald and obsidian are down near the

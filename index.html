@@ -721,8 +721,8 @@ body.touch #hint{display:none}
       goes &mdash; snow takes you somewhere snowy, sand somewhere sandy.</small>
     <div class="pickhead">Furniture for a house</div>
     <canvas id="ideasFurn"></canvas>
-    <small>Tap the block button, then <b>For a house</b>. Two beds side by side
-      make a big one.</small>
+    <small>Tap the block button, then <b>For a house</b>. A bed takes two blocks and
+      lies the way you are looking; two side by side make a double.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -837,8 +837,15 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
        and every save written before today still loads. */
     ROAD=31,KERB=32,ROADLINE=33,GRID=34,
     /* Furniture for the houses he builds. Appended in turn - ids 0-34 are
-       untouched, so every district saved before today still loads. */
-    FURNACE=35,BED=36;
+       untouched, so every district saved before today still loads.
+
+       A bed is two blocks laid end to end, the way it is in Minecraft: BED is the
+       foot and BEDHEAD is the pillow end. BED keeps the number it already had, so
+       the single-block beds he built before this change still load - they come up
+       as a lone foot, which is a bed frame with a mattress on it and nothing to
+       fix. Which way a bed points is worked out from where its other half is, so
+       there is no third id per direction and nothing extra in the save. */
+    FURNACE=35,BED=36,BEDHEAD=37;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -896,7 +903,16 @@ DEFS[GRID]     ={name:'Start Line',tiles:[38,38,38]};
    is what he asked for. Furnace bottom borrows stone and bed bottom borrows
    planks - a face nobody ever sees does not need a tile of its own. */
 DEFS[FURNACE]  ={name:'Furnace', tiles:[39,3,40]};
-DEFS[BED]      ={name:'Bed',     tiles:[41,8,42]};
+/* The two bed halves are props: they are not cubes, and buildChunk builds them out
+   of the little boxes listed in BED_SHAPE instead of six square faces. `tiles` is
+   still here because three things read it that have nothing to do with meshing -
+   the picker swatch, the ghost's colour, and the drawing on the ideas page - and
+   all three want one square picture of a bed rather than a slice through one. */
+DEFS[BED]      ={name:'Bed',     tiles:[41,45,41], prop:'bedFoot'};
+/* Not in any drawer - the head is placed by laying a bed, never chosen. That is
+   the whole of how it stays out of the picker; there is no "hidden" flag, because
+   a flag nothing reads is a comment that looks like code. */
+DEFS[BEDHEAD]  ={name:'Bed',     tiles:[41,45,42], prop:'bedHead'};
 
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
              COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
@@ -1383,38 +1399,56 @@ function buildAtlas(){
     x.fillStyle='#8a8a93'; x.fillRect(6,6,4,4);
     x.fillStyle='#66666e'; x.fillRect(7,7,2,2);
   });
-  /* 40 furnace side - the mouth, with a fire lit inside it. Painted into the
-     texture rather than made a glow block: glow lights every face equally, which
-     would leave a stone furnace shining like a lamp on all six sides. */
-  tile(40,function(x,r){
-    fill(x,'#8b8b94'); speck(x,r,['#80808a','#99999f','#75757e'],80);
-    x.fillStyle='#63636b'; x.fillRect(3,4,10,1);
-    x.fillStyle='#2b2b31'; x.fillRect(3,5,10,8);
-    x.fillStyle='#1b1b20'; x.fillRect(4,6,8,7);
-    x.fillStyle='#d94b1f'; x.fillRect(4,10,8,3);
-    x.fillStyle='#ff8a1f'; x.fillRect(5,11,6,2);
-    x.fillStyle='#ffd45a'; x.fillRect(6,12,4,1);
-    x.fillStyle='#ff8a1f'; x.fillRect(6,9,1,1); x.fillRect(9,8,1,2);
-    x.fillStyle='#6c6c74'; x.fillRect(0,14,16,2);
-  });
-  /* 41 bed top - blanket, a turned-down sheet and a pillow at one end */
+  /* 40 furnace side - the mouth, with a fire lit inside it. Redrawn on a timer by
+     animateFire(); this is frame 0. Painted into the texture rather than made a
+     glow block: glow lights every face equally, which would leave a stone furnace
+     shining like a lamp on all six sides. */
+  tile(40,function(x,r){ drawFurnace(x,0); });
+  /* 41 a bed seen from above. Not on any face of anything - the bed is built out
+     of boxes and none of them is a whole block wide. This is the picture on the
+     palette button, in the picker and on the ideas page, which all want one square
+     that says "bed" at 44 pixels across. */
   tile(41,function(x,r){
     fill(x,'#c4362f'); speck(x,r,['#b52f28','#d34039'],50);
-    x.fillStyle='#f4f0e4'; x.fillRect(0,0,16,5);
-    x.fillStyle='#ded9c8'; x.fillRect(0,4,16,1);
-    x.fillStyle='#e8e2d0'; x.fillRect(0,6,16,2);
-    x.fillStyle='#9e2620'; x.fillRect(0,8,16,1);
-    x.fillStyle='#9e2620'; x.fillRect(0,15,16,1);
+    x.fillStyle='#f4f0e4'; x.fillRect(2,1,12,5);
+    x.fillStyle='#ded9c8'; x.fillRect(2,5,12,1);
+    x.fillStyle='#e8e2d0'; x.fillRect(2,7,12,2);
+    x.fillStyle='#9e2620'; x.fillRect(2,9,12,1);
+    x.fillStyle='#6e5336'; x.fillRect(0,0,2,16); x.fillRect(14,0,2,16);
+    x.fillStyle='#6e5336'; x.fillRect(0,0,16,1); x.fillRect(0,15,16,1);
+    x.fillStyle='#5c452c'; x.fillRect(1,0,1,16); x.fillRect(14,0,1,16);
   });
-  /* 42 bed side - blanket over a mattress on a wooden frame */
+  /* 42 the head end of a bed, seen from outside: the headboard with the pillow
+     showing over it. Only used as this half's swatch. */
   tile(42,function(x,r){
     fill(x,'#8a6a47'); speck(x,r,['#7d5f3f','#997754'],40);
-    x.fillStyle='#c4362f'; x.fillRect(0,0,16,7);
-    x.fillStyle='#9e2620'; x.fillRect(0,7,16,1);
-    x.fillStyle='#f4f0e4'; x.fillRect(0,8,16,3);
-    x.fillStyle='#ded9c8'; x.fillRect(0,10,16,1);
-    x.fillStyle='#6e5336'; x.fillRect(1,12,3,4); x.fillRect(12,12,3,4);
-    x.fillStyle='#5c452c'; x.fillRect(0,15,16,1);
+    x.fillStyle='#f4f0e4'; x.fillRect(3,2,10,4);
+    x.fillStyle='#ded9c8'; x.fillRect(3,5,10,1);
+    x.fillStyle='#6e5336'; x.fillRect(0,7,16,9);
+    x.fillStyle='#5c452c'; x.fillRect(0,7,16,1);
+    for(var i=2;i<16;i+=4){ x.fillStyle='#7d5f3f'; x.fillRect(i,8,1,8); }
+  });
+  /* 43 blanket - the red cover that lies over the mattress */
+  tile(43,function(x,r){
+    fill(x,'#c4362f'); speck(x,r,['#b52f28','#d34039','#ad2b25'],70);
+    x.fillStyle='#9e2620'; x.fillRect(0,15,16,1);
+  });
+  /* 44 sheet - the white mattress under it */
+  tile(44,function(x,r){
+    fill(x,'#f2eee0'); speck(x,r,['#e8e3d2','#faf7ec'],50);
+    x.fillStyle='#ded9c8'; x.fillRect(0,15,16,1);
+  });
+  /* 45 bed wood - the frame, the legs and the headboard. Darker than planks so the
+     frame reads as a separate thing from a plank floor underneath it. */
+  tile(45,function(x,r){
+    fill(x,'#6e5336'); speck(x,r,['#63492e','#7c5f3f','#59421f'],60);
+    for(var i=0;i<16;i+=5){ x.fillStyle='#5c452c'; x.fillRect(0,i,16,1); }
+  });
+  /* 46 pillow - paler than the sheet, with a dent in it */
+  tile(46,function(x,r){
+    fill(x,'#fbf8ee'); speck(x,r,['#f2eee0','#ffffff'],40);
+    x.fillStyle='#e6e0cd'; x.fillRect(3,3,10,10);
+    x.fillStyle='#f2eee0'; x.fillRect(4,4,8,8);
   });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
@@ -1449,6 +1483,46 @@ function drawFire(x,frame){
   /* a couple of drifting sparks */
   x.fillStyle='#fff3bd';
   for(var s=0;s<3;s++) x.fillRect((r()*16)|0,(r()*7)|0,1,1);
+}
+
+/* The furnace mouth, with a fire burning in it. Its own function for the same
+   reason as drawFire: animateFire redraws this one tile on a timer rather than
+   rebuilding the atlas or re-meshing anything.
+
+   Stone first and always the same - the speckle is drawn from a fixed seed rather
+   than the frame number, so the stonework stays put while only the flames move.
+   Seeded to match what buildAtlas's tile() would have handed it, so frame 0 here
+   and frame 0 there are the same picture. */
+function drawFurnace(x,frame){
+  var r=mulberry32(9176+40*7919);
+  x.fillStyle='#8b8b94'; x.fillRect(0,0,16,16);
+  var stone=['#80808a','#99999f','#75757e'];
+  for(var i=0;i<80;i++){ x.fillStyle=stone[(r()*3)|0]; x.fillRect((r()*16)|0,(r()*16)|0,1,1); }
+  x.fillStyle='#63636b'; x.fillRect(3,4,10,1);
+  x.fillStyle='#2b2b31'; x.fillRect(3,5,10,8);
+  x.fillStyle='#1b1b20'; x.fillRect(4,6,8,7);
+  x.fillStyle='#6c6c74'; x.fillRect(0,14,16,2);
+
+  /* Flames inside the mouth. Eight columns, x=4..11, rising from y=13 - the same
+     shape of thing as drawFire but small, contained and a good deal calmer, so a
+     kitchen does not flicker like a bonfire. */
+  var f=mulberry32(5150+frame*7919);
+  var cols=['#d94b1f','#ff8a1f','#ffc43d','#ffe98a'];
+  for(var c=0;c<8;c++){
+    var base=3.6+Math.sin((c+frame*1.35)*1.05)*1.5+f()*1.3;
+    var h=Math.max(2,Math.min(7,base|0));
+    for(var y=0;y<h;y++){
+      var t=y/h;
+      var ci = t<0.34?0 : (t<0.64?1 : (t<0.88?2:3));
+      x.fillStyle=cols[ci];
+      x.fillRect(4+c,13-y,1,1);
+    }
+  }
+  /* embers on the floor of it, and the odd spark going up */
+  x.fillStyle='#ffd45a';
+  for(var e=0;e<3;e++) x.fillRect(4+((f()*8)|0),13,1,1);
+  x.fillStyle='#fff3bd';
+  if(frame&1) x.fillRect(4+((f()*8)|0),6+((f()*3)|0),1,1);
 }
 
 /* Portal shimmer. White-ish on purpose: the per-portal colour comes from the
@@ -1506,8 +1580,12 @@ function getBlock(x,y,z){
 }
 function isOpaque(x,y,z){
   var b=getBlock(x,y,z);
-  return b!==AIR && !DEFS[b].transparent;
+  return b!==AIR && !DEFS[b].transparent && !DEFS[b].prop;
 }
+/* A prop does not fill its cell - a bed is a frame with legs and a good deal of
+   air around it - so it must not hide the faces of whatever it stands against, or
+   the wall behind a bed comes out with a block-shaped hole in it. */
+function isProp(b){ return b!==AIR && !!DEFS[b].prop; }
 function isSolid(x,y,z){
   if(!inside(x,y,z)) return false;
   var b=blocks[idx(x,y,z)];
@@ -2193,26 +2271,44 @@ var matGlow=new THREE.MeshBasicMaterial({map:atlasTex,vertexColors:true});
    256x256, so a re-upload at this rate costs nothing, and it avoids having to
    re-mesh chunks to swap UVs between frames. Skipped entirely when there is no
    fire in the world, which is the normal case. */
-var fireFrame=0, fireClock=0, fireCount=0;
+var fireFrame=0, fireClock=0, fireCount=0, furnaceCount=0, furnaceFrame=0;
+/* Repaint one tile of the atlas in place, in the same 16x16 coordinates the tile
+   was originally drawn in. Lifted out of animateFire when the furnace became the
+   second thing that moves. */
+function repaintTile(c,i,fn){
+  var tx=(i%ACOLS)*TP, ty=Math.floor(i/ACOLS)*TP;
+  c.save();
+  c.beginPath(); c.rect(tx,ty,TP,TP); c.clip();
+  c.translate(tx,ty); c.scale(TP/16,TP/16);
+  c.imageSmoothingEnabled=false;
+  fn(c);
+  c.restore();
+}
 function animateFire(dt){
-  if(fireCount<=0) return;
+  if(fireCount<=0 && furnaceCount<=0) return;
   fireClock+=dt;
   if(fireClock<0.11) return;                 /* ~9 flickers a second */
   fireClock=0;
   fireFrame=(fireFrame+1)&7;
   var c=atlasCanvas.getContext('2d');
-  var tx=(23%ACOLS)*TP, ty=Math.floor(23/ACOLS)*TP;
-  c.save();
-  c.beginPath(); c.rect(tx,ty,TP,TP); c.clip();
-  c.translate(tx,ty); c.scale(TP/16,TP/16);
-  c.imageSmoothingEnabled=false;
-  drawFire(c,fireFrame);
-  c.restore();
+  if(fireCount>0)    repaintTile(c,23,function(x){ drawFire(x,fireFrame); });
+  /* The furnace burns at half the rate of an open flame - a stove in a bedroom
+     should not be the busiest thing on screen. Its own counter rather than a slice
+     of the fire's, so it still gets all eight frames, just half as often; taking
+     every other bit of fireFrame would have given it four pictures and a visible
+     repeat. The tile is only touched on the ticks that change it. */
+  if(furnaceCount>0 && !(fireFrame&1)){
+    furnaceFrame=(furnaceFrame+1)&7;
+    repaintTile(c,40,function(x){ drawFurnace(x,furnaceFrame); });
+  }
   atlasTex.needsUpdate=true;
 }
 function recountFire(){
-  fireCount=0;
-  for(var i=0;i<blocks.length;i++) if(blocks[i]===FIRE) fireCount++;
+  fireCount=0; furnaceCount=0;
+  for(var i=0;i<blocks.length;i++){
+    if(blocks[i]===FIRE) fireCount++;
+    else if(blocks[i]===FURNACE) furnaceCount++;
+  }
 }
 
 var hemi=new THREE.HemisphereLight(0xdff2ff,0x6f8a5a,0.80);
@@ -2337,6 +2433,84 @@ var CORNERS=[[0,0],[1,0],[1,1],[0,1]];
 var AO_LEVEL=[0.53,0.70,0.86,1.0];
 var PAD=0.03;
 
+/* ---------------- props: the things that are not cubes ----------------
+   A bed is a wooden frame on four legs, with a mattress in it, a blanket over
+   that, a pillow at one end and a headboard behind the pillow. Written out in
+   sixteenths of a block, exactly the units Minecraft's own models use, with the
+   bed lying along +X and the pillow end at +X. Every other direction is this list
+   turned a quarter turn at a time, so there is one description of a bed rather
+   than four.
+
+   [x0,y0,z0, x1,y1,z1, tile] - one tile for the whole box. A leg is three
+   sixteenths across, so a proper top/side split on it would be invisible and the
+   list would be three times as long to read.
+
+   The mattress top sits at 12/16, not 16/16, but the block is still solid to walk
+   into and stand on, the same as any other. That is a quarter of a block of daylight
+   under his feet when he stands on a bed, and the alternative is teaching the
+   collision code about part-height blocks, which is the physics he asked me not to
+   touch. Minecraft's own bed is 9/16 and steppable; this one is a little taller and
+   is not. */
+var BED_WOOD=45, BED_SHEET=44, BED_BLANKET=43, BED_PILLOW=46;
+var BED_SHAPE={
+  /* the foot: two legs at the outer end, frame, mattress, blanket over all of it */
+  bedFoot:[
+    [0,0,1,   3,4,4,    BED_WOOD],
+    [0,0,12,  3,4,15,   BED_WOOD],
+    [0,4,0,   16,7,16,  BED_WOOD],
+    [1,7,1,   16,11,15, BED_SHEET],
+    [1,11,1,  16,12.5,15, BED_BLANKET]
+  ],
+  /* the head: legs under the headboard, the blanket turned down, then the pillow */
+  bedHead:[
+    [13,0,1,  16,4,4,   BED_WOOD],
+    [13,0,12, 16,4,15,  BED_WOOD],
+    [0,4,0,   16,7,16,  BED_WOOD],
+    [0,7,1,   14,11,15, BED_SHEET],
+    [0,11,1,  7,12.5,15, BED_BLANKET],
+    [7,11,2,  13,14,14, BED_PILLOW],
+    [14,4,0,  16,16,16, BED_WOOD]
+  ]
+};
+
+/* Which way a bed points is not stored anywhere - it is read off the fact that its
+   other half is next door. Two ids instead of eight, nothing new in the save file,
+   and a bed that was placed before any of this existed still loads.
+
+   The two halves scan in opposite orders on purpose. A foot looks +X,+Z,-X,-Z and a
+   head looks -X,-Z,+X,+Z, which is what keeps two beds pushed end to end from pairing
+   across the join: foot,head,foot,head in a row has every half finding the partner it
+   was actually placed with, and so does head,foot,foot,head. */
+var BED_SCAN=[[1,0],[0,1],[-1,0],[0,-1]];
+function bedPartner(x,y,z,id){
+  var head=id===BEDHEAD, want=head?BED:BEDHEAD;
+  for(var i=0;i<4;i++){
+    var d=BED_SCAN[head?(i+2)&3:i];
+    if(getBlock(x+d[0],y,z+d[1])===want) return d;
+  }
+  return null;
+}
+/* The direction from foot to head, which is the way the whole bed faces. A half
+   with no partner - one he built before beds came in two pieces, or one whose
+   other half somebody else dug while he was looking away - lies along +X, so it is
+   still a bed rather than nothing. */
+function bedFacing(x,y,z,id){
+  var d=bedPartner(x,y,z,id);
+  if(!d) return [1,0];
+  return id===BEDHEAD ? [-d[0],-d[1]] : d;
+}
+/* Turn a box a quarter turn at a time about the middle of its cell. Returns the
+   box in the same [x0,y0,z0,x1,y1,z1] order with the corners put back in order,
+   because rotating swaps which end is the smaller one. */
+function rotBox(b,fx,fz){
+  var x0=b[0], z0=b[2], x1=b[3], z1=b[5], ax0,az0,ax1,az1;
+  if(fx===1 && fz===0){ ax0=x0; az0=z0; ax1=x1; az1=z1; }
+  else if(fx===0 && fz===1){ ax0=16-z1; az0=x0; ax1=16-z0; az1=x1; }
+  else if(fx===-1 && fz===0){ ax0=16-x1; az0=16-z1; ax1=16-x0; az1=16-z0; }
+  else { ax0=z0; az0=16-x1; ax1=z1; az1=16-x0; }
+  return [ax0,b[1],az0,ax1,b[4],az1,b[6]];
+}
+
 var chunks=[];
 function makeChunks(){
   chunks=[];
@@ -2391,6 +2565,56 @@ function markDirty(x,y,z){
    while being ruinous on the tablet. */
 var chunkRebuilds=0;
 
+/* One box of a prop, all six faces of it, into the opaque buffers.
+
+   Each face is mapped across the whole tile rather than a slice of it matching the
+   box's size. On the big faces - the frame, the mattress, the blanket - the box is
+   a whole cell wide and the two are the same thing. On a leg three sixteenths
+   across it squashes the texture, which is why the wood, sheet, blanket and pillow
+   tiles are all even weaves with no picture in them: there is nothing there to look
+   wrong. Anything with a design on it would need the slice.
+
+   Ambient occlusion is not sampled: a prop sits in the middle of its cell with air
+   around it, so the neighbours a cube would ask about are not touching it. Faces
+   keep their own shading, which is what gives the frame its edges. */
+function propBox(P,N,U,C,I,ox,oy,oz,box,tint){
+  var x0=ox+box[0]/16, y0=oy+box[1]/16, z0=oz+box[2]/16;
+  var x1=ox+box[3]/16, y1=oy+box[4]/16, z1=oz+box[5]/16;
+  var t=box[6];
+  var tx=t%ACOLS, ty=Math.floor(t/ACOLS);
+  var u0=(tx+PAD)/ACOLS, u1=(tx+1-PAD)/ACOLS;
+  var v0=1-(ty+1-PAD)/AROWS, v1=1-(ty+PAD)/AROWS;
+  /* corner order per face, then the normal and how dark it is - the same six
+     shades a cube uses, so a bed sits in a room lit like everything else */
+  var faces=[
+    {q:[[x1,y0,z1],[x1,y0,z0],[x1,y1,z0],[x1,y1,z1]], n:[1,0,0],  s:0.80},
+    {q:[[x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0]], n:[-1,0,0], s:0.80},
+    {q:[[x0,y1,z1],[x1,y1,z1],[x1,y1,z0],[x0,y1,z0]], n:[0,1,0],  s:1.00},
+    {q:[[x0,y0,z0],[x1,y0,z0],[x1,y0,z1],[x0,y0,z1]], n:[0,-1,0], s:0.52},
+    {q:[[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]], n:[0,0,1],  s:0.90},
+    {q:[[x1,y0,z0],[x0,y0,z0],[x0,y1,z0],[x1,y1,z0]], n:[0,0,-1], s:0.90}
+  ];
+  for(var f=0;f<6;f++){
+    var F=faces[f], vs=P.length/3;
+    for(var k=0;k<4;k++){
+      P.push(F.q[k][0],F.q[k][1],F.q[k][2]);
+      N.push(F.n[0],F.n[1],F.n[2]);
+      var du=CORNERS[k][0], dv=CORNERS[k][1];
+      U.push(u0+du*(u1-u0), v0+dv*(v1-v0));
+      var sh=F.s*tint;
+      C.push(sh,sh,sh);
+    }
+    I.push(vs,vs+1,vs+2, vs,vs+2,vs+3);
+  }
+}
+function propMesh(P,N,U,C,I,x,y,z,id,def,tint){
+  var shape=BED_SHAPE[def.prop];
+  if(!shape) return;
+  var face=bedFacing(x,y,z,id);
+  for(var i=0;i<shape.length;i++)
+    propBox(P,N,U,C,I,x,y,z,rotBox(shape[i],face[0],face[1]),tint);
+}
+
 function buildChunk(ch){
   chunkRebuilds++;
   var P=[],N=[],U=[],C=[],I=[];      // opaque buffers
@@ -2406,12 +2630,16 @@ function buildChunk(ch){
     var def=DEFS[b], trans=!!def.transparent, glow=!!def.glow;
     var tint=0.955+hash2(x*31+y*17,z*13+y*7)*0.09;
 
+    /* Not a cube. Build it out of boxes and move on - no neighbour culling, because
+       nothing about a bed lines up with the edge of its cell. */
+    if(def.prop){ propMesh(P,N,U,C,I,x,y,z,b,def,tint); continue; }
+
     for(var f=0;f<6;f++){
       var F=FACES[f];
       var nx=x+F.n[0], ny=y+F.n[1], nz=z+F.n[2];
       var nb=getBlock(nx,ny,nz);
-      if(trans){ if(nb!==AIR) continue; }
-      else { if(nb!==AIR && !DEFS[nb].transparent) continue; }
+      if(trans){ if(nb!==AIR && !isProp(nb)) continue; }
+      else { if(nb!==AIR && !DEFS[nb].transparent && !isProp(nb)) continue; }
 
       var tileIdx=def.tiles[F.t];
       var tx=tileIdx%ACOLS, ty=Math.floor(tileIdx/ACOLS);
@@ -2503,9 +2731,11 @@ var FOG_NEAR=46, FOG_FAR=118;
 function setBlock(x,y,z,id){
   if(!inside(x,y,z)) return false;
   if(blocks[idx(x,y,z)]===id) return false;
-  /* Keep the flame count straight so animateFire can idle when nothing is lit. */
+  /* Keep the flame counts straight so animateFire can idle when nothing is lit. */
   if(blocks[idx(x,y,z)]===FIRE) fireCount--;
   if(id===FIRE) fireCount++;
+  if(blocks[idx(x,y,z)]===FURNACE) furnaceCount--;
+  if(id===FURNACE) furnaceCount++;
   blocks[idx(x,y,z)]=id;
   edits[x+','+y+','+z]=id;
   markDirty(x,y,z);
@@ -4246,11 +4476,53 @@ function buildTarget(){
   if(!canBuild()) return null;
   return placeCell(rayHit()) || placeCell(groundAhead());
 }
+/* A bed is two blocks, so it needs a second cell free before either goes down. The
+   pillow end goes one block further from him than the half he is aiming at, so a bed
+   built facing a wall ends up with its headboard against the wall. If that space is
+   taken the other three directions are tried in turn, and if none of them is free he
+   is told - rather than left with half a bed and no way to finish it. */
+function bedDirs(){
+  var fx=Math.sin(yaw), fz=Math.cos(yaw);
+  var first = Math.abs(fx)>Math.abs(fz) ? [fx>0?1:-1,0] : [0,fz>0?1:-1];
+  var all=[first];
+  for(var i=0;i<4;i++){
+    var d=BED_SCAN[i];
+    if(d[0]!==first[0]||d[1]!==first[1]) all.push(d);
+  }
+  return all;
+}
+/* Empty, inside the world, and not where he is standing - the same three questions
+   placeCell asks about the first cell, asked again about the second. */
+function cellFree(bx,by,bz){
+  if(!inside(bx,by,bz)) return false;
+  var cur=getBlock(bx,by,bz);
+  if(cur!==AIR && cur!==WATER) return false;
+  var px0=player.x-PW, px1=player.x+PW, pz0=player.z-PW, pz1=player.z+PW;
+  return !(bx+1>px0 && bx<px1 && bz+1>pz0 && bz<pz1 && by+1>player.y && by<player.y+PH);
+}
+function placeBed(c){
+  var dirs=bedDirs();
+  for(var i=0;i<dirs.length;i++){
+    var d=dirs[i];
+    if(!cellFree(c.x+d[0],c.y,c.z+d[1])) continue;
+    setBlock(c.x,c.y,c.z,BED);
+    setBlock(c.x+d[0],c.y,c.z+d[1],BEDHEAD);
+    return true;
+  }
+  toast('A bed needs two blocks of room!');
+  return false;
+}
 function breakAt(x,y,z){
   var b=getBlock(x,y,z);
   if(b===AIR||b===WATER) return false;
   if(DEFS[b] && DEFS[b].unbreakable){ toast('That one is too tough!'); return false; }
+  /* Both halves of a bed go together, the way they do in Minecraft. Half a bed is
+     not something he meant to make and not something he can put right. Read before
+     anything is cleared, and cleared through setBlock like any other change, so the
+     other half travels to everybody else in the room too. */
+  var half=(b===BED||b===BEDHEAD)?bedPartner(x,y,z,b):null;
   setBlock(x,y,z,AIR);
+  if(half) setBlock(x+half[0],y,z+half[1],AIR);
   burst(new THREE.Vector3(x+0.5,y+0.5,z+0.5),DEFS[b].avg,9);
   sfx('dig');
   portalsOnBreak(x,y,z);
@@ -4288,6 +4560,7 @@ function build(){
   }
   var c=buildTarget();
   if(!c) return;
+  if(selected===BED){ if(placeBed(c)) sfx('place'); return; }
   setBlock(c.x,c.y,c.z,selected);
   sfx('place');
   /* Did that block just finish a portal? The flood behind this is capped at 729
@@ -8293,7 +8566,39 @@ window.__henrycraft={
        SNOW:SNOW,ICE:ICE,SANDSTONE:SANDSTONE,CACTUS:CACTUS,PINE:PINE,
        MUSHCAP:MUSHCAP,MUSHCAP2:MUSHCAP2,MUSHSTEM:MUSHSTEM,PORTAL:PORTAL,
        ROAD:ROAD,KERB:KERB,ROADLINE:ROADLINE,GRID:GRID,
-       FURNACE:FURNACE,BED:BED},
+       FURNACE:FURNACE,BED:BED,BEDHEAD:BEDHEAD},
+  bedFacing:bedFacing,
+  /* Every triangle in every chunk mesh, whether the camera can see it or not.
+     renderCost() deliberately counts only what survived frustum culling, which is
+     the right answer to "what does this cost to draw" and the wrong one to "what
+     shape did the mesher build". */
+  chunkTriangles:function(){
+    flushDirty();
+    var t=0;
+    chunks.forEach(function(c){
+      ['opaque','trans','glow'].forEach(function(k){
+        var m=c[k]; if(!m) return;
+        var ix=m.geometry.getIndex(); if(ix) t+=ix.count/3;
+      });
+    });
+    return t;
+  },
+  fireCounts:function(){ return {fire:fireCount, furnace:furnaceCount, frame:fireFrame}; },
+  /* The real animation step, with the time handed to it rather than taken from the
+     clock. Under a software rasteriser the render loop manages three or four frames
+     a second, so a test that waits and watches is measuring the frame rate more
+     than the flame - which is exactly how the first version of this reported a fire
+     that had barely moved. */
+  tickFire:animateFire,
+  atlasTile:function(i){
+    /* what the atlas actually holds for one tile, right now - the only way a test
+       can see that the furnace flame moved without looking at the screen */
+    var c=atlasCanvas.getContext('2d');
+    var d=c.getImageData((i%ACOLS)*TP,Math.floor(i/ACOLS)*TP,TP,TP).data;
+    var h=0;
+    for(var k=0;k<d.length;k+=4) h=(h*31+d[k]+d[k+1]*3+d[k+2]*7)|0;
+    return h;
+  },
   DEFS:DEFS,
   PALETTE:PALETTE,
   swatchURL:swatchURL,
@@ -8527,6 +8832,8 @@ window.__henrycraft={
   /* The three ways a block gets dug or placed, so a test can try all of them from the
      driving seat and find that none of them does anything. */
   dig:dig, build:build, digDown:digDown, setFly:setFly,
+  breakAt:breakAt, placeBed:placeBed,
+  setYaw:function(v){ yaw=v; },
   /* Is the game offering to dig or place anything right now? Both halves, because the
      wireframe box and the ghost block are drawn from different answers. */
   aiming:function(){

@@ -108,6 +108,28 @@ function slope(pts) {
                           '36860b,ffffff,dc8c54,36860b,36860b,ffffff',
         JSON.stringify(henry));
 
+  /* ---- 0b: the numbers behind the blocks ----------------------------------
+     A district is saved as a map of coordinates to block ids, so an id IS the save
+     format. Renumbering one - by inserting into the middle of the list rather than
+     appending, or by reordering it - silently turns every diamond in his world into
+     something else, with no error anywhere and no way back. Written out here so that
+     it is a decision somebody has to make on purpose. New blocks get new numbers on
+     the end and this list grows; nothing in it ever changes. */
+  console.log('0b. every block id is the number it has always been');
+  const ID_TABLE = {
+    AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, WOOD: 5, LEAVES: 6, PLANKS: 7,
+    BRICK: 8, GLASS: 9, GOLD: 10, DIAMOND: 11, RAINBOW: 12, WATER: 13, BEDROCK: 14,
+    COAL: 15, COPPER: 16, LAPIS: 17, EMERALD: 18, OBSIDIAN: 19, ENCHANT: 20, FIRE: 21,
+    SNOW: 22, ICE: 23, SANDSTONE: 24, CACTUS: 25, PINE: 26, MUSHCAP: 27, MUSHCAP2: 28,
+    MUSHSTEM: 29, PORTAL: 30, ROAD: 31, KERB: 32, ROADLINE: 33, GRID: 34,
+    FURNACE: 35, BED: 36, BEDHEAD: 37,
+  };
+  const ids = await page.evaluate(() => window.__henrycraft.ids);
+  const moved = Object.keys(ID_TABLE).filter(k => ids[k] !== ID_TABLE[k])
+    .map(k => `${k} is ${ids[k]}, was ${ID_TABLE[k]}`);
+  check(`all ${Object.keys(ID_TABLE).length} block ids are unchanged`, moved.length === 0,
+        moved.join('; '));
+
   console.log('1. atlas tiles are unique and every UV lands inside the atlas');
   const atlas = await page.evaluate(() => {
     const H = window.__henrycraft, a = H.atlas(), slots = a.cols * a.rows;
@@ -265,6 +287,177 @@ function slope(pts) {
         JSON.stringify(drawers.survived));
   note('furniture: ' + drawers.names.join(', ') +
        `; drawer after the round trip: ${drawers.openAfter}`);
+
+  /* ---- 2c: the bed is a bed ------------------------------------------------
+     The first version was one cube with a red top, and it read as a cake. A bed
+     in Minecraft is two blocks laid end to end and shorter than a block, with a
+     frame, legs, a pillow and a headboard. This one is the same, built out of
+     twelve little boxes rather than two cubes - and which way it points is worked
+     out from where its other half is, so nothing is stored per direction. */
+  console.log('2c. a bed is two blocks, points the way he is facing, and is not a cube');
+  const bed = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 77);
+    const gy = 24, out = {};
+    for (let x = 20; x <= 60; x++) for (let z = 20; z <= 60; z++) {
+      for (let y = gy; y < gy + 6; y++) H.setBlock(x, y, z, ids.AIR);
+      H.setBlock(x, gy - 1, z, ids.PLANKS);
+    }
+    H.selectBlock(ids.BED);
+
+    // yaw 0 looks along +Z here: forward is (sin yaw, cos yaw)
+    out.placed = [[0, '+Z', [0, 1]], [Math.PI / 2, '+X', [1, 0]],
+                  [Math.PI, '-Z', [0, -1]], [-Math.PI / 2, '-X', [-1, 0]]]
+      .map(([ang, label, want], i) => {
+        const x = 26 + i * 4, z = 30;
+        H.movePlayer(x + 0.5, gy + 0.05, z - 2.5);
+        H.setYaw(ang);
+        H.placeBed({x, y: gy, z});
+        const head = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+          .find(d => H.getBlock(x + d[0], gy, z + d[1]) === ids.BEDHEAD);
+        return {label, want,
+                foot: H.getBlock(x, gy, z) === ids.BED,
+                head: head || null,
+                facing: H.bedFacing(x, gy, z, ids.BED)};
+      });
+
+    // digging either half takes the other with it
+    H.setBlock(40, gy, 40, ids.BED); H.setBlock(41, gy, 40, ids.BEDHEAD);
+    H.breakAt(40, gy, 40);
+    out.digFoot = [H.getBlock(40, gy, 40), H.getBlock(41, gy, 40)];
+    H.setBlock(40, gy, 42, ids.BED); H.setBlock(41, gy, 42, ids.BEDHEAD);
+    H.breakAt(41, gy, 42);
+    out.digHead = [H.getBlock(40, gy, 42), H.getBlock(41, gy, 42)];
+
+    // nowhere to put the other half: nothing goes down, and he is told
+    const bx = 45, bz = 45;
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(d => H.setBlock(bx + d[0], gy, bz + d[1], ids.STONE));
+    H.movePlayer(bx + 0.5, gy + 0.05, bz + 3.5);
+    H.placeBed({x: bx, y: gy, z: bz});
+    out.noRoom = {cell: H.getBlock(bx, gy, bz),
+                  said: document.getElementById('toast').textContent};
+
+    /* Two beds pushed end to end must not pair across the join. Both arrangements:
+       foot-head-foot-head, and head-foot-foot-head. */
+    H.setBlock(50, gy, 55, ids.BED);     H.setBlock(51, gy, 55, ids.BEDHEAD);
+    H.setBlock(52, gy, 55, ids.BED);     H.setBlock(53, gy, 55, ids.BEDHEAD);
+    out.inLine = [H.bedFacing(50, gy, 55, ids.BED), H.bedFacing(51, gy, 55, ids.BEDHEAD),
+                  H.bedFacing(52, gy, 55, ids.BED), H.bedFacing(53, gy, 55, ids.BEDHEAD)];
+    H.setBlock(50, gy, 58, ids.BEDHEAD); H.setBlock(51, gy, 58, ids.BED);
+    H.setBlock(52, gy, 58, ids.BED);     H.setBlock(53, gy, 58, ids.BEDHEAD);
+    out.headOut = [H.bedFacing(50, gy, 58, ids.BEDHEAD), H.bedFacing(51, gy, 58, ids.BED),
+                   H.bedFacing(52, gy, 58, ids.BED), H.bedFacing(53, gy, 58, ids.BEDHEAD)];
+
+    // across a chunk boundary - CHUNK is 16, so 31 and 32 are in different chunks
+    H.setBlock(31, gy, 50, ids.BED); H.setBlock(32, gy, 50, ids.BEDHEAD);
+    out.chunkEdge = [H.bedFacing(31, gy, 50, ids.BED), H.bedFacing(32, gy, 50, ids.BEDHEAD)];
+
+    // a half on its own, which is how a bed built before today loads
+    H.setBlock(56, gy, 58, ids.BED);
+    out.lone = H.bedFacing(56, gy, 58, ids.BED);
+
+    /* Shape. A bed is twelve boxes - five in the foot, seven in the head - and six
+       faces each, so 144 triangles. Measured as a difference against the same world
+       without it, twice: once in the open, and once with the bed pushed against a
+       wall. The two must come to the same number. If a prop were treated as a solid
+       cube for face culling, the wall would lose the face behind the bed and the
+       second figure would come out smaller - which is the bug this catches, and it
+       is invisible from the front. */
+    const wipe = (x, z) => { H.setBlock(x, gy, z, ids.AIR); H.setBlock(x + 1, gy, z, ids.AIR); };
+    wipe(24, 24);
+    const base = H.chunkTriangles();
+    H.setBlock(24, gy, 24, ids.BED); H.setBlock(25, gy, 24, ids.BEDHEAD);
+    out.openTris = H.chunkTriangles() - base;
+    wipe(24, 24);
+
+    for (let y = gy; y < gy + 3; y++) H.setBlock(26, y, 24, ids.BRICK);   // a wall
+    const walled = H.chunkTriangles();
+    H.setBlock(24, gy, 24, ids.BED); H.setBlock(25, gy, 24, ids.BEDHEAD); // head against it
+    out.wallTris = H.chunkTriangles() - walled;
+
+    return out;
+  });
+  const dirEq = (a, b) => !!a && !!b && a[0] === b[0] && a[1] === b[1];
+  check('a bed is two blocks, a foot and a head',
+        bed.placed.every(t => t.foot && t.head),
+        JSON.stringify(bed.placed.map(t => ({d: t.label, foot: t.foot, head: t.head}))));
+  check('it lies the way he is facing, all four ways round',
+        bed.placed.every(t => dirEq(t.head, t.want) && dirEq(t.facing, t.want)),
+        JSON.stringify(bed.placed));
+  check('digging either half takes the other with it',
+        bed.digFoot[0] === 0 && bed.digFoot[1] === 0 &&
+        bed.digHead[0] === 0 && bed.digHead[1] === 0,
+        `foot dug ${bed.digFoot}, head dug ${bed.digHead}`);
+  check('with no room for the second half nothing is placed, and he is told',
+        bed.noRoom.cell === 0 && /two blocks of room/.test(bed.noRoom.said),
+        JSON.stringify(bed.noRoom));
+  check('two beds end to end each pair with their own other half',
+        bed.inLine.every(f => dirEq(f, [1, 0])) &&
+        dirEq(bed.headOut[0], [-1, 0]) && dirEq(bed.headOut[1], [-1, 0]) &&
+        dirEq(bed.headOut[2], [1, 0])  && dirEq(bed.headOut[3], [1, 0]),
+        `in line ${JSON.stringify(bed.inLine)}, head to head ${JSON.stringify(bed.headOut)}`);
+  check('a bed spanning two chunks agrees with itself',
+        dirEq(bed.chunkEdge[0], [1, 0]) && dirEq(bed.chunkEdge[1], [1, 0]),
+        JSON.stringify(bed.chunkEdge));
+  check('a half on its own still lies down as a bed', dirEq(bed.lone, [1, 0]),
+        JSON.stringify(bed.lone));
+  check(`a bed is 12 boxes, not 2 cubes (${bed.openTris} triangles)`,
+        bed.openTris === 144, `${bed.openTris} triangles, expected 144`);
+  check('and it does not punch a hole in the wall behind it',
+        bed.wallTris === bed.openTris,
+        `${bed.wallTris} against a wall, ${bed.openTris} in the open`);
+
+  /* ---- 2d: the furnace fire moves -----------------------------------------
+     Same trick as Flint & Steel: one tile of the atlas is repainted on a timer and
+     the texture re-uploaded, so nothing is re-meshed. Read off the atlas rather
+     than the screen - a screenshot cannot tell a flame that moved from one the
+     renderer happened to shade differently.
+
+     The animation is stepped by hand with a known dt, and separately checked to be
+     wired into the render loop at all. Waiting and watching measures both at once,
+     and under a software rasteriser the frame rate is the smaller number: the first
+     version of this saw two pictures in a second and a half and called the flame
+     broken, when what it had measured was three frames a second. */
+  console.log('2d. the fire in the furnace moves, and idles when there is none');
+  const flame = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    H.loadThemeSeed('meadow', 5);
+
+    const idle = [];
+    for (let i = 0; i < 20; i++) { H.tickFire(0.12); idle.push(H.atlasTile(40)); }
+
+    const gy = H.surfaceY(30, 30);
+    H.setBlock(30, gy, 30, ids.FURNACE);
+    const lit = [];
+    for (let i = 0; i < 40; i++) { H.tickFire(0.12); lit.push(H.atlasTile(40)); }
+    const counts = H.fireCounts();
+
+    // and it really is on the render loop, not just callable
+    const before = H.atlasTile(40);
+    let moved = false;
+    for (let i = 0; i < 25 && !moved; i++) { await wait(120); moved = H.atlasTile(40) !== before; }
+
+    H.setBlock(30, gy, 30, ids.AIR);
+    const after = H.fireCounts();
+    const stillNow = H.atlasTile(40);
+    for (let i = 0; i < 20; i++) H.tickFire(0.12);
+    return {counts, after, moved,
+            idleFrames: new Set(idle).size,
+            litFrames: new Set(lit).size,
+            stopped: H.atlasTile(40) === stillNow};
+  });
+  check('with no furnace in the world the tile is never touched',
+        flame.idleFrames === 1, `${flame.idleFrames} different pictures while idle`);
+  check(`a lit furnace cycles eight pictures (${flame.litFrames} seen)`,
+        flame.litFrames === 8, `${flame.litFrames} distinct frames over 40 ticks`);
+  check('and the render loop is really driving it', flame.moved,
+        'the tile never changed on its own in 3 seconds');
+  check('digging the furnace out stops the repainting again', flame.stopped,
+        'the tile kept changing with no furnace left');
+  check('the furnace count follows placing and digging one',
+        flame.counts.furnace === 1 && flame.after.furnace === 0,
+        `${flame.counts.furnace} lit, ${flame.after.furnace} after digging`);
 
   // ---- 3 + 4: ore across seeds, and the depth invariants -------------------
   console.log(`3. every world generates all the new ore (${SEEDS} seeds)`);
