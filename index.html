@@ -864,7 +864,16 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
     BATH=49,BATH1=50,BATH2=51,BATH3=52,
     SINK=53,SINK1=54,SINK2=55,SINK3=56,
     TOILET=57,TOILET1=58,TOILET2=59,TOILET3=60,
-    TILES=61;
+    TILES=61,
+    /* A door. Two blocks tall, because he has to walk through it, and it swings.
+       The bottom half carries both facts - which way it faces and whether it is
+       open - so that is four ids shut and four open. The top half is one id that
+       reads both off the block underneath it, which is the same trick the bed's
+       two halves use on each other: no second byte per cell, nothing new in the
+       save file. */
+    DOOR=62,DOOR1=63,DOOR2=64,DOOR3=65,
+    DOOROPEN=66,DOOROPEN1=67,DOOROPEN2=68,DOOROPEN3=69,
+    DOORTOP=70;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -938,16 +947,36 @@ DEFS[BED]      ={name:'Bed',     tiles:[41,45,41], prop:'bedFoot'};
 DEFS[BEDHEAD]  ={name:'Bed',     tiles:[41,45,42], prop:'bedHead'};
 DEFS[TABLE]    ={name:'Table',   tiles:[47,45,50], prop:'table'};
 DEFS[LAMP]     ={name:'Lamp',    tiles:[48,45,52], prop:'lamp'};
-/* walkThrough because a rug you cannot walk on is a rug-shaped wall across the
-   doorway. isSolid already knows how to make something see-through to the player -
-   it is how water and a lit portal work - so this costs no physics. */
-DEFS[RUG]      ={name:'Rug',     tiles:[49,49,49], prop:'rug', walkThrough:true};
+/* Two separate ideas that a rug happens to need both of. `passable` is "he walks
+   through it" - a rug you cannot walk on is a rug-shaped wall across the doorway,
+   and isSolid already knew how to do this because water and a lit portal work that
+   way. `replaceable` is "a new block goes into this cell rather than beside it",
+   which is what makes a table stand on the carpet instead of hovering over it.
+   An open door is passable but emphatically not replaceable: building into a
+   doorway should build in the doorway, not delete the door. */
+DEFS[RUG]      ={name:'Rug',     tiles:[49,49,49], prop:'rug',
+                 passable:true, replaceable:true};
 /* The chair, once per quarter turn. Written as a loop rather than four near
    identical lines, because four lines differing in one digit is how a wrong digit
    gets in. `family` names the set: it is what keeps three of them out of the picker
    and what tells the "every block has its own side tile" check that four chairs
    sharing one picture is the point rather than a slip. */
 DEFS[TILES]    ={name:'Tiles',   tiles:[57,57,57]};
+/* The top half of a door. One id: which way it faces and whether it is open are
+   read off the bottom half every time they are needed, so there is nothing here
+   that can disagree with the half below it. */
+DEFS[DOORTOP]  ={name:'Door',    tiles:[62,62,63], prop:'doorTop'};
+/* Shut and open, four ways round each. `family` is the set a quarter turn moves
+   through; `door` marks both sets as the same thing to press on, and `open` is the
+   one bit of state the whole door has. */
+[[FAMILY.door=[DOOR,DOOR1,DOOR2,DOOR3],           'door',     false],
+ [FAMILY.doorOpen=[DOOROPEN,DOOROPEN1,DOOROPEN2,DOOROPEN3], 'doorOpen', true]
+].forEach(function(f){
+  f[0].forEach(function(id,dir){
+    DEFS[id]={name:'Door', tiles:[62,62,63], prop:f[2]?'doorOpen':'door',
+              family:f[1], dir:dir, door:true, open:f[2], passable:f[2]};
+  });
+});
 /* Everything with a front, one set of four ids each. The `tiles` on each is the
    picture in the drawer, which is why all four of a set share it. */
 [[ 'chair',  [CHAIR,CHAIR1,CHAIR2,CHAIR3],     'Chair',  [47,45,51]],
@@ -967,7 +996,7 @@ var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,R
 /* The second drawer. Everything that furnishes a building rather than makes one
    goes here, so the row of blocks along the bottom stops growing every time he
    asks for something. */
-var FURNITURE=[FURNACE,BED,TABLE,CHAIR,LAMP,RUG,TV,BATH,SINK,TOILET,TILES];
+var FURNITURE=[FURNACE,BED,TABLE,CHAIR,LAMP,RUG,TV,BATH,SINK,TOILET,TILES,DOOR];
 /* What the palette and the picker both show, one group at a time. Icons carry
    the meaning - he cannot read the labels yet. */
 var GROUPS=[{key:'blocks',    label:'Blocks',    icon:'🧱', ids:PALETTE},
@@ -1629,6 +1658,24 @@ function buildAtlas(){
     x.fillStyle='#f4f6f7'; x.fillRect(6,10,6,5);
     x.fillStyle='#dde3e6'; x.fillRect(5,15,8,1);
   });
+  /* 62 door wood - panelled, and darker than a plank wall so a door in one reads
+     as a door rather than a patch */
+  tile(62,function(x,r){
+    fill(x,'#7a5227'); speck(x,r,['#6e4a22','#875c2f'],50);
+    x.fillStyle='#63421d'; x.fillRect(1,1,14,1); x.fillRect(1,14,14,1);
+    x.fillStyle='#63421d'; x.fillRect(1,1,1,14); x.fillRect(14,1,1,14);
+    x.fillStyle='#8c6132'; x.fillRect(3,3,10,4); x.fillRect(3,9,10,4);
+    x.fillStyle='#5c3c1a'; x.fillRect(3,7,10,1);
+  });
+  /* 63 the drawer picture: a door in its frame, standing ajar */
+  tile(63,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#63421d'; x.fillRect(2,1,12,15);
+    x.fillStyle='#3a4a55'; x.fillRect(4,3,9,13);
+    x.fillStyle='#7a5227'; x.fillRect(4,3,6,13);
+    x.fillStyle='#8c6132'; x.fillRect(5,5,4,4); x.fillRect(5,10,4,4);
+    x.fillStyle='#f2c231'; x.fillRect(9,9,1,2);
+  });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
     fill(x,'#e6dcc2');
@@ -1795,8 +1842,13 @@ function isSolid(x,y,z){
      coordinates, which never asks about collision. */
   /* A rug is the third of these: something you see but walk straight over. Without
      it a rug is a rug-shaped wall lying across the doorway, and the only way to get
-     rid of it is to dig it up. */
-  return b!==AIR && !DEFS[b].liquid && !DEFS[b].portal && !DEFS[b].walkThrough;
+     rid of it is to dig it up.
+
+     The top half of a door has no state of its own - it is one id whichever way the
+     door faces and whether or not it is open - so it asks the half underneath it,
+     which is the only place that is written down. */
+  if(b===DOORTOP){ var below=DEFS[getBlock(x,y-1,z)]; return !(below && below.passable); }
+  return b!==AIR && !DEFS[b].liquid && !DEFS[b].portal && !DEFS[b].passable;
 }
 function surfaceY(x,z){
   for(var y=WY-1;y>=0;y--){ var b=getBlock(x,y,z); if(b!==AIR && b!==WATER) return y+1; }
@@ -2672,7 +2724,7 @@ var PAD=0.03;
    is not. */
 var BED_WOOD=45, BED_SHEET=44, BED_BLANKET=43, BED_PILLOW=46;
 var PALE_WOOD=47, LAMP_SHADE=48, RUG_TILE=49;
-var TV_BODY=53, TV_SCREEN=54, PORCELAIN=55, BATH_WATER=56;
+var TV_BODY=53, TV_SCREEN=54, PORCELAIN=55, BATH_WATER=56, DOOR_WOOD=62;
 /* The four quarter turns, in the order a facing id counts them. Index 0 is +X,
    which is the direction every shape below is written lying along. */
 var FACE4=[[1,0],[0,1],[-1,0],[0,-1]];
@@ -2749,6 +2801,21 @@ var PROP_SHAPE={
     [3.5,12.6,4.5, 10.5,13,11.5, BATH_WATER],
     [2,13,7,  4,16,9,   TV_BODY]
   ],
+  /* A door, shut, filling the doorway and facing +X. The hinge is the -Z edge.
+     Open is the same panel swung a quarter turn about that hinge, so it lies along
+     -Z instead of across the opening - which is what actually clears the way
+     through. The handle sticks out a little either side, so it reads as a door from
+     both rooms rather than from one. */
+  door:[
+    [13,0,0,   16,16,16, DOOR_WOOD],
+    [12.4,7,12, 16.6,9,14, DOOR_WOOD]
+  ],
+  doorOpen:[
+    [0,0,0,    16,16,3,  DOOR_WOOD],
+    [1,7,0.4,  3,9,2.6,  DOOR_WOOD]
+  ],
+  /* The top half draws whatever the bottom half is doing - see propMesh. */
+  doorTop:[],
   /* a toilet, sat on looking along +X, cistern behind at -X */
   toilet:[
     [4,0,4,   12,5,12,  PORCELAIN],
@@ -2906,9 +2973,19 @@ function propFacing(x,y,z,id,def){
    pale box. Same two buffers a cube would pick between; the choice is per box here
    because one lamp is partly wood and partly light. */
 function propMesh(opq,glw,x,y,z,id,def,tint){
-  var shape=PROP_SHAPE[def.prop];
-  if(!shape) return;
-  var face=propFacing(x,y,z,id,def);
+  var shape=PROP_SHAPE[def.prop], face=propFacing(x,y,z,id,def);
+  /* The top half of a door is one id with nothing written on it. Everything it
+     draws - which way round, and whether the panel is across the opening or swung
+     out of it - comes from the half underneath, so the two can never disagree and
+     opening a door needs one block changed rather than two kept in step. A top
+     half with nothing under it draws nothing at all rather than guessing. */
+  if(def.prop==='doorTop'){
+    var below=DEFS[getBlock(x,y-1,z)];
+    if(!below || !below.door) return;
+    shape=PROP_SHAPE[below.open?'doorOpen':'door'];
+    face=FACE4[below.dir];
+  }
+  if(!shape || !shape.length) return;
   for(var i=0;i<shape.length;i++){
     var b=shape[i], lit=!!b[7], t=lit?glw:opq;
     propBox(t.P,t.N,t.U,t.C,t.I,x,y,z,rotBox(b,face[0],face[1]),tint,lit);
@@ -4768,7 +4845,7 @@ function aim(){ return canBuild() ? (rayHit()||groundAhead()) : null; }
    rug's own cell puts the table on the floor where he pointed, and costs that one
    square of carpet, which the table is standing on anyway. */
 function replaceable(id){
-  return id===AIR || id===WATER || !!(DEFS[id] && DEFS[id].walkThrough);
+  return id===AIR || id===WATER || !!(DEFS[id] && DEFS[id].replaceable);
 }
 function placeCell(h){
   if(!h) return null;
@@ -4861,11 +4938,16 @@ function facingId(id){
 }
 /* Empty, inside the world, and not where he is standing - the same three questions
    placeCell asks about the first cell, asked again about the second. */
+/* Is he standing in this cell? Its own function because a door has to ask it too,
+   before it shuts on him. */
+function cellHasPlayer(bx,by,bz){
+  var px0=player.x-PW, px1=player.x+PW, pz0=player.z-PW, pz1=player.z+PW;
+  return bx+1>px0 && bx<px1 && bz+1>pz0 && bz<pz1 && by+1>player.y && by<player.y+PH;
+}
 function cellFree(bx,by,bz){
   if(!inside(bx,by,bz)) return false;
   if(!replaceable(getBlock(bx,by,bz))) return false;
-  var px0=player.x-PW, px1=player.x+PW, pz0=player.z-PW, pz1=player.z+PW;
-  return !(bx+1>px0 && bx<px1 && bz+1>pz0 && bz<pz1 && by+1>player.y && by<player.y+PH);
+  return !cellHasPlayer(bx,by,bz);
 }
 function placeBed(c){
   var best=bedPlacements(c)[0];
@@ -4912,6 +4994,39 @@ function turnBed(x,y,z,id){
   toast('No room to turn it!');
   return true;
 }
+/* A door is two blocks tall because he has to walk through it. The bottom goes
+   where he pointed and the top sits on it; if there is no headroom he is told
+   rather than left with half a door. */
+function placeDoor(c){
+  if(!cellFree(c.x,c.y+1,c.z)){ toast('A door needs two blocks of room!'); return false; }
+  setBlock(c.x,c.y,c.z,facingId(DOOR));
+  setBlock(c.x,c.y+1,c.z,DOORTOP);
+  return true;
+}
+/* Which cell of a door is the one that remembers anything. */
+function doorBase(x,y,z){
+  var id=getBlock(x,y,z);
+  if(id===DOORTOP && DEFS[getBlock(x,y-1,z)] && DEFS[getBlock(x,y-1,z)].door) return y-1;
+  return (DEFS[id] && DEFS[id].door) ? y : null;
+}
+/* Press BUILD on a door and it swings. Shutting it while he is standing in the
+   doorway would seal him inside his own front door, so that is refused rather than
+   done - the one way a decorative block could get him stuck. */
+function toggleDoor(x,y,z){
+  var by=doorBase(x,y,z);
+  if(by===null) return false;
+  var def=DEFS[getBlock(x,by,z)];
+  /* def.open is what it is NOW, so this is the shutting case - the only one that
+     can seal him in. Written the other way round first, which refused to open a
+     door he was standing in and shut one on him quite happily. */
+  if(def.open && (cellHasPlayer(x,by,z) || cellHasPlayer(x,by+1,z))){
+    toast('Step out of the doorway first!');
+    return true;
+  }
+  setBlock(x,by,z,FAMILY[def.open?'door':'doorOpen'][def.dir]);
+  sfx('place');
+  return true;
+}
 function turnFurniture(x,y,z){
   var id=getBlock(x,y,z), def=DEFS[id];
   if(!def) return false;
@@ -4930,8 +5045,11 @@ function breakAt(x,y,z){
      anything is cleared, and cleared through setBlock like any other change, so the
      other half travels to everybody else in the room too. */
   var half=(b===BED||b===BEDHEAD)?bedPartner(x,y,z,b):null;
+  /* and both halves of a door, for the same reason */
+  var dby=(b===DOORTOP||(DEFS[b]&&DEFS[b].door))?doorBase(x,y,z):null;
   setBlock(x,y,z,AIR);
   if(half) setBlock(x+half[0],y,z+half[1],AIR);
+  if(dby!==null){ setBlock(x,dby,z,AIR); setBlock(x,dby+1,z,AIR); }
   burst(new THREE.Vector3(x+0.5,y+0.5,z+0.5),DEFS[b].avg,9);
   sfx('dig');
   portalsOnBreak(x,y,z);
@@ -4970,10 +5088,11 @@ function build(){
   /* Turning a piece of furniture comes before placing anything, so a tap on a chair
      turns the chair rather than putting a block on its seat. */
   var t=aim();
-  if(t && turnFurniture(t.x,t.y,t.z)) return;
+  if(t && (toggleDoor(t.x,t.y,t.z) || turnFurniture(t.x,t.y,t.z))) return;
   var c=buildTarget();
   if(!c) return;
   if(selected===BED){ if(placeBed(c)) sfx('place'); return; }
+  if(selected===DOOR){ if(placeDoor(c)) sfx('place'); return; }
   /* facingId is the identity for everything that has no front, which is all but a
      handful of blocks - so this one line covers the chair and everything after it. */
   setBlock(c.x,c.y,c.z,facingId(selected));
@@ -8996,7 +9115,10 @@ window.__henrycraft={
        BATH:BATH,BATH1:BATH1,BATH2:BATH2,BATH3:BATH3,
        SINK:SINK,SINK1:SINK1,SINK2:SINK2,SINK3:SINK3,
        TOILET:TOILET,TOILET1:TOILET1,TOILET2:TOILET2,TOILET3:TOILET3,
-       TILES:TILES},
+       TILES:TILES,
+       DOOR:DOOR,DOOR1:DOOR1,DOOR2:DOOR2,DOOR3:DOOR3,
+       DOOROPEN:DOOROPEN,DOOROPEN1:DOOROPEN1,DOOROPEN2:DOOROPEN2,DOOROPEN3:DOOROPEN3,
+       DOORTOP:DOORTOP},
   FAMILY:FAMILY,
   propFacing:function(x,y,z,id){ return propFacing(x,y,z,id,DEFS[id]); },
   facingId:facingId,
@@ -9271,6 +9393,7 @@ window.__henrycraft={
      driving seat and find that none of them does anything. */
   dig:dig, build:build, digDown:digDown, setFly:setFly,
   breakAt:breakAt, placeBed:placeBed, turnFurniture:turnFurniture,
+  placeDoor:placeDoor, toggleDoor:toggleDoor, doorBase:doorBase,
   bedPlacements:function(c){ return bedPlacements(c); },
   setYaw:function(v){ yaw=v; },
   setPitch:function(v){ pitch=v; },

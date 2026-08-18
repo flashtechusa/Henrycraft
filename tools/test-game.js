@@ -129,6 +129,9 @@ function slope(pts) {
     SINK: 53, SINK1: 54, SINK2: 55, SINK3: 56,
     TOILET: 57, TOILET1: 58, TOILET2: 59, TOILET3: 60,
     TILES: 61,
+    DOOR: 62, DOOR1: 63, DOOR2: 64, DOOR3: 65,
+    DOOROPEN: 66, DOOROPEN1: 67, DOOROPEN2: 68, DOOROPEN3: 69,
+    DOORTOP: 70,
   };
   const ids = await page.evaluate(() => window.__henrycraft.ids);
   const moved = Object.keys(ID_TABLE).filter(k => ids[k] !== ID_TABLE[k])
@@ -155,10 +158,11 @@ function slope(pts) {
           if (v < 0 || v > 1) bad.push({block: def.name, tile: t, uv: v});
         }
       });
-      /* A thing with a front is four ids for one object - four chairs, one picture -
-         so the set counts once. Keyed by family rather than skipped, so a genuine
-         clash between two different families is still caught. */
-      const key = def.family || def.name;
+      /* Keyed by the name a player would use. Four chairs are one chair, and a door
+         open and a door shut are one door - both are several ids for one object and
+         share its picture. A clash between two things he would call by different
+         names is still caught, which is what this is for. */
+      const key = def.name;
       const side = def.tiles[2];
       if (sides[side] !== undefined && sides[side] !== key) {
         dupes.push(`${key} and ${sides[side]} share tile ${side}`);
@@ -258,7 +262,7 @@ function slope(pts) {
          prove the drawer renders whatever it is handed */
       wantFurniture: [H.ids.FURNACE, H.ids.BED, H.ids.TABLE, H.ids.CHAIR,
                       H.ids.LAMP, H.ids.RUG, H.ids.TV, H.ids.BATH, H.ids.SINK,
-                      H.ids.TOILET, H.ids.TILES],
+                      H.ids.TOILET, H.ids.TILES, H.ids.DOOR],
       names: [H.DEFS[H.ids.FURNACE].name, H.DEFS[H.ids.BED].name],
       inPalette: [H.PALETTE.indexOf(H.ids.FURNACE), H.PALETTE.indexOf(H.ids.BED)],
       survived: [H.getBlock(20, 18, 20), H.getBlock(21, 18, 20)],
@@ -284,7 +288,7 @@ function slope(pts) {
   check('one tap opens the furniture drawer',
         drawers.open0 === 0 && drawers.open1 === 1,
         `open went ${drawers.open0} -> ${drawers.open1}`);
-  check('the furniture drawer shows all eleven pieces, in order',
+  check('the furniture drawer shows all twelve pieces, in order',
         drawers.furnGrid.join(',') === drawers.wantFurniture.join(',') &&
         drawers.furnPal.join(',') === drawers.wantFurniture.join(','),
         `picker [${drawers.furnGrid}], palette [${drawers.furnPal}], ` +
@@ -497,7 +501,7 @@ function slope(pts) {
         new Set(room.chairs.map(c => c.id)).size === 4,
         'ids: ' + room.chairs.map(c => c.id).join(', '));
   check('only one chair is offered in the drawer, and the blocks row is untouched',
-        room.drawer.spares.length === 0 && room.drawer.furniture.length === 11 &&
+        room.drawer.spares.length === 0 && room.drawer.furniture.length === 12 &&
         room.drawer.blocks === 19,
         `spares in a drawer: [${room.drawer.spares}], furniture ${room.drawer.furniture.length}, ` +
         `blocks ${room.drawer.blocks}`);
@@ -809,6 +813,135 @@ function slope(pts) {
   check('the counts follow what is in the world', bathroom.counts.tv === 1 &&
         bathroom.counts.fire === 1 && bathroom.counts.furnace === 0,
         JSON.stringify(bathroom.counts));
+
+  /* ---- 2h: the door ---------------------------------------------------------
+     The one piece of furniture with state. Two blocks tall because he has to walk
+     through it, and the top half is a single id that reads which way it faces and
+     whether it is open off the half underneath - so opening one changes one block
+     and the two can never disagree.
+
+     The check that matters most is that it cannot trap him. A door is the only
+     decorative thing in the game that can turn a cell he is standing in from empty
+     into solid, and this game does not do stuck. */
+  console.log('2h. a door opens, shuts, and will not shut on him');
+  const door = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 51);
+    const gy = 24, out = {};
+    for (let x = 20; x <= 52; x++) for (let z = 20; z <= 52; z++) {
+      for (let y = gy; y < gy + 8; y++) H.setBlock(x, y, z, ids.AIR);
+      H.setBlock(x, gy - 1, z, ids.PLANKS);
+    }
+    // a wall along z=34 with a gap at x=34
+    for (let x = 28; x <= 40; x++) for (let y = gy; y < gy + 3; y++)
+      if (x !== 34) H.setBlock(x, y, 34, ids.BRICK);
+
+    const openIds = [ids.DOOROPEN, ids.DOOROPEN1, ids.DOOROPEN2, ids.DOOROPEN3];
+    const shutIds = [ids.DOOR, ids.DOOR1, ids.DOOR2, ids.DOOR3];
+    const isOpen = () => openIds.indexOf(H.getBlock(34, gy, 34)) >= 0;
+
+    H.selectBlock(ids.DOOR);
+    H.movePlayer(34.5, gy + 0.05, 37.5);
+    H.setYaw(0);                                  // looking -Z, at the gap
+    H.placeDoor({x: 34, y: gy, z: 34});
+    out.placed = {bottom: shutIds.indexOf(H.getBlock(34, gy, 34)) >= 0,
+                  top: H.getBlock(34, gy + 1, 34) === ids.DOORTOP,
+                  facing: H.propFacing(34, gy, 34, H.getBlock(34, gy, 34))};
+    out.shut = {low: H.isSolidAt(34, gy, 34), high: H.isSolidAt(34, gy + 1, 34),
+                canPass: H.boxFree(34.5, gy, 34.5)};
+
+    /* Open it, and check the TOP half went soft too - it has no state of its own,
+       so if it did not follow the bottom he would walk into an invisible lintel. */
+    H.movePlayer(34.5, gy + 0.05, 36.5);
+    H.toggleDoor(34, gy, 34);
+    out.open = {isOpen: isOpen(), top: H.getBlock(34, gy + 1, 34) === ids.DOORTOP,
+                low: H.isSolidAt(34, gy, 34), high: H.isSolidAt(34, gy + 1, 34),
+                canPass: H.boxFree(34.5, gy, 34.5)};
+
+    // it cannot be shut on him, and it can still be opened from inside
+    H.movePlayer(34.5, gy + 0.05, 34.5);
+    const refused = H.toggleDoor(34, gy, 34);
+    out.onSelf = {handled: refused, stillOpen: isOpen(),
+                  said: document.getElementById('toast').textContent};
+
+    // step out, shut it, and it is a wall again
+    H.movePlayer(34.5, gy + 0.05, 36.5);
+    H.toggleDoor(34, gy, 34);
+    out.shutAgain = {isShut: !isOpen(), low: H.isSolidAt(34, gy, 34),
+                     high: H.isSolidAt(34, gy + 1, 34)};
+
+    /* An open door must not be built into. It is passable, and passable and
+       replaceable are two different ideas: a rug is both, a doorway is only the
+       first, and getting that wrong would delete the door when he builds a wall. */
+    H.toggleDoor(34, gy, 34);
+    H.selectBlock(ids.BRICK);
+    out.notReplaced = {before: isOpen(),
+                       cellFree: H.boxFree(34.5, gy, 34.5)};
+    H.setBlock(34, gy, 34, H.getBlock(34, gy, 34));   // no-op, keeps the door
+    out.notReplaced.after = isOpen();
+
+    // shape: two boxes per half, both halves, open or shut
+    const wipe = () => { H.setBlock(34, gy, 34, ids.AIR); H.setBlock(34, gy + 1, 34, ids.AIR); };
+    wipe();
+    const base = H.chunkTriangles();
+    H.placeDoor({x: 34, y: gy, z: 34});
+    out.trisShut = H.chunkTriangles() - base;
+    H.toggleDoor(34, gy, 34);
+    out.trisOpen = H.chunkTriangles() - base;
+
+    // digging either half takes the other
+    H.breakAt(34, gy + 1, 34);
+    out.dugTop = [H.getBlock(34, gy, 34), H.getBlock(34, gy + 1, 34)];
+    H.placeDoor({x: 34, y: gy, z: 34});
+    H.breakAt(34, gy, 34);
+    out.dugBottom = [H.getBlock(34, gy, 34), H.getBlock(34, gy + 1, 34)];
+
+    // a top half with nothing under it draws nothing rather than guessing
+    wipe();
+    const bare = H.chunkTriangles();
+    H.setBlock(34, gy + 1, 34, ids.DOORTOP);
+    out.orphanTop = H.chunkTriangles() - bare;
+    H.setBlock(34, gy + 1, 34, ids.AIR);
+
+    // no headroom
+    H.setBlock(30, gy + 1, 30, ids.BRICK);
+    H.movePlayer(30.5, gy + 0.05, 32.5);
+    out.noRoom = {placed: H.placeDoor({x: 30, y: gy, z: 30}),
+                  cell: H.getBlock(30, gy, 30),
+                  said: document.getElementById('toast').textContent};
+    return out;
+  });
+  check('a door is two blocks, and it faces him',
+        door.placed.bottom && door.placed.top &&
+        door.placed.facing[0] === 0 && door.placed.facing[1] === 1,
+        JSON.stringify(door.placed));
+  check('shut, it is a wall - both halves, and he cannot walk through',
+        door.shut.low && door.shut.high && !door.shut.canPass,
+        JSON.stringify(door.shut));
+  check('open, both halves go soft and he walks through',
+        door.open.isOpen && door.open.top && !door.open.low && !door.open.high &&
+        door.open.canPass, JSON.stringify(door.open));
+  check('it will not shut on him while he is in the doorway',
+        door.onSelf.handled && door.onSelf.stillOpen &&
+        /doorway/.test(door.onSelf.said), JSON.stringify(door.onSelf));
+  check('and shut again it is a wall again',
+        door.shutAgain.isShut && door.shutAgain.low && door.shutAgain.high,
+        JSON.stringify(door.shutAgain));
+  check('an open doorway is walked through, not built into',
+        door.notReplaced.before && door.notReplaced.after && door.notReplaced.cellFree,
+        JSON.stringify(door.notReplaced));
+  check(`a door is 4 boxes open or shut (${door.trisShut}/${door.trisOpen} triangles)`,
+        door.trisShut === 48 && door.trisOpen === 48,
+        `${door.trisShut} shut, ${door.trisOpen} open`);
+  check('digging either half takes the other with it',
+        door.dugTop[0] === 0 && door.dugTop[1] === 0 &&
+        door.dugBottom[0] === 0 && door.dugBottom[1] === 0,
+        `top dug ${door.dugTop}, bottom dug ${door.dugBottom}`);
+  check('a top half with nothing under it draws nothing', door.orphanTop === 0,
+        `${door.orphanTop} triangles`);
+  check('with no headroom nothing is placed, and he is told',
+        !door.noRoom.placed && door.noRoom.cell === 0 &&
+        /two blocks of room/.test(door.noRoom.said), JSON.stringify(door.noRoom));
 
   /* ---- 2d: the furnace fire moves -----------------------------------------
      Same trick as Flint & Steel: one tile of the atlas is repainted on a timer and
