@@ -276,16 +276,22 @@ function requireNode22() {
        that something turned up. */
     const bedSpot = await B.evaluate(() => {
       const H = window.__henrycraft, y = H.surfaceY(28, 28) + 1;
-      H.setBlock(28, y, 28, H.ids.AIR); H.setBlock(28, y, 29, H.ids.AIR);
-      H.movePlayer(28.5, y, 26.5);
-      H.setYaw(0);                              // looking along +Z
+      for (const d of [[0, 0], [0, 1], [0, -1], [1, 0], [-1, 0]])
+        H.setBlock(28 + d[0], y, 28 + d[1], H.ids.AIR);
+      H.movePlayer(28.5, y, 30.5);
+      H.setYaw(0);                              // forward is -sin/-cos yaw: along -Z
       H.placeBed({x: 28, y: y, z: 28});
-      return {x: 28, y: y, z: 28, foot: H.ids.BED, head: H.ids.BEDHEAD,
+      /* Which neighbour the head landed in is worked out rather than assumed - the
+         point of the check is that both halves cross the wire and agree, not which
+         way this particular bed happens to lie. */
+      const head = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+        .find(d => H.getBlock(28 + d[0], y, 28 + d[1]) === H.ids.BEDHEAD);
+      return {x: 28, y: y, z: 28, foot: H.ids.BED, head: H.ids.BEDHEAD, at: head || null,
               facing: H.bedFacing(28, y, 28, H.ids.BED)};
     });
-    const bedWhole = await waitFor(A, s =>
+    const bedWhole = !!bedSpot.at && await waitFor(A, s =>
       window.__henrycraft.getBlock(s.x, s.y, s.z) === s.foot &&
-      window.__henrycraft.getBlock(s.x, s.y, s.z + 1) === s.head, bedSpot);
+      window.__henrycraft.getBlock(s.x + s.at[0], s.y, s.z + s.at[1]) === s.head, bedSpot);
     const bedFacingA = bedWhole
       ? await A.evaluate(s => window.__henrycraft.bedFacing(s.x, s.y, s.z, s.foot), bedSpot)
       : null;
