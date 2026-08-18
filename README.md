@@ -766,8 +766,8 @@ correct. The *columns* must never change: it is dividing by the column count tha
 turns an index into a row.
 
 **A telly and a bathroom** followed: a television with something moving on it, a
-bath, a sink, a toilet and bathroom tiles. That brings the drawer to eleven over
-two rows, and means the four-ids-per-front machinery is exercised by five families
+bath, a sink, a toilet and bathroom tiles. With the door that brings the drawer to
+twelve over two rows, and means the four-ids-per-front machinery is exercised by five families
 rather than one. The screen is self-lit like a screen in a dark room, and what is
 on it is deliberately abstract — bands of colour with a shape bouncing over them.
 Nothing to read, nothing that could startle him, nothing that ever stops.
@@ -806,10 +806,32 @@ with daylight under its legs. Rugs are **replaceable** now, the way water always
 was: the block goes in the rug's own cell and stands on the floor he pointed at,
 costing the one square of carpet it is standing on.
 
+**A door that opens.** Two blocks tall, because he has to walk through it. The
+bottom half carries both facts — which way it faces and whether it is open — so
+that is four ids shut and four open; the top half is **one id** that reads both off
+the block underneath, the same trick the bed's two halves use on each other.
+Opening a door changes one block, the halves cannot disagree, and nothing new goes
+into the save file. Pressing BUILD swings it: the panel is a slab filling the
+doorway, and open it is that same panel swung a quarter turn about its hinge to lie
+against the side, so the way through is really clear rather than merely marked
+passable.
+
+**It cannot trap him.** A door is the only decorative block in the game that can
+turn a cell he is standing in from empty into solid, so shutting one on him is
+refused — *"Step out of the doorway first!"* — while opening one from inside always
+works. The guard was inverted the first time, written on the state the door is in
+rather than the state it is moving to, so it refused to *open* a door he stood in
+and shut one on him quite happily.
+
+That door also forced one idea to become two. A single flag was doing both "he
+walks through it" and "a new block goes into this cell". A rug needs both; an open
+door needs only the first, because otherwise building a wall beside a doorway
+**deletes the door**. They are `passable` and `replaceable` now.
+
 **Block ids are pinned by a test.** A district is saved as coordinates to block ids,
 so an id *is* the save format — inserting into the middle of the list rather than
 appending would turn every diamond in his world into something else, silently, with
-no way back. All 62 numbers are written out longhand in `tools/test-game.js`, so
+no way back. All 71 numbers are written out longhand in `tools/test-game.js`, so
 renumbering has to be a deliberate act.
 
 **Ore to dig for.** Coal and copper are common in the upper rock, lapis sits
