@@ -123,6 +123,7 @@ function slope(pts) {
     SNOW: 22, ICE: 23, SANDSTONE: 24, CACTUS: 25, PINE: 26, MUSHCAP: 27, MUSHCAP2: 28,
     MUSHSTEM: 29, PORTAL: 30, ROAD: 31, KERB: 32, ROADLINE: 33, GRID: 34,
     FURNACE: 35, BED: 36, BEDHEAD: 37,
+    TABLE: 38, CHAIR: 39, CHAIR1: 40, CHAIR2: 41, CHAIR3: 42, LAMP: 43, RUG: 44,
   };
   const ids = await page.evaluate(() => window.__henrycraft.ids);
   const moved = Object.keys(ID_TABLE).filter(k => ids[k] !== ID_TABLE[k])
@@ -149,9 +150,15 @@ function slope(pts) {
           if (v < 0 || v > 1) bad.push({block: def.name, tile: t, uv: v});
         }
       });
+      /* A thing with a front is four ids for one object - four chairs, one picture -
+         so the set counts once. Keyed by family rather than skipped, so a genuine
+         clash between two different families is still caught. */
+      const key = def.family || def.name;
       const side = def.tiles[2];
-      if (sides[side] !== undefined) dupes.push(`${def.name} and ${sides[side]} share tile ${side}`);
-      sides[side] = def.name;
+      if (sides[side] !== undefined && sides[side] !== key) {
+        dupes.push(`${key} and ${sides[side]} share tile ${side}`);
+      }
+      sides[side] = key;
     }
     return {slots, blocks: Object.keys(H.DEFS).length, bad, dupes, atlas: a};
   });
@@ -242,6 +249,10 @@ function slope(pts) {
       blocksGrid, blocksPal, furnGrid, furnPal, backGrid,
       pickTabs: tabs('pickTabs'), palTabs: tabs('palTabs'),
       pickedBed, bed: H.ids.BED, furnace: H.ids.FURNACE, closed, placed, followed,
+      /* named one by one rather than read back off FURNITURE, which would only
+         prove the drawer renders whatever it is handed */
+      wantFurniture: [H.ids.FURNACE, H.ids.BED, H.ids.TABLE, H.ids.CHAIR,
+                      H.ids.LAMP, H.ids.RUG],
       names: [H.DEFS[H.ids.FURNACE].name, H.DEFS[H.ids.BED].name],
       inPalette: [H.PALETTE.indexOf(H.ids.FURNACE), H.PALETTE.indexOf(H.ids.BED)],
       survived: [H.getBlock(20, 18, 20), H.getBlock(21, 18, 20)],
@@ -267,10 +278,11 @@ function slope(pts) {
   check('one tap opens the furniture drawer',
         drawers.open0 === 0 && drawers.open1 === 1,
         `open went ${drawers.open0} -> ${drawers.open1}`);
-  check(`the furniture drawer shows exactly the furnace and the bed`,
-        drawers.furnGrid.join(',') === [drawers.furnace, drawers.bed].join(',') &&
-        drawers.furnPal.join(',') === [drawers.furnace, drawers.bed].join(','),
-        `picker [${drawers.furnGrid}], palette [${drawers.furnPal}]`);
+  check('the furniture drawer shows the furnace, bed, table, chair, lamp and rug',
+        drawers.furnGrid.join(',') === drawers.wantFurniture.join(',') &&
+        drawers.furnPal.join(',') === drawers.wantFurniture.join(','),
+        `picker [${drawers.furnGrid}], palette [${drawers.furnPal}], ` +
+        `wanted [${drawers.wantFurniture}]`);
   check('picking the bed selects it and shuts the picker',
         drawers.pickedBed === drawers.bed && drawers.closed,
         `selected=${drawers.pickedBed} closed=${drawers.closed}`);
@@ -406,6 +418,95 @@ function slope(pts) {
   check('and it does not punch a hole in the wall behind it',
         bed.wallTris === bed.openTris,
         `${bed.wallTris} against a wall, ${bed.openTris} in the open`);
+
+  /* ---- 2e: the rest of the furniture ---------------------------------------
+     A table, a chair, a lamp and a rug. Three things they needed that the bed did
+     not: a prop with a front, a prop that glows, and a prop you walk straight over. */
+  console.log('2e. a table, a chair that faces him, a lamp that glows and a rug he can walk on');
+  const room = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 91);
+    const gy = 24, out = {};
+    for (let x = 20; x <= 50; x++) for (let z = 20; z <= 50; z++) {
+      for (let y = gy; y < gy + 6; y++) H.setBlock(x, y, z, ids.AIR);
+      H.setBlock(x, gy - 1, z, ids.PLANKS);
+    }
+
+    /* A chair should end up looking at him, so a chair pushed against a wall has
+       its back to the wall. Placed through the same call build() uses. */
+    H.selectBlock(ids.CHAIR);
+    out.chairs = [[0, '+Z', [0, -1]], [Math.PI / 2, '+X', [-1, 0]],
+                  [Math.PI, '-Z', [0, 1]], [-Math.PI / 2, '-X', [1, 0]]]
+      .map(([ang, looking, want], i) => {
+        const x = 24 + i * 3, z = 30;
+        H.setYaw(ang);
+        const id = H.facingId(ids.CHAIR);
+        H.setBlock(x, gy, z, id);
+        return {looking, want, id, facing: H.propFacing(x, gy, z, id),
+                inFamily: H.FAMILY.chair.indexOf(id)};
+      });
+
+    // only the first of the four is offered; the other three are in no drawer
+    const g = H.groups();
+    out.drawer = {
+      furniture: g.list[1].ids.slice(),
+      spares: H.FAMILY.chair.slice(1).filter(id => g.list.some(x => x.ids.indexOf(id) >= 0)),
+      blocks: g.list[0].ids.length,
+    };
+
+    /* Shapes, measured the same way the bed's was. A table is 5 boxes, a chair 6,
+       a lamp 3 and a rug 1 - times 12 triangles each. The lamp's shade is the only
+       box in the game that is self-lit and not a whole cube, so it is counted in
+       the glow group on its own. */
+    const clear = (x, z) => H.setBlock(x, gy, z, ids.AIR);
+    const delta = (x, z, id, group) => {
+      clear(x, z);
+      const before = H.chunkTriangles(group);
+      H.setBlock(x, gy, z, id);
+      const d = H.chunkTriangles(group) - before;
+      clear(x, z);
+      return d;
+    };
+    out.tris = {
+      table: delta(40, 40, ids.TABLE),
+      chair: delta(40, 42, ids.CHAIR),
+      lamp: delta(40, 44, ids.LAMP),
+      rug: delta(40, 46, ids.RUG),
+      lampGlow: delta(40, 44, ids.LAMP, 'glow'),
+      tableGlow: delta(40, 40, ids.TABLE, 'glow'),
+    };
+
+    /* A rug is walked over, not into. Everything else here is walked into. */
+    H.setBlock(35, gy, 35, ids.RUG);
+    H.setBlock(36, gy, 35, ids.TABLE);
+    out.solid = {rug: H.isSolidAt(35, gy, 35), table: H.isSolidAt(36, gy, 35)};
+    out.canStand = {onRug: H.boxFree(35.5, gy, 35.5), onTable: H.boxFree(36.5, gy, 35.5)};
+    return out;
+  });
+  const same = (a, b) => !!a && !!b && a[0] === b[0] && a[1] === b[1];
+  check('a chair turns to face him, all four ways round',
+        room.chairs.every(c => same(c.facing, c.want) && c.inFamily >= 0),
+        JSON.stringify(room.chairs));
+  check('the four chairs are four different ids',
+        new Set(room.chairs.map(c => c.id)).size === 4,
+        'ids: ' + room.chairs.map(c => c.id).join(', '));
+  check('only one chair is offered in the drawer, and the blocks row is untouched',
+        room.drawer.spares.length === 0 && room.drawer.furniture.length === 6 &&
+        room.drawer.blocks === 19,
+        `spares in a drawer: [${room.drawer.spares}], furniture ${room.drawer.furniture.length}, ` +
+        `blocks ${room.drawer.blocks}`);
+  check(`table 5 boxes, chair 6, lamp 3, rug 1 ` +
+        `(${room.tris.table}/${room.tris.chair}/${room.tris.lamp}/${room.tris.rug} triangles)`,
+        room.tris.table === 60 && room.tris.chair === 72 &&
+        room.tris.lamp === 36 && room.tris.rug === 12,
+        JSON.stringify(room.tris));
+  check('the lampshade alone is self-lit, and nothing else is',
+        room.tris.lampGlow === 12 && room.tris.tableGlow === 0,
+        `lamp puts ${room.tris.lampGlow} triangles in the glow group, table ${room.tris.tableGlow}`);
+  check('a rug is walked over and a table is walked into',
+        room.solid.rug === false && room.solid.table === true &&
+        room.canStand.onRug === true && room.canStand.onTable === false,
+        JSON.stringify({solid: room.solid, stand: room.canStand}));
 
   /* ---- 2d: the furnace fire moves -----------------------------------------
      Same trick as Flint & Steel: one tile of the atlas is repainted on a timer and

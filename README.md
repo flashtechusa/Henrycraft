@@ -725,7 +725,7 @@ fix. The two halves scan their neighbours in opposite orders, which is what stop
 beds pushed end to end from pairing across the join.
 
 A bed is the first thing in the game that is **not a cube**. `buildChunk` builds it
-out of the twelve little boxes listed in `BED_SHAPE`, written in sixteenths of a
+out of the twelve little boxes listed in `PROP_SHAPE`, written in sixteenths of a
 block the way Minecraft's own models are, and a quarter turn at a time covers the
 other three directions. It is still solid to walk into and stand on, so there is a
 quarter of a block of daylight under his feet on top of one — the alternative is
@@ -737,6 +737,39 @@ and nothing at all happening in a world with no furnace in it. Half the rate of 
 open fire, with its own eight-frame counter, so a stove in a bedroom is not the
 busiest thing on screen. Both are ordinary blocks otherwise: nothing cooks, nobody
 sleeps, and both dig away like anything else.
+
+**A table, a chair, a lamp and a rug** came next, and each needed something the bed
+had not.
+
+A **chair has a front**, and there is nowhere to keep which way it points except the
+id itself — the world is one byte per cell and the save file is those bytes. So a
+thing with a front costs four ids, one per quarter turn, with one entry in the
+drawer; Minecraft does the same and calls it a block state. A chair turns to face
+*him*, which is also what puts its back to the wall rather than its seat when he
+pushes one against one.
+
+A **lamp glows**. Its shade goes to the self-lit buffer — the one fire and portals
+already use — so it gives off light instead of being lit by the sun. It is the only
+box in the game that is self-lit and not a whole cube, which is why the mesher picks
+a buffer per box rather than per block.
+
+A **rug is walked over**, not into. `isSolid` already knew how to make something
+see-through to the player, because that is how water and a lit portal work, so this
+cost no physics. Its pattern also had to carry across the join: the first one had a
+woven border, and five blocks by five came out as twenty-five little mats instead of
+one carpet.
+
+The atlas is **8 across by 16 down** now rather than 8 by 8. The furniture ran out of
+tiles at 64, and a tile's position is derived from its index everywhere it is used —
+so adding rows reflows the sheet on its own and every existing tile number stays
+correct. The *columns* must never change: it is dividing by the column count that
+turns an index into a row.
+
+**Block ids are pinned by a test.** A district is saved as coordinates to block ids,
+so an id *is* the save format — inserting into the middle of the list rather than
+appending would turn every diamond in his world into something else, silently, with
+no way back. All 45 numbers are written out longhand in `tools/test-game.js`, so
+renumbering has to be a deliberate act.
 
 **Ore to dig for.** Coal and copper are common in the upper rock, lapis sits
 mid-depth, gold a bit deeper, and diamond, emerald and obsidian are down near the

@@ -845,10 +845,23 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
        as a lone foot, which is a bed frame with a mattress on it and nothing to
        fix. Which way a bed points is worked out from where its other half is, so
        there is no third id per direction and nothing extra in the save. */
-    FURNACE=35,BED=36,BEDHEAD=37;
+    FURNACE=35,BED=36,BEDHEAD=37,
+    /* The rest of the furniture. A chair has a front, and there is nowhere to keep
+       which way it points except the id itself - the world is one byte per cell and
+       the save file is those bytes - so a thing with a front costs four ids, one per
+       quarter turn, in the order FACE4 lists them. Minecraft does the same and calls
+       it a block state. One entry in the drawer either way: placing picks which of
+       the four by where he is looking. */
+    TABLE=38,
+    CHAIR=39,CHAIR1=40,CHAIR2=41,CHAIR3=42,
+    LAMP=43,RUG=44;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
+/* Sets of ids that are one thing seen four ways round. Filled in below, read by the
+   picker (only the first of a set is offered), by placement (which of the four) and
+   by the mesher (how far to turn it). */
+var FAMILY={};
 DEFS[GRASS]   ={name:'Grass',   tiles:[0,2,1]};
 DEFS[DIRT]    ={name:'Dirt',    tiles:[2,2,2]};
 DEFS[STONE]   ={name:'Stone',   tiles:[3,3,3]};
@@ -904,7 +917,7 @@ DEFS[GRID]     ={name:'Start Line',tiles:[38,38,38]};
    planks - a face nobody ever sees does not need a tile of its own. */
 DEFS[FURNACE]  ={name:'Furnace', tiles:[39,3,40]};
 /* The two bed halves are props: they are not cubes, and buildChunk builds them out
-   of the little boxes listed in BED_SHAPE instead of six square faces. `tiles` is
+   of the little boxes listed in PROP_SHAPE instead of six square faces. `tiles` is
    still here because three things read it that have nothing to do with meshing -
    the picker swatch, the ghost's colour, and the drawing on the ideas page - and
    all three want one square picture of a bed rather than a slice through one. */
@@ -913,13 +926,28 @@ DEFS[BED]      ={name:'Bed',     tiles:[41,45,41], prop:'bedFoot'};
    the whole of how it stays out of the picker; there is no "hidden" flag, because
    a flag nothing reads is a comment that looks like code. */
 DEFS[BEDHEAD]  ={name:'Bed',     tiles:[41,45,42], prop:'bedHead'};
+DEFS[TABLE]    ={name:'Table',   tiles:[47,45,50], prop:'table'};
+DEFS[LAMP]     ={name:'Lamp',    tiles:[48,45,52], prop:'lamp'};
+/* walkThrough because a rug you cannot walk on is a rug-shaped wall across the
+   doorway. isSolid already knows how to make something see-through to the player -
+   it is how water and a lit portal work - so this costs no physics. */
+DEFS[RUG]      ={name:'Rug',     tiles:[49,49,49], prop:'rug', walkThrough:true};
+/* The chair, once per quarter turn. Written as a loop rather than four near
+   identical lines, because four lines differing in one digit is how a wrong digit
+   gets in. `family` names the set: it is what keeps three of them out of the picker
+   and what tells the "every block has its own side tile" check that four chairs
+   sharing one picture is the point rather than a slip. */
+FAMILY.chair=[CHAIR,CHAIR1,CHAIR2,CHAIR3];
+FAMILY.chair.forEach(function(id,dir){
+  DEFS[id]={name:'Chair', tiles:[47,45,51], prop:'chair', family:'chair', dir:dir};
+});
 
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
              COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
 /* The second drawer. Everything that furnishes a building rather than makes one
    goes here, so the row of blocks along the bottom stops growing every time he
    asks for something. */
-var FURNITURE=[FURNACE,BED];
+var FURNITURE=[FURNACE,BED,TABLE,CHAIR,LAMP,RUG];
 /* What the palette and the picker both show, one group at a time. Icons carry
    the meaning - he cannot read the labels yet. */
 var GROUPS=[{key:'blocks',    label:'Blocks',    icon:'🧱', ids:PALETTE},
@@ -1069,11 +1097,15 @@ function mulberry32(a){
 }
 
 /* ---------------- procedural texture atlas ---------------- */
-/* 8x8 = 64 slots. A tile's position is derived from its index (index % ACOLS,
-   index / ACOLS) here, in the UV maths in buildChunk, in tileAverage and in
-   swatchURL, so widening the grid reflows every tile on its own and the tile
-   numbers in DEFS above stay correct. Nothing needs re-pointing by hand. */
-var ACOLS=8, AROWS=8, TP=32;
+/* 8 across, 16 down = 128 slots. A tile's position is derived from its index
+   (index % ACOLS, index / ACOLS) here, in the UV maths in buildChunk, in
+   tileAverage and in swatchURL, so making the grid taller reflows every tile on
+   its own and the tile numbers in DEFS above stay correct. Nothing needs
+   re-pointing by hand - which is the whole reason it was safe to do this when the
+   furniture ran out of room at 64. The columns must not change: it is dividing by
+   ACOLS that turns an index into a row, so widening it really would move
+   everything. */
+var ACOLS=8, AROWS=16, TP=32;
 var atlasCanvas=document.createElement('canvas');
 atlasCanvas.width=ACOLS*TP; atlasCanvas.height=AROWS*TP;
 
@@ -1450,6 +1482,67 @@ function buildAtlas(){
     x.fillStyle='#e6e0cd'; x.fillRect(3,3,10,10);
     x.fillStyle='#f2eee0'; x.fillRect(4,4,8,8);
   });
+  /* 47 pale wood - the table top, the chair seat. Lighter than the bed's frame so
+     a table standing on a plank floor is not one brown shape. */
+  tile(47,function(x,r){
+    fill(x,'#c49a5f'); speck(x,r,['#b88d52','#d0a86d','#ac8149'],60);
+    for(var i=0;i<16;i+=6){ x.fillStyle='#ac8149'; x.fillRect(0,i,16,1); }
+  });
+  /* 48 lampshade - drawn bright because it is lit by itself, not by the sun */
+  tile(48,function(x,r){
+    fill(x,'#ffe9a8');
+    for(var i=0;i<16;i++){
+      var v=r();
+      x.fillStyle = v<.3?'#ffd970' : (v<.6?'#fff3cc':'#ffe9a8');
+      x.fillRect(i,0,1,16);
+    }
+    x.fillStyle='#ffca4a'; x.fillRect(0,14,16,2);
+  });
+  /* 49 rug. The pattern has to carry across the join, because a rug is several
+     blocks and every block gets the same square: the first version had a woven
+     border, and five by five came out as twenty-five little mats instead of one
+     carpet. So the motif sits on a four-pixel grid with nothing at the edges, and
+     the next block along continues it. */
+  tile(49,function(x,r){
+    fill(x,'#9c3b4e');
+    speck(x,r,['#8e3345','#a94356','#b04c5e'],70);
+    x.fillStyle='#e8d9a8';
+    for(var a=0;a<16;a+=4) for(var b=0;b<16;b+=4) x.fillRect(a,b,2,1);
+    x.fillStyle='#c9a76a';
+    for(var a2=2;a2<16;a2+=4) for(var b2=2;b2<16;b2+=4) x.fillRect(a2,b2,1,2);
+    x.fillStyle='#3f6f8e';
+    for(var a3=1;a3<16;a3+=8) for(var b3=1;b3<16;b3+=8) x.fillRect(a3,b3,2,2);
+  });
+  /* 50, 51, 52: the pictures on the drawer buttons. None of these is on any face of
+     anything - the furniture is built out of boxes and no box is a whole cell wide -
+     so each one is a little drawing of the thing from the side, which is what a
+     five-year-old who cannot read the label is actually choosing from. */
+  /* 50 a table */
+  tile(50,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#c49a5f'; x.fillRect(1,5,14,3);
+    x.fillStyle='#ac8149'; x.fillRect(1,7,14,1);
+    x.fillStyle='#8a6a47'; x.fillRect(3,8,2,7); x.fillRect(11,8,2,7);
+    x.fillStyle='#6e5336'; x.fillRect(0,15,16,1);
+  });
+  /* 51 a chair */
+  tile(51,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#c49a5f'; x.fillRect(4,1,3,14);
+    x.fillStyle='#ac8149'; x.fillRect(4,1,3,1);
+    x.fillStyle='#c49a5f'; x.fillRect(7,8,7,2);
+    x.fillStyle='#8a6a47'; x.fillRect(7,10,2,5); x.fillRect(12,10,2,5);
+    x.fillStyle='#6e5336'; x.fillRect(0,15,16,1);
+  });
+  /* 52 a lamp */
+  tile(52,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#ffe9a8'; x.fillRect(4,2,8,6);
+    x.fillStyle='#fff3cc'; x.fillRect(5,3,6,3);
+    x.fillStyle='#ffca4a'; x.fillRect(4,7,8,1);
+    x.fillStyle='#8a6a47'; x.fillRect(7,8,2,6);
+    x.fillStyle='#6e5336'; x.fillRect(5,14,6,2);
+  });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
     fill(x,'#e6dcc2');
@@ -1594,7 +1687,10 @@ function isSolid(x,y,z){
      it says where it goes, and he cannot get in. The dwell test missed it for the
      worst possible reason: standIn() put the player inside by assigning
      coordinates, which never asks about collision. */
-  return b!==AIR && !DEFS[b].liquid && !DEFS[b].portal;
+  /* A rug is the third of these: something you see but walk straight over. Without
+     it a rug is a rug-shaped wall lying across the doorway, and the only way to get
+     rid of it is to dig it up. */
+  return b!==AIR && !DEFS[b].liquid && !DEFS[b].portal && !DEFS[b].walkThrough;
 }
 function surfaceY(x,z){
   for(var y=WY-1;y>=0;y--){ var b=getBlock(x,y,z); if(b!==AIR && b!==WATER) return y+1; }
@@ -2452,7 +2548,11 @@ var PAD=0.03;
    touch. Minecraft's own bed is 9/16 and steppable; this one is a little taller and
    is not. */
 var BED_WOOD=45, BED_SHEET=44, BED_BLANKET=43, BED_PILLOW=46;
-var BED_SHAPE={
+var PALE_WOOD=47, LAMP_SHADE=48, RUG_TILE=49;
+/* The four quarter turns, in the order a facing id counts them. Index 0 is +X,
+   which is the direction every shape below is written lying along. */
+var FACE4=[[1,0],[0,1],[-1,0],[0,-1]];
+var PROP_SHAPE={
   /* the foot: two legs at the outer end, frame, mattress, blanket over all of it */
   bedFoot:[
     [0,0,1,   3,4,4,    BED_WOOD],
@@ -2470,6 +2570,35 @@ var BED_SHAPE={
     [0,11,1,  7,12.5,15, BED_BLANKET],
     [7,11,2,  13,14,14, BED_PILLOW],
     [14,4,0,  16,16,16, BED_WOOD]
+  ],
+  /* a table: a top on four legs, and nothing points anywhere */
+  table:[
+    [0,12,0,  16,15,16, PALE_WOOD],
+    [1,0,1,   3,12,3,   BED_WOOD],
+    [13,0,1,  15,12,3,  BED_WOOD],
+    [1,0,13,  3,12,15,  BED_WOOD],
+    [13,0,13, 15,12,15, BED_WOOD]
+  ],
+  /* a chair, sitting up looking along +X: the back is the panel behind him at -X */
+  chair:[
+    [1,9,2,   3,16,14,  PALE_WOOD],
+    [2,7,2,   14,9,14,  PALE_WOOD],
+    [2,0,2,   4,7,4,    BED_WOOD],
+    [12,0,2,  14,7,4,   BED_WOOD],
+    [2,0,12,  4,7,14,   BED_WOOD],
+    [12,0,12, 14,7,14,  BED_WOOD]
+  ],
+  /* a lamp. The shade carries a 1 on the end, which is what sends that box to the
+     self-lit buffer instead of the shaded one - so it glows rather than being lit,
+     the same trick as fire and portals. */
+  lamp:[
+    [6,0,6,   10,1,10,  BED_WOOD],
+    [7,1,7,   9,9,9,    BED_WOOD],
+    [4,9,4,   12,14,12, LAMP_SHADE, 1]
+  ],
+  /* a rug: one flat square lying on the floor */
+  rug:[
+    [0,0,0,   16,1,16,  RUG_TILE]
   ]
 };
 
@@ -2577,7 +2706,7 @@ var chunkRebuilds=0;
    Ambient occlusion is not sampled: a prop sits in the middle of its cell with air
    around it, so the neighbours a cube would ask about are not touching it. Faces
    keep their own shading, which is what gives the frame its edges. */
-function propBox(P,N,U,C,I,ox,oy,oz,box,tint){
+function propBox(P,N,U,C,I,ox,oy,oz,box,tint,flat){
   var x0=ox+box[0]/16, y0=oy+box[1]/16, z0=oz+box[2]/16;
   var x1=ox+box[3]/16, y1=oy+box[4]/16, z1=oz+box[5]/16;
   var t=box[6];
@@ -2601,18 +2730,32 @@ function propBox(P,N,U,C,I,ox,oy,oz,box,tint){
       N.push(F.n[0],F.n[1],F.n[2]);
       var du=CORNERS[k][0], dv=CORNERS[k][1];
       U.push(u0+du*(u1-u0), v0+dv*(v1-v0));
-      var sh=F.s*tint;
+      var sh=flat?1:F.s*tint;
       C.push(sh,sh,sh);
     }
     I.push(vs,vs+1,vs+2, vs,vs+2,vs+3);
   }
 }
-function propMesh(P,N,U,C,I,x,y,z,id,def,tint){
-  var shape=BED_SHAPE[def.prop];
+/* Which way this one is turned. A bed reads it off its other half, because a bed is
+   two blocks and each half can see the other. Anything with a `dir` carries it in
+   its own id. Anything else does not turn at all. */
+function propFacing(x,y,z,id,def){
+  if(def.dir!==undefined) return FACE4[def.dir];
+  if(id===BED||id===BEDHEAD) return bedFacing(x,y,z,id);
+  return FACE4[0];
+}
+/* A box carrying a 1 on the end goes to the self-lit buffer and keeps full
+   brightness on every face, which is what makes a lampshade a lamp rather than a
+   pale box. Same two buffers a cube would pick between; the choice is per box here
+   because one lamp is partly wood and partly light. */
+function propMesh(opq,glw,x,y,z,id,def,tint){
+  var shape=PROP_SHAPE[def.prop];
   if(!shape) return;
-  var face=bedFacing(x,y,z,id);
-  for(var i=0;i<shape.length;i++)
-    propBox(P,N,U,C,I,x,y,z,rotBox(shape[i],face[0],face[1]),tint);
+  var face=propFacing(x,y,z,id,def);
+  for(var i=0;i<shape.length;i++){
+    var b=shape[i], lit=!!b[7], t=lit?glw:opq;
+    propBox(t.P,t.N,t.U,t.C,t.I,x,y,z,rotBox(b,face[0],face[1]),tint,lit);
+  }
 }
 
 function buildChunk(ch){
@@ -2620,6 +2763,8 @@ function buildChunk(ch){
   var P=[],N=[],U=[],C=[],I=[];      // opaque buffers
   var tP=[],tN=[],tU=[],tC=[],tI=[]; // transparent buffers
   var gP=[],gN=[],gU=[],gC=[],gI=[]; // self-lit buffers (fire)
+  /* the same two, named, for the prop path - which picks between them per box */
+  var OPQ={P:P,N:N,U:U,C:C,I:I}, GLW={P:gP,N:gN,U:gU,C:gC,I:gI};
   var x0=ch.cx*CHUNK, z0=ch.cz*CHUNK;
 
   for(var y=0;y<WY;y++)
@@ -2632,7 +2777,7 @@ function buildChunk(ch){
 
     /* Not a cube. Build it out of boxes and move on - no neighbour culling, because
        nothing about a bed lines up with the edge of its cell. */
-    if(def.prop){ propMesh(P,N,U,C,I,x,y,z,b,def,tint); continue; }
+    if(def.prop){ propMesh(OPQ,GLW,x,y,z,b,def,tint); continue; }
 
     for(var f=0;f<6;f++){
       var F=FACES[f];
@@ -4481,15 +4626,30 @@ function buildTarget(){
    built facing a wall ends up with its headboard against the wall. If that space is
    taken the other three directions are tried in turn, and if none of them is free he
    is told - rather than left with half a bed and no way to finish it. */
-function bedDirs(){
+/* Whichever of the four directions he is most nearly looking along. */
+function lookDir(){
   var fx=Math.sin(yaw), fz=Math.cos(yaw);
-  var first = Math.abs(fx)>Math.abs(fz) ? [fx>0?1:-1,0] : [0,fz>0?1:-1];
+  return Math.abs(fx)>Math.abs(fz) ? [fx>0?1:-1,0] : [0,fz>0?1:-1];
+}
+function bedDirs(){
+  var first=lookDir();
   var all=[first];
   for(var i=0;i<4;i++){
     var d=BED_SCAN[i];
     if(d[0]!==first[0]||d[1]!==first[1]) all.push(d);
   }
   return all;
+}
+/* Which of a family's four ids to put down. A chair, a telly, anything with a
+   front: he should end up looking at the front of it, so it is turned back towards
+   him - which also means a chair pushed against a wall has its back to the wall
+   rather than its seat. */
+function facingId(id){
+  var def=DEFS[id];
+  if(!def || !def.family) return id;
+  var d=lookDir();
+  for(var i=0;i<4;i++) if(FACE4[i][0]===-d[0] && FACE4[i][1]===-d[1]) return FAMILY[def.family][i];
+  return id;
 }
 /* Empty, inside the world, and not where he is standing - the same three questions
    placeCell asks about the first cell, asked again about the second. */
@@ -4561,7 +4721,9 @@ function build(){
   var c=buildTarget();
   if(!c) return;
   if(selected===BED){ if(placeBed(c)) sfx('place'); return; }
-  setBlock(c.x,c.y,c.z,selected);
+  /* facingId is the identity for everything that has no front, which is all but a
+     handful of blocks - so this one line covers the chair and everything after it. */
+  setBlock(c.x,c.y,c.z,facingId(selected));
   sfx('place');
   /* Did that block just finish a portal? The flood behind this is capped at 729
      cells and bails the moment it escapes, so asking on every placement costs
@@ -4894,19 +5056,27 @@ function paintPortalRecipe(cv){
    cannot read "For a house", so what he is looking for has to be a picture. */
 function paintFurniture(cv){
   var c=cv.getContext('2d');
-  var size=44, gap=26, pad=6;
-  var W=pad*2+FURNITURE.length*size+(FURNITURE.length-1)*gap, H=size+24;
+  /* Six across, then wrap. The drawer is going to keep growing, and a row that only
+     ever gets longer walks off the side of a phone. */
+  var size=44, gap=22, pad=6, per=6, rowH=size+26;
+  var cols=Math.min(per,FURNITURE.length);
+  var rows=Math.ceil(FURNITURE.length/per);
+  var W=pad*2+cols*size+(cols-1)*gap, H=rows*rowH;
   cv.width=W; cv.height=H;
   c.clearRect(0,0,W,H);
   c.imageSmoothingEnabled=false;
   FURNITURE.forEach(function(id,i){
-    var x=pad+i*(size+gap);
-    drawTileAt(c,DEFS[id].tiles[2],x,4,size);
+    var col=i%per, row=Math.floor(i/per);
+    /* a short last row sits under the middle of the one above rather than jammed left */
+    var inRow=Math.min(per,FURNITURE.length-row*per);
+    var rowW=inRow*size+(inRow-1)*gap;
+    var x=pad+(W-pad*2-rowW)/2+col*(size+gap), y=row*rowH+3;
+    drawTileAt(c,DEFS[id].tiles[2],x,y,size);
     c.save();
     c.fillStyle='#f6f1e4';
-    c.font='bold 13px Trebuchet MS, Verdana, sans-serif';
+    c.font='bold 12px Trebuchet MS, Verdana, sans-serif';
     c.textAlign='center'; c.textBaseline='top';
-    c.fillText(DEFS[id].name,x+size/2,size+8);
+    c.fillText(DEFS[id].name,x+size/2,y+size+5);
     c.restore();
   });
   return {w:W,h:H};
@@ -8566,17 +8736,24 @@ window.__henrycraft={
        SNOW:SNOW,ICE:ICE,SANDSTONE:SANDSTONE,CACTUS:CACTUS,PINE:PINE,
        MUSHCAP:MUSHCAP,MUSHCAP2:MUSHCAP2,MUSHSTEM:MUSHSTEM,PORTAL:PORTAL,
        ROAD:ROAD,KERB:KERB,ROADLINE:ROADLINE,GRID:GRID,
-       FURNACE:FURNACE,BED:BED,BEDHEAD:BEDHEAD},
+       FURNACE:FURNACE,BED:BED,BEDHEAD:BEDHEAD,
+       TABLE:TABLE,CHAIR:CHAIR,CHAIR1:CHAIR1,CHAIR2:CHAIR2,CHAIR3:CHAIR3,
+       LAMP:LAMP,RUG:RUG},
+  FAMILY:FAMILY,
+  propFacing:function(x,y,z,id){ return propFacing(x,y,z,id,DEFS[id]); },
+  facingId:facingId,
+  isSolidAt:isSolid,
+  boxFree:boxFree,
   bedFacing:bedFacing,
   /* Every triangle in every chunk mesh, whether the camera can see it or not.
      renderCost() deliberately counts only what survived frustum culling, which is
      the right answer to "what does this cost to draw" and the wrong one to "what
      shape did the mesher build". */
-  chunkTriangles:function(){
+  chunkTriangles:function(group){
     flushDirty();
     var t=0;
     chunks.forEach(function(c){
-      ['opaque','trans','glow'].forEach(function(k){
+      (group?[group]:['opaque','trans','glow']).forEach(function(k){
         var m=c[k]; if(!m) return;
         var ix=m.geometry.getIndex(); if(ix) t+=ix.count/3;
       });
