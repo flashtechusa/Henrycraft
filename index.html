@@ -117,6 +117,23 @@ body>canvas{display:block;position:fixed;inset:0}
 }
 .slot.on{transform:translateY(-8px);box-shadow:0 10px 0 rgba(0,0,0,.45),0 0 0 4px var(--sun)}
 
+/* ---------- the two drawers ----------
+   One row of tabs, shown above the desktop palette and again above the touch
+   picker. Inside #palette it is a flex child with a full-width basis, so the
+   slots wrap onto their own rows underneath it and the palette keeps measuring
+   its own height for layoutHint. */
+.gtabs{display:flex;gap:8px;justify-content:center;flex-basis:100%;pointer-events:auto}
+#pickTabs{margin-bottom:10px}
+.gtab{
+  display:flex;align-items:center;gap:6px;
+  padding:6px 14px;border-radius:10px;border:3px solid var(--ink);
+  background:rgba(18,42,71,.82);color:var(--cream);
+  font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  box-shadow:0 4px 0 rgba(0,0,0,.45);cursor:pointer;user-select:none;
+}
+.gtab i{font-style:normal;font-size:17px;line-height:1}
+.gtab.on{background:var(--sun);color:var(--ink);box-shadow:0 4px 0 rgba(0,0,0,.35)}
+
 /* ---------- touch controls ---------- */
 #touchUI{display:none}
 body.touch #touchUI{display:block}
@@ -162,8 +179,9 @@ body.touch #blockBtn{
   font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
   color:var(--sun);text-align:center;margin-bottom:10px
 }
-/* 19 blocks. Seven across gives three rows with one slot spare; six across
-   would need a fourth row, which does not fit a phone held sideways. */
+/* Seven across. The blocks drawer holds 19, which is three rows with one slot
+   spare; six across would need a fourth row, which does not fit a phone held
+   sideways. Anything new goes in a second drawer rather than a fourth row. */
 #pickerGrid{display:grid;grid-template-columns:repeat(7,58px);gap:8px}
 #pickerGrid .slot{width:58px;height:58px}
 
@@ -305,6 +323,9 @@ body.touch #hint{display:none}
   }
   #pickerGrid{grid-template-columns:repeat(7,46px)}
   #pickerGrid .slot{width:46px;height:46px}
+  .gtab{padding:4px 10px;font-size:10px;gap:4px}
+  .gtab i{font-size:14px}
+  #pickTabs{margin-bottom:6px}
   .pickcard{padding:10px 12px}
   .pickhead{margin-bottom:6px;font-size:11px}
 }
@@ -324,6 +345,26 @@ body.touch #hint{display:none}
    instead of both being z-index 30 and showing through each other. */
 #newDistrict,#confirmDel{z-index:34;background:rgba(8,20,36,.94)}
 #newDistrict .card,#confirmDel .card{max-height:none}
+/* One card, and on a phone held sideways it is taller than the window. Centring
+   it with justify-content clips the top off with no way to scroll back up to it -
+   the heading disappeared and the "Got it" button sat below the fold. Auto margins
+   centre it exactly the same while there is room and collapse to nothing when
+   there is not, so the overlay's own scrolling reaches both ends. */
+#ideas{justify-content:flex-start}
+/* And a panel to read it against. There is no shared .card rule, so this one had
+   no background at all: the palette and the hint line showed straight through the
+   middle of the recipe. Nobody noticed while the card was short enough to sit in
+   the empty middle of the screen. */
+#ideas .card{
+  margin:auto 0;background:var(--panel);border:4px solid var(--ink);border-radius:18px;
+  box-shadow:0 6px 0 rgba(0,0,0,.45);padding:18px 20px;
+  display:grid;gap:10px;justify-items:center
+}
+#ideas h2{margin:0;font-size:20px;letter-spacing:.08em;color:var(--sun);text-shadow:0 3px 0 var(--ink)}
+#ideas small{font-size:12px;font-weight:700;line-height:1.35;opacity:.9;max-width:44ch}
+/* the tab he has to look for, in the colour it is painted */
+#ideas small b{color:var(--sun);font-weight:900}
+#ideas .pickhead{margin:0}
 
 /* the signature: a title built like a stack of blocks */
 #title{
@@ -410,7 +451,7 @@ body.touch #hint{display:none}
 }
 #portalHelp.on{opacity:1}
 #portalHelp small{font-size:12px;font-weight:800;opacity:.9;text-align:center}
-#portalHelpPic,#ideasPic{
+#portalHelpPic,#ideasPic,#ideasFurn{
   max-width:100%;height:auto;image-rendering:pixelated;
   image-rendering:-moz-crisp-edges;image-rendering:crisp-edges
 }
@@ -574,6 +615,7 @@ body.touch #hint{display:none}
   <div id="picker" class="hide">
     <div class="pickcard">
       <div class="pickhead">Pick a block</div>
+      <div id="pickTabs" class="gtabs"></div>
       <div id="pickerGrid"></div>
     </div>
   </div>
@@ -677,6 +719,10 @@ body.touch #hint{display:none}
     <small>Build a frame out of obsidian, fill the middle in with any block, then
       light it with Flint &amp; Steel. Whatever you fill it with decides where it
       goes &mdash; snow takes you somewhere snowy, sand somewhere sandy.</small>
+    <div class="pickhead">Furniture for a house</div>
+    <canvas id="ideasFurn"></canvas>
+    <small>Tap the block button, then <b>For a house</b>. Two beds side by side
+      make a big one.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -789,7 +835,10 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
     PORTAL=30,
     /* The racing district. Appended once more, so every id above keeps its number
        and every save written before today still loads. */
-    ROAD=31,KERB=32,ROADLINE=33,GRID=34;
+    ROAD=31,KERB=32,ROADLINE=33,GRID=34,
+    /* Furniture for the houses he builds. Appended in turn - ids 0-34 are
+       untouched, so every district saved before today still loads. */
+    FURNACE=35,BED=36;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -818,9 +867,9 @@ DEFS[ENCHANT] ={name:'Enchanting', tiles:[22,21,21]};
    decorative - nothing anywhere spreads it, puts it out, or takes damage from
    it, and it digs away like any other block. */
 DEFS[FIRE]    ={name:'Flint & Steel', tiles:[23,23,23], glow:true};
-/* Theme terrain. Not in PALETTE - these are what districts are made of rather
-   than things Henry places, and adding eight more swatches would push the picker
-   to a fourth row that does not fit a phone. */
+/* Theme terrain. In no drawer - these are what districts are made of rather than
+   things Henry places, and adding eight more swatches would push the picker to a
+   fourth row that does not fit a phone. */
 DEFS[SNOW]     ={name:'Snow',      tiles:[24,3,25]};
 DEFS[ICE]      ={name:'Ice',       tiles:[26,26,26]};
 DEFS[SANDSTONE]={name:'Sandstone', tiles:[27,27,27]};
@@ -840,9 +889,30 @@ DEFS[ROAD]     ={name:'Road',      tiles:[35,35,35]};
 DEFS[KERB]     ={name:'Kerb',      tiles:[36,36,36]};
 DEFS[ROADLINE] ={name:'Road Line', tiles:[37,37,37]};
 DEFS[GRID]     ={name:'Start Line',tiles:[38,38,38]};
+/* Furniture, for the inside of a house he has already built. Ordinary solid
+   blocks: the furnace does not smelt anything and the bed does not set a spawn
+   point or a night to sleep through, because there is no smelting, no night and
+   nothing to respawn from. They are here to be furniture and nothing else, which
+   is what he asked for. Furnace bottom borrows stone and bed bottom borrows
+   planks - a face nobody ever sees does not need a tile of its own. */
+DEFS[FURNACE]  ={name:'Furnace', tiles:[39,3,40]};
+DEFS[BED]      ={name:'Bed',     tiles:[41,8,42]};
 
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
              COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
+/* The second drawer. Everything that furnishes a building rather than makes one
+   goes here, so the row of blocks along the bottom stops growing every time he
+   asks for something. */
+var FURNITURE=[FURNACE,BED];
+/* What the palette and the picker both show, one group at a time. Icons carry
+   the meaning - he cannot read the labels yet. */
+var GROUPS=[{key:'blocks',    label:'Blocks',    icon:'🧱', ids:PALETTE},
+            {key:'furniture', label:'For a house', icon:'🛏️', ids:FURNITURE}];
+var group=0;
+function groupOf(id){
+  for(var i=0;i<GROUPS.length;i++) if(GROUPS[i].ids.indexOf(id)>=0) return i;
+  return -1;
+}
 
 /* Where each ore lives, in absolute block heights. Bedrock is y=0, so the
    obsidian band sits directly on top of it.
@@ -1304,6 +1374,47 @@ function buildAtlas(){
     for(var a=0;a<4;a++) for(var b=0;b<4;b++){
       if((a+b)%2===0) x.fillRect(a*4,b*4,4,4);
     }
+  });
+  /* 39 furnace top - a stone hob with a dark ring set into it */
+  tile(39,function(x,r){
+    fill(x,'#7c7c84'); speck(x,r,['#71717a','#8a8a93','#66666e'],90);
+    x.fillStyle='#5a5a62'; x.fillRect(3,3,10,10);
+    x.fillStyle='#3a3a41'; x.fillRect(4,4,8,8);
+    x.fillStyle='#8a8a93'; x.fillRect(6,6,4,4);
+    x.fillStyle='#66666e'; x.fillRect(7,7,2,2);
+  });
+  /* 40 furnace side - the mouth, with a fire lit inside it. Painted into the
+     texture rather than made a glow block: glow lights every face equally, which
+     would leave a stone furnace shining like a lamp on all six sides. */
+  tile(40,function(x,r){
+    fill(x,'#8b8b94'); speck(x,r,['#80808a','#99999f','#75757e'],80);
+    x.fillStyle='#63636b'; x.fillRect(3,4,10,1);
+    x.fillStyle='#2b2b31'; x.fillRect(3,5,10,8);
+    x.fillStyle='#1b1b20'; x.fillRect(4,6,8,7);
+    x.fillStyle='#d94b1f'; x.fillRect(4,10,8,3);
+    x.fillStyle='#ff8a1f'; x.fillRect(5,11,6,2);
+    x.fillStyle='#ffd45a'; x.fillRect(6,12,4,1);
+    x.fillStyle='#ff8a1f'; x.fillRect(6,9,1,1); x.fillRect(9,8,1,2);
+    x.fillStyle='#6c6c74'; x.fillRect(0,14,16,2);
+  });
+  /* 41 bed top - blanket, a turned-down sheet and a pillow at one end */
+  tile(41,function(x,r){
+    fill(x,'#c4362f'); speck(x,r,['#b52f28','#d34039'],50);
+    x.fillStyle='#f4f0e4'; x.fillRect(0,0,16,5);
+    x.fillStyle='#ded9c8'; x.fillRect(0,4,16,1);
+    x.fillStyle='#e8e2d0'; x.fillRect(0,6,16,2);
+    x.fillStyle='#9e2620'; x.fillRect(0,8,16,1);
+    x.fillStyle='#9e2620'; x.fillRect(0,15,16,1);
+  });
+  /* 42 bed side - blanket over a mattress on a wooden frame */
+  tile(42,function(x,r){
+    fill(x,'#8a6a47'); speck(x,r,['#7d5f3f','#997754'],40);
+    x.fillStyle='#c4362f'; x.fillRect(0,0,16,7);
+    x.fillStyle='#9e2620'; x.fillRect(0,7,16,1);
+    x.fillStyle='#f4f0e4'; x.fillRect(0,8,16,3);
+    x.fillStyle='#ded9c8'; x.fillRect(0,10,16,1);
+    x.fillStyle='#6e5336'; x.fillRect(1,12,3,4); x.fillRect(12,12,3,4);
+    x.fillStyle='#5c452c'; x.fillRect(0,15,16,1);
   });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
@@ -4506,8 +4617,30 @@ function paintPortalRecipe(cv){
   }
   return {w:W,h:H};
 }
+/* The two furniture swatches, drawn at the size they appear in the drawer. He
+   cannot read "For a house", so what he is looking for has to be a picture. */
+function paintFurniture(cv){
+  var c=cv.getContext('2d');
+  var size=44, gap=26, pad=6;
+  var W=pad*2+FURNITURE.length*size+(FURNITURE.length-1)*gap, H=size+24;
+  cv.width=W; cv.height=H;
+  c.clearRect(0,0,W,H);
+  c.imageSmoothingEnabled=false;
+  FURNITURE.forEach(function(id,i){
+    var x=pad+i*(size+gap);
+    drawTileAt(c,DEFS[id].tiles[2],x,4,size);
+    c.save();
+    c.fillStyle='#f6f1e4';
+    c.font='bold 13px Trebuchet MS, Verdana, sans-serif';
+    c.textAlign='center'; c.textBaseline='top';
+    c.fillText(DEFS[id].name,x+size/2,size+8);
+    c.restore();
+  });
+  return {w:W,h:H};
+}
 function showIdeas(){
   paintPortalRecipe(document.getElementById('ideasPic'));
+  paintFurniture(document.getElementById('ideasFurn'));
   el('ideas').classList.remove('hide');
 }
 
@@ -4571,10 +4704,40 @@ function toast(msg,ms){
   toastTimer=setTimeout(function(){ t.classList.remove('show'); },ms||1150);
   el('raceMsg').classList.remove('show');
 }
+/* One row of drawer tabs, painted into whichever container is given. Rebuilt with
+   the palette rather than toggled, so there is one description of which drawer is
+   open and both copies cannot disagree. */
+function fillTabs(host){
+  host.innerHTML='';
+  GROUPS.forEach(function(g,gi){
+    var b=document.createElement('div');
+    b.className='gtab'+(gi===group?' on':'');
+    b.dataset.group=g.key;
+    b.innerHTML='<i>'+g.icon+'</i>'+g.label;
+    b.addEventListener('pointerdown',function(e){
+      e.preventDefault(); e.stopPropagation();
+      showGroup(gi);
+    });
+    host.appendChild(b);
+  });
+}
+function showGroup(gi){
+  if(gi===group || !GROUPS[gi]) return;
+  group=gi;
+  buildPalette();
+  tone(560,0.05,'sine',0.04);
+}
 function buildPalette(){
   var hosts=[el('palette'),el('pickerGrid')];
   hosts.forEach(function(h){ h.innerHTML=''; });
-  PALETTE.forEach(function(id){
+  /* The desktop tabs live inside the palette, so they have to be put back after
+     it is emptied. The picker's tabs are their own element and only need filling. */
+  var palTabs=document.createElement('div');
+  palTabs.id='palTabs'; palTabs.className='gtabs';
+  fillTabs(palTabs);
+  el('palette').appendChild(palTabs);
+  fillTabs(el('pickTabs'));
+  GROUPS[group].ids.forEach(function(id){
     hosts.forEach(function(host,hi){
       var d=document.createElement('div');
       d.className='slot'+(id===selected?' on':'');
@@ -4788,6 +4951,11 @@ function openPicker(){ el('picker').classList.remove('hide'); }
 function closePicker(){ el('picker').classList.add('hide'); }
 function selectBlock(id){
   selected=id;
+  /* Picking a block that lives in the other drawer opens that drawer, so the
+     highlight is always somewhere he can see it - restoring a saved district
+     that ended on a bed is the case that matters. */
+  var gi=groupOf(id);
+  if(gi>=0 && gi!==group){ group=gi; buildPalette(); }
   if(typeof ghostMat!=='undefined' && DEFS[id].avg!==undefined) ghostMat.color.copy(srgb(DEFS[id].avg));
   var slots=document.querySelectorAll('.slot');
   for(var i=0;i<slots.length;i++) slots[i].classList.toggle('on',+slots[i].dataset.id===id);
@@ -4854,9 +5022,12 @@ document.addEventListener('mouseup',function(e){
 document.addEventListener('contextmenu',function(e){ e.preventDefault(); });
 window.addEventListener('wheel',function(e){
   if(!playing) return;
-  var i=PALETTE.indexOf(selected);
-  i=(i+(e.deltaY>0?1:-1)+PALETTE.length)%PALETTE.length;
-  selectBlock(PALETTE[i]);
+  /* Cycles the drawer that is open, so the wheel cannot scroll past the end of
+     the furniture and land back in the middle of the blocks. */
+  var ids=GROUPS[group].ids;
+  var i=ids.indexOf(selected);
+  i=(i+(e.deltaY>0?1:-1)+ids.length)%ids.length;
+  selectBlock(ids[i]);
 },{passive:true});
 
 /* touch: joystick + look-drag */
@@ -8121,9 +8292,18 @@ window.__henrycraft={
        OBSIDIAN:OBSIDIAN,ENCHANT:ENCHANT,FIRE:FIRE,
        SNOW:SNOW,ICE:ICE,SANDSTONE:SANDSTONE,CACTUS:CACTUS,PINE:PINE,
        MUSHCAP:MUSHCAP,MUSHCAP2:MUSHCAP2,MUSHSTEM:MUSHSTEM,PORTAL:PORTAL,
-       ROAD:ROAD,KERB:KERB,ROADLINE:ROADLINE,GRID:GRID},
+       ROAD:ROAD,KERB:KERB,ROADLINE:ROADLINE,GRID:GRID,
+       FURNACE:FURNACE,BED:BED},
   DEFS:DEFS,
   PALETTE:PALETTE,
+  swatchURL:swatchURL,
+  FURNITURE:FURNITURE,
+  groups:function(){
+    return {open:group, list:GROUPS.map(function(g){
+      return {key:g.key, label:g.label, ids:g.ids.slice()};
+    })};
+  },
+  showGroup:showGroup,
   ORE_BANDS:ORE_BANDS,
   atlas:function(){ return {cols:ACOLS,rows:AROWS,tile:TP}; },
   dims:function(){ return {WX:WX,WY:WY,WZ:WZ,waterLevel:WATER_LEVEL}; },

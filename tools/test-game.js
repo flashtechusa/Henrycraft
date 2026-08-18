@@ -161,6 +161,111 @@ function slope(pts) {
         `${sel.slots} slots for ${sel.size} palette entries`);
   note('new entries: ' + sel.names.join(', '));
 
+  /* ---- 2b: the second drawer ------------------------------------------------
+     Henry wanted a furnace and a bed for the houses he builds, and his dad asked
+     that the row of blocks stop growing to hold them. So they live behind a tab
+     instead. The point of these checks is that the blocks drawer is exactly as
+     big as it was, that one tap reaches the furniture, and that a furnace put in
+     a wall is still there tomorrow. */
+  console.log('2b. furniture lives in its own drawer and the blocks drawer has not grown');
+  const drawers = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    const grid = () => [...document.querySelectorAll('#pickerGrid .slot')].map(s => +s.dataset.id);
+    const palSlots = () => [...document.querySelectorAll('#palette .slot')].map(s => +s.dataset.id);
+    const tabs = id => [...document.querySelectorAll('#' + id + ' .gtab')]
+      .map(t => ({key: t.dataset.group, on: t.classList.contains('on')}));
+
+    H.selectBlock(H.ids.GRASS);                 // known starting point: blocks drawer
+    const g0 = H.groups();
+    const blocksGrid = grid(), blocksPal = palSlots();
+
+    // one tap on the furniture tab, exactly as a finger would do it
+    const tab = document.querySelectorAll('#pickTabs .gtab')[1];
+    tab.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));
+    const g1 = H.groups();
+    const furnGrid = grid(), furnPal = palSlots();
+
+    // pick the bed from the drawer, and build with it
+    const bedSlot = [...document.querySelectorAll('#pickerGrid .slot')]
+      .find(s => +s.dataset.id === H.ids.BED);
+    bedSlot.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));
+    const pickedBed = H.selected();
+    const closed = document.getElementById('picker').classList.contains('hide');
+
+    H.setBlock(20, 18, 20, H.ids.BED);
+    H.setBlock(21, 18, 20, H.ids.FURNACE);
+    const placed = [H.getBlock(20, 18, 20), H.getBlock(21, 18, 20)];
+
+    // and back again, without the blocks having changed underneath him
+    document.querySelectorAll('#pickTabs .gtab')[0]
+      .dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));
+    const backGrid = grid();
+
+    /* Selecting something from the other drawer has to open that drawer, or the
+       highlight ends up somewhere he cannot see. This is what happens when a
+       saved district is restored having last been left on a bed. */
+    H.selectBlock(H.ids.FURNACE);
+    const followed = H.groups().open;
+
+    // a furnace in a wall survives leaving the district and coming back
+    await H.saveNow();
+    const other = await H.createDistrict('Furniture Test', 'meadow');
+    const here = H.districts().list.map(d => d.slug).find(s => s !== other);
+    await H.switchDistrict(other);
+    await H.switchDistrict(here);
+
+    return {
+      open0: g0.open, open1: g1.open,
+      keys: g0.list.map(g => g.key),
+      blocksGrid, blocksPal, furnGrid, furnPal, backGrid,
+      pickTabs: tabs('pickTabs'), palTabs: tabs('palTabs'),
+      pickedBed, bed: H.ids.BED, furnace: H.ids.FURNACE, closed, placed, followed,
+      names: [H.DEFS[H.ids.FURNACE].name, H.DEFS[H.ids.BED].name],
+      inPalette: [H.PALETTE.indexOf(H.ids.FURNACE), H.PALETTE.indexOf(H.ids.BED)],
+      survived: [H.getBlock(20, 18, 20), H.getBlock(21, 18, 20)],
+      selAfter: H.selected(), openAfter: H.groups().open,
+    };
+  });
+  check('there are two drawers, blocks and furniture',
+        drawers.keys.join(',') === 'blocks,furniture', drawers.keys.join(','));
+  check('both the palette and the picker carry the tabs',
+        drawers.palTabs.length === 2 && drawers.pickTabs.length === 2,
+        `palette ${drawers.palTabs.length}, picker ${drawers.pickTabs.length}`);
+  /* Nineteen, written out rather than read back from PALETTE. Comparing the grid
+     against PALETTE.length only proves the palette renders what it is given - it
+     passed happily at twenty. The number is the requirement: the blocks row stops
+     growing, and anything new goes in a drawer. Changing this line is a decision,
+     which is the point of it being here. */
+  check(`the blocks drawer still holds 19 and no more`,
+        sel.size === 19 && drawers.blocksGrid.length === 19 && drawers.blocksPal.length === 19,
+        `PALETTE ${sel.size}, picker ${drawers.blocksGrid.length}, palette ${drawers.blocksPal.length}`);
+  check('the furniture is not in the blocks drawer',
+        drawers.inPalette[0] < 0 && drawers.inPalette[1] < 0,
+        'PALETTE indexes: ' + drawers.inPalette.join(', '));
+  check('one tap opens the furniture drawer',
+        drawers.open0 === 0 && drawers.open1 === 1,
+        `open went ${drawers.open0} -> ${drawers.open1}`);
+  check(`the furniture drawer shows exactly the furnace and the bed`,
+        drawers.furnGrid.join(',') === [drawers.furnace, drawers.bed].join(',') &&
+        drawers.furnPal.join(',') === [drawers.furnace, drawers.bed].join(','),
+        `picker [${drawers.furnGrid}], palette [${drawers.furnPal}]`);
+  check('picking the bed selects it and shuts the picker',
+        drawers.pickedBed === drawers.bed && drawers.closed,
+        `selected=${drawers.pickedBed} closed=${drawers.closed}`);
+  check('the blocks come back unchanged when the first tab is tapped',
+        drawers.backGrid.join(',') === drawers.blocksGrid.join(','),
+        `${drawers.backGrid.length} slots`);
+  check('selecting furniture by id opens the furniture drawer', drawers.followed === 1,
+        'drawer ' + drawers.followed);
+  check('a furnace and a bed can be placed',
+        drawers.placed[0] === drawers.bed && drawers.placed[1] === drawers.furnace,
+        JSON.stringify(drawers.placed));
+  check('they are still there after leaving the district and coming back',
+        drawers.survived[0] === drawers.bed && drawers.survived[1] === drawers.furnace,
+        JSON.stringify(drawers.survived));
+  note('furniture: ' + drawers.names.join(', ') +
+       `; drawer after the round trip: ${drawers.openAfter}`);
+
   // ---- 3 + 4: ore across seeds, and the depth invariants -------------------
   console.log(`3. every world generates all the new ore (${SEEDS} seeds)`);
   const ORES = ['COAL','COPPER','LAPIS','EMERALD','OBSIDIAN','GOLD','DIAMOND'];
@@ -526,6 +631,46 @@ function slope(pts) {
     check(`${v.w}x${v.h}  palette ${r.palH}px tall, hint clear above it`,
           fails.length === 0, fails.join('; '));
     await c3.close();
+  }
+
+  /* The ideas page is taller than a phone held sideways, and always was. It was
+     centred with justify-content, which clips the top off a card that does not fit
+     and gives no way to scroll back up to it: the heading was unreachable at 390px
+     and the Got it button sat below the fold. Checked at both ends rather than by
+     measuring the card, because what matters is whether he can read the first line
+     and press the button, not how tall it is. */
+  console.log('8c. the ideas page can be read top to bottom and closed');
+  for (const v of [{w: 844, h: 390}, {w: 853, h: 477}, {w: 1280, h: 800}]) {
+    const c4 = await browser.newContext({viewport: {width: v.w, height: v.h}});
+    const p4 = await c4.newPage();
+    const errs4 = [];
+    p4.on('pageerror', e => errs4.push(e.message));
+    await p4.goto(url, {waitUntil: 'load'});
+    await p4.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
+                             {timeout: 60000});
+    await p4.click('#playBtn');
+    await p4.waitForTimeout(400);
+    const r = await p4.evaluate(() => {
+      document.getElementById('mIdeas').click();
+      const ov = document.getElementById('ideas');
+      ov.scrollTop = 0;
+      const head = document.querySelector('#ideas h2').getBoundingClientRect();
+      ov.scrollTop = ov.scrollHeight;
+      const btn = document.getElementById('ideasDone').getBoundingClientRect();
+      const furn = document.getElementById('ideasFurn');
+      const panel = getComputedStyle(document.querySelector('#ideas .card')).backgroundColor;
+      return {headTop: Math.round(head.top), btnBottom: Math.round(btn.bottom),
+              vh: window.innerHeight, furnW: furn.width, furnH: furn.height, panel};
+    });
+    const fails = [];
+    if (r.headTop < 0) fails.push(`heading ${-r.headTop}px above the top when scrolled up`);
+    if (r.btnBottom > r.vh) fails.push(`Got it ${r.btnBottom - r.vh}px below the fold when scrolled down`);
+    if (!(r.furnW > 0 && r.furnH > 0)) fails.push('the furniture swatches were not drawn');
+    if (/rgba?\(0, 0, 0, 0\)/.test(r.panel)) fails.push('the card has no background to read against');
+    if (errs4.length) fails.push('page errors: ' + errs4.join(' | '));
+    check(`${v.w}x${v.h}  heading at ${r.headTop}, Got it ends at ${r.btnBottom} of ${r.vh}`,
+          fails.length === 0, fails.join('; '));
+    await c4.close();
   }
 
   check('no page errors during the whole run', pageErrors.length === 0, pageErrors.join(' | '));

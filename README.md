@@ -367,6 +367,18 @@ the moment the row above it grew. It is two stacked rows now, measured at five s
 and where the row above already reaches the buttons on a narrow phone, which it did before
 there was a lap clock, that is reported rather than blamed on the clock.
 
+Adding the furniture section to *Things you can build* turned up two more of the same kind,
+both older than the change. The page has **no panel behind it** &mdash; there is no shared
+`.card` rule, only `#menu .card` &mdash; so the palette and the keyboard crib had always been
+showing through the middle of the portal recipe; nobody saw it while the card was short enough
+to sit in the empty middle of the screen. And the overlay centres its card with
+`justify-content`, which **clips the top off anything taller than the window with no way to
+scroll back up to it**: on a phone held sideways at 390px the heading was already unreachable
+before I made the card longer. Auto margins centre it identically while there is room and
+collapse to nothing when there is not. `test-game.js` now scrolls the page to each end at
+three sizes and checks that the heading and the *Got it* button can both actually be reached,
+because that is the thing that matters &mdash; not how tall the card is.
+
 ## Playing together
 
 Everything below is off until somebody turns it on. Alone is the default, and
@@ -652,6 +664,15 @@ a server that was already deployed.
 brick, glass, gold, diamond, rainbow, coal, copper, lapis, emerald, obsidian, an
 enchanting table, and Flint &amp; Steel.
 
+**Furniture, in a second drawer.** Henry asked for a furnace and a bed to put
+inside the houses he builds. Rather than make the row of blocks longer again, the
+picker grew two tabs — 🧱 **Blocks** and 🛏️ **For a house** — and the furniture
+lives behind the second one. They are ordinary blocks: nothing cooks in the
+furnace, nobody has to sleep in the bed, and both dig away like anything else.
+Two beds side by side make a double. The blocks row is pinned at nineteen by a
+test that writes the number out rather than reading it back, so the next thing he
+asks for goes in a drawer too.
+
 **Ore to dig for.** Coal and copper are common in the upper rock, lapis sits
 mid-depth, gold a bit deeper, and diamond, emerald and obsidian are down near the
 bedrock — obsidian only in the bottom two layers. Digging straight down from a
@@ -799,10 +820,10 @@ colours.
 `node tools/test-game.js` drives the real `index.html` in headless Chromium and
 asserts against the live world. It needs Playwright; set `PLAYWRIGHT_PATH` if it
 is installed somewhere unusual. It covers the atlas and UV bounds, the palette,
-ore generation and depth bands across 20 seeds, that no fish ever leaves the
-water over a minute of simulation per seed, that the shark's path does not depend
-on where Henry is, that fire never spreads, and the control layout at phone and
-desktop sizes.
+the two picker drawers, ore generation and depth bands across 20 seeds, that no
+fish ever leaves the water over a minute of simulation per seed, that the shark's
+path does not depend on where Henry is, that fire never spreads, and the control
+layout at phone and desktop sizes.
 
 `node tools/test-portals.js` covers portals: frame detection at every size from
 1×2 to 21×21 in both vertical planes, a specific hint for each wrong shape, and
