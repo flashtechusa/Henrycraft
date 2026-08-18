@@ -765,10 +765,51 @@ so adding rows reflows the sheet on its own and every existing tile number stays
 correct. The *columns* must never change: it is dividing by the column count that
 turns an index into a row.
 
+**A telly and a bathroom** followed: a television with something moving on it, a
+bath, a sink, a toilet and bathroom tiles. That brings the drawer to eleven over
+two rows, and means the four-ids-per-front machinery is exercised by five families
+rather than one. The screen is self-lit like a screen in a dark room, and what is
+on it is deliberately abstract — bands of colour with a shape bouncing over them.
+Nothing to read, nothing that could startle him, nothing that ever stops.
+
+Three moving tiles was one too many for a pair of variables, so the animation is a
+**table**: one atlas tile each, how many of that thing are in the world, and how
+many ticks between pictures. Fire every tick, furnace every second, telly every
+third — a room with all three in it should not flicker. A district with none of
+them does no work at all.
+
+**The headboard goes against the wall**, including in a corner. A bed is two blocks
+and the cell he aims at is one of them, so there are eight arrangements; they are
+scored rather than tried in a fixed order, and something solid behind the headboard
+is worth more than everything else put together. The edge of the world counts as a
+wall. In an open room nothing scores, so it lies away from him as it always did.
+
+**Press BUILD on a piece of furniture to turn it** a quarter turn — bed, chair,
+telly, bath, sink or toilet. No new button on an already crowded pad, and it is the
+press he already knows. Turning a bed keeps the foot still and swings the head
+round, and says so when there is no room. A wall, a floor, a table or a rug does not
+answer to it, so building the house around the furniture is unaffected.
+
+**Forward was backwards.** `rayHit` and `groundAhead` have always taken forward as
+*minus* sin and *minus* cos of yaw. The direction helper the furniture used took
+plus, copied from `faceOpenGround` — which uses plus because it is asking where
+there is room *behind* him for the trailing camera to sit, the opposite question.
+So every direction it produced pointed the wrong way: a bed's headboard went to the
+wall behind him, and a chair turned its back on him. **The tests agreed**, because
+they were written from the same misreading, which is exactly why they passed while
+the game was wrong in his hands. Worth remembering as the failure mode a test
+cannot catch: one that shares an assumption with the code it is checking.
+
+**Things stand on rugs.** A rug is a sixteenth of a block thick but filled its cell
+for placement, so "on top of it" meant the cell above — a table hovering a block up
+with daylight under its legs. Rugs are **replaceable** now, the way water always
+was: the block goes in the rug's own cell and stands on the floor he pointed at,
+costing the one square of carpet it is standing on.
+
 **Block ids are pinned by a test.** A district is saved as coordinates to block ids,
 so an id *is* the save format — inserting into the middle of the list rather than
 appending would turn every diamond in his world into something else, silently, with
-no way back. All 45 numbers are written out longhand in `tools/test-game.js`, so
+no way back. All 62 numbers are written out longhand in `tools/test-game.js`, so
 renumbering has to be a deliberate act.
 
 **Ore to dig for.** Coal and copper are common in the upper rock, lapis sits
