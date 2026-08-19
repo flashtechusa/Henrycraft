@@ -828,10 +828,36 @@ walks through it" and "a new block goes into this cell". A rug needs both; an op
 door needs only the first, because otherwise building a wall beside a doorway
 **deletes the door**. They are `passable` and `replaceable` now.
 
+**Dinner on the table.** A plate with a knife and fork, the same setting with food
+on it, a cake and a cup. They go **on** the table rather than a block above it: a
+place setting is a sixteenth of a block of china, so it lies on the table top where
+he pointed. Passable, because a knife and fork are not something to bump into, but
+not replaceable, so building beside the table does not sweep the dinner off it. The
+settings turn to face whoever is sitting there, like the chairs do.
+
+**Sitting down** is a 🪑 chip that appears whenever a seat is within reach and goes
+when he walks away — the same way the 🏎️ kart button only exists on a circuit.
+Deliberately *not* BUILD: BUILD on a chair turns it, and a five-year-old who wants
+to sit down should not find out that way that his chair is now facing the wall. A
+chair, a toilet and a bath have a seat height; a table and a telly do not.
+
+Nothing about it can strand him. Pushing the stick stands him up, so the control he
+already knows is always the way out; digging the seat out from under him stands him
+up; getting into a kart stands him up; and standing up looks for somewhere clear
+rather than assuming there is one.
+
+The seated branch returned early out of `updatePlayer` at first. That correctly
+skipped the physics — he is sitting inside a solid cell, which physics would shove
+him straight out of — and *also* skipped the code that moves the avatar and the
+camera, so he sat down and the picture stayed where he had been standing. Nothing
+that reads `player()` could see it; only the screenshot did. The pose and the camera
+are their own function now, called from both paths, and `avatarAt()` reports where
+they really are so a check can hold them to it.
+
 **Block ids are pinned by a test.** A district is saved as coordinates to block ids,
 so an id *is* the save format — inserting into the middle of the list rather than
 appending would turn every diamond in his world into something else, silently, with
-no way back. All 71 numbers are written out longhand in `tools/test-game.js`, so
+no way back. All 81 numbers are written out longhand in `tools/test-game.js`, so
 renumbering has to be a deliberate act.
 
 **Ore to dig for.** Coal and copper are common in the upper rock, lapis sits
