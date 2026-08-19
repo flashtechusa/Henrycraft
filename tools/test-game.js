@@ -132,6 +132,9 @@ function slope(pts) {
     DOOR: 62, DOOR1: 63, DOOR2: 64, DOOR3: 65,
     DOOROPEN: 66, DOOROPEN1: 67, DOOROPEN2: 68, DOOROPEN3: 69,
     DOORTOP: 70,
+    PLATE: 71, PLATE1: 72, PLATE2: 73, PLATE3: 74,
+    DINNER: 75, DINNER1: 76, DINNER2: 77, DINNER3: 78,
+    CAKE: 79, CUP: 80,
   };
   const ids = await page.evaluate(() => window.__henrycraft.ids);
   const moved = Object.keys(ID_TABLE).filter(k => ids[k] !== ID_TABLE[k])
@@ -262,7 +265,8 @@ function slope(pts) {
          prove the drawer renders whatever it is handed */
       wantFurniture: [H.ids.FURNACE, H.ids.BED, H.ids.TABLE, H.ids.CHAIR,
                       H.ids.LAMP, H.ids.RUG, H.ids.TV, H.ids.BATH, H.ids.SINK,
-                      H.ids.TOILET, H.ids.TILES, H.ids.DOOR],
+                      H.ids.TOILET, H.ids.TILES, H.ids.DOOR,
+                      H.ids.PLATE, H.ids.DINNER, H.ids.CAKE, H.ids.CUP],
       names: [H.DEFS[H.ids.FURNACE].name, H.DEFS[H.ids.BED].name],
       inPalette: [H.PALETTE.indexOf(H.ids.FURNACE), H.PALETTE.indexOf(H.ids.BED)],
       survived: [H.getBlock(20, 18, 20), H.getBlock(21, 18, 20)],
@@ -288,7 +292,7 @@ function slope(pts) {
   check('one tap opens the furniture drawer',
         drawers.open0 === 0 && drawers.open1 === 1,
         `open went ${drawers.open0} -> ${drawers.open1}`);
-  check('the furniture drawer shows all twelve pieces, in order',
+  check('the furniture drawer shows all sixteen pieces, in order',
         drawers.furnGrid.join(',') === drawers.wantFurniture.join(',') &&
         drawers.furnPal.join(',') === drawers.wantFurniture.join(','),
         `picker [${drawers.furnGrid}], palette [${drawers.furnPal}], ` +
@@ -501,7 +505,7 @@ function slope(pts) {
         new Set(room.chairs.map(c => c.id)).size === 4,
         'ids: ' + room.chairs.map(c => c.id).join(', '));
   check('only one chair is offered in the drawer, and the blocks row is untouched',
-        room.drawer.spares.length === 0 && room.drawer.furniture.length === 12 &&
+        room.drawer.spares.length === 0 && room.drawer.furniture.length === 16 &&
         room.drawer.blocks === 19,
         `spares in a drawer: [${room.drawer.spares}], furniture ${room.drawer.furniture.length}, ` +
         `blocks ${room.drawer.blocks}`);
@@ -942,6 +946,151 @@ function slope(pts) {
   check('with no headroom nothing is placed, and he is told',
         !door.noRoom.placed && door.noRoom.cell === 0 &&
         /two blocks of room/.test(door.noRoom.said), JSON.stringify(door.noRoom));
+
+  /* ---- 2i: dinner on the table, and sitting down at it ----------------------
+     He asked for food and plates and knives and forks so there could be dinner on
+     the table, and to be able to sit down at a table or on the toilet. */
+  console.log('2i. dinner goes on the table, and he can sit down at it');
+  const dinner = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadThemeSeed('meadow', 63);
+    const gy = 24, out = {};
+    for (let x = 20; x <= 52; x++) for (let z = 20; z <= 52; z++) {
+      for (let y = gy; y < gy + 6; y++) H.setBlock(x, y, z, ids.AIR);
+      H.setBlock(x, gy - 1, z, ids.PLANKS);
+    }
+
+    /* A plate goes ON the table - the cell above it - rather than a block higher
+       or in place of the table. Placed by aiming at the table and pressing build,
+       which is what he does. */
+    H.setBlock(30, gy, 30, ids.TABLE);
+    H.selectBlock(ids.PLATE);
+    /* Close enough and steep enough to catch the TOP of the table rather than its
+       near side or the floor in front of it - the aimed cell is asserted below, so
+       a stance that misses says so instead of looking like a placement bug. */
+    H.movePlayer(30.5, gy + 0.05, 31.5);
+    H.setYaw(0); H.setPitch(-0.62);
+    const aimedAt = H.aimAt();          // before building: afterwards it hits the plate
+    H.build();
+    out.onTable = {aimed: aimedAt,
+                   above: H.getBlock(30, gy + 1, 30),
+                   isPlate: H.FAMILY.plate.indexOf(H.getBlock(30, gy + 1, 30)) >= 0,
+                   table: H.getBlock(30, gy, 30) === ids.TABLE,
+                   higher: H.getBlock(30, gy + 2, 30)};
+
+    /* Dinner is walked through, not into - it is a sixteenth of a block of china -
+       but it is not swept away by building next to it. */
+    H.setBlock(40, gy, 40, ids.DINNER);
+    out.food = {passable: H.isSolidAt(40, gy, 40) === false,
+                notReplaced: (() => {
+                  const before = H.getBlock(40, gy, 40);
+                  H.setBlock(41, gy, 40, ids.BRICK);        // a neighbour, not the cell
+                  return H.getBlock(40, gy, 40) === before;
+                })()};
+
+    const delta = (id) => {
+      H.setBlock(44, gy, 44, ids.AIR);
+      const before = H.chunkTriangles();
+      H.setBlock(44, gy, 44, id);
+      const d = H.chunkTriangles() - before;
+      H.setBlock(44, gy, 44, ids.AIR);
+      return d;
+    };
+    out.tris = {plate: delta(ids.PLATE), dinner: delta(ids.DINNER),
+                cake: delta(ids.CAKE), cup: delta(ids.CUP)};
+
+    /* Sitting. A chair, a toilet and a bath all have a seat height; a table and a
+       telly do not, so he cannot sit on those. */
+    out.seats = ['CHAIR', 'TOILET', 'BATH'].map(k => {
+      H.setBlock(35, gy, 35, ids[k]);
+      const s = H.seatAtFor(35, gy, 35);
+      return {k, seat: s !== null};
+    });
+    H.setBlock(35, gy, 35, ids.TABLE);
+    out.notSeats = {table: H.seatAtFor(35, gy, 35) === null,
+                    tv: (H.setBlock(35, gy, 35, ids.TV), H.seatAtFor(35, gy, 35) === null)};
+
+    /* Sit on a chair: he ends up on the seat, facing the way the chair does, and
+       the chip changes to standing up. */
+    H.setBlock(30, gy, 34, ids.CHAIR);          // dir 0, looking +X
+    H.movePlayer(30.5, gy + 0.05, 35.5);
+    out.near = H.seatNear();
+    H.toggleSit();
+    out.sat = {seat: H.sitting(), p: H.player(),
+               chip: !document.getElementById('sitBtn').classList.contains('hide'),
+               label: document.getElementById('sitBtn').textContent};
+
+    /* The avatar and the camera have to keep following him while he is sitting.
+       The first version returned out of updatePlayer before the code that moves
+       them, so he sat down and the picture stayed where he had been standing -
+       invisible to anything that only reads player(). */
+    const camBefore = H.avatarAt().cam;
+    H.step(0.05); H.step(0.05);
+    const av = H.avatarAt();
+    out.drawn = {avatarOnSeat: Math.abs(av.x - 30.5) < 0.01 && Math.abs(av.z - 34.5) < 0.01 &&
+                               Math.abs(av.y - (gy + 0.56)) < 0.01,
+                 kneesUp: av.legs < -1.0,
+                 camMoved: Math.abs(av.cam.x - camBefore.x) > 0.001 ||
+                           Math.abs(av.cam.z - camBefore.z) > 0.001 ||
+                           Math.abs(av.cam.y - camBefore.y) > 0.001};
+
+    // pushing the stick gets him up
+    H.setInput({fwd: 1});
+    H.step(0.05);
+    H.setInput({fwd: 0});
+    out.stoodByMoving = {seat: H.sitting(), free: H.boxFree(H.player().x, H.player().y, H.player().z)};
+
+    // digging the chair out from under him gets him up too
+    H.movePlayer(30.5, gy + 0.05, 35.5);
+    H.toggleSit();
+    const satAgain = !!H.sitting();
+    H.setBlock(30, gy, 34, ids.AIR);
+    H.step(0.05);
+    out.dugOut = {satAgain, seat: H.sitting()};
+
+    // and the toilet, since that is what he asked for by name
+    H.setBlock(38, gy, 38, ids.TOILET);
+    H.movePlayer(38.5, gy + 0.05, 39.5);
+    H.toggleSit();
+    out.toilet = {seat: H.sitting(), y: +H.player().y.toFixed(2), want: +(gy + 0.62).toFixed(2)};
+    H.standUp();
+    out.stoodUp = {seat: H.sitting(),
+                   free: H.boxFree(H.player().x, H.player().y, H.player().z)};
+    return out;
+  });
+  check('a plate goes on the table he pointed at, not a block above it',
+        !!dinner.onTable.aimed && dinner.onTable.aimed.x === 30 &&
+        dinner.onTable.aimed.y === 24 && dinner.onTable.aimed.z === 30 &&
+        dinner.onTable.isPlate && dinner.onTable.table && dinner.onTable.higher === 0,
+        JSON.stringify(dinner.onTable));
+  check('dinner is walked through, and not swept off by building beside it',
+        dinner.food.passable && dinner.food.notReplaced, JSON.stringify(dinner.food));
+  check(`plate 3 boxes, dinner 3, cake 3, cup 2 ` +
+        `(${dinner.tris.plate}/${dinner.tris.dinner}/${dinner.tris.cake}/${dinner.tris.cup})`,
+        dinner.tris.plate === 36 && dinner.tris.dinner === 36 &&
+        dinner.tris.cake === 36 && dinner.tris.cup === 24, JSON.stringify(dinner.tris));
+  check('a chair, a toilet and a bath can be sat on; a table and a telly cannot',
+        dinner.seats.every(s => s.seat) && dinner.notSeats.table && dinner.notSeats.tv,
+        JSON.stringify({seats: dinner.seats, not: dinner.notSeats}));
+  check('sitting puts him on the seat, and the chip offers standing up',
+        !!dinner.sat.seat && Math.abs(dinner.sat.p.y - 24.56) < 0.01 &&
+        dinner.sat.chip && dinner.sat.label === '🧍',
+        JSON.stringify(dinner.sat));
+  check('the avatar and the camera keep following him while he sits',
+        dinner.drawn.avatarOnSeat && dinner.drawn.kneesUp,
+        JSON.stringify(dinner.drawn));
+  check('pushing the stick stands him up, somewhere he fits',
+        dinner.stoodByMoving.seat === null && dinner.stoodByMoving.free,
+        JSON.stringify(dinner.stoodByMoving));
+  check('digging the seat out from under him stands him up',
+        dinner.dugOut.satAgain && dinner.dugOut.seat === null,
+        JSON.stringify(dinner.dugOut));
+  check('and he can sit on the toilet, which is what he asked for by name',
+        !!dinner.toilet.seat && Math.abs(dinner.toilet.y - dinner.toilet.want) < 0.01,
+        JSON.stringify(dinner.toilet));
+  check('standing up leaves him somewhere he fits',
+        dinner.stoodUp.seat === null && dinner.stoodUp.free,
+        JSON.stringify(dinner.stoodUp));
 
   /* ---- 2d: the furnace fire moves -----------------------------------------
      Same trick as Flint & Steel: one tile of the atlas is repainted on a timer and

@@ -604,6 +604,7 @@ body.touch #hint{display:none}
   <div id="topRight">
     <!-- Only in a racing district. Nothing new appears anywhere else. -->
     <button class="chip icon blockbtn hide" id="kartBtn" title="Get in the kart">🏎️</button>
+    <button class="chip icon blockbtn hide" id="sitBtn" title="Sit down">🪑</button>
     <button class="chip icon blockbtn" id="btnView" title="Change view">🎥</button>
     <button class="chip icon blockbtn" id="btnSound" title="Sound">🔊</button>
     <button class="chip icon blockbtn" id="btnMenu" title="Menu">⚙️</button>
@@ -873,7 +874,16 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
        save file. */
     DOOR=62,DOOR1=63,DOOR2=64,DOOR3=65,
     DOOROPEN=66,DOOROPEN1=67,DOOROPEN2=68,DOOROPEN3=69,
-    DOORTOP=70;
+    DOORTOP=70,
+    /* Laying the table. A place setting has a left and a right, so it costs four
+       ids like everything else with a front; a cake and a cup look the same from
+       every side and cost one each. All of them are `passable` - they are a
+       sixteenth of a block of china sitting on a table, not something to walk
+       into - but not `replaceable`, so building near the table does not sweep the
+       dinner off it. */
+    PLATE=71,PLATE1=72,PLATE2=73,PLATE3=74,
+    DINNER=75,DINNER1=76,DINNER2=77,DINNER3=78,
+    CAKE=79,CUP=80;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -962,6 +972,8 @@ DEFS[RUG]      ={name:'Rug',     tiles:[49,49,49], prop:'rug',
    and what tells the "every block has its own side tile" check that four chairs
    sharing one picture is the point rather than a slip. */
 DEFS[TILES]    ={name:'Tiles',   tiles:[57,57,57]};
+DEFS[CAKE]     ={name:'Cake',    tiles:[67,68,72], prop:'cake', passable:true};
+DEFS[CUP]      ={name:'Cup',     tiles:[69,69,73], prop:'cup',  passable:true};
 /* The top half of a door. One id: which way it faces and whether it is open are
    read off the bottom half every time they are needed, so there is nothing here
    that can disagree with the half below it. */
@@ -983,11 +995,19 @@ DEFS[DOORTOP]  ={name:'Door',    tiles:[62,62,63], prop:'doorTop'};
  [ 'tv',     [TV,TV1,TV2,TV3],                 'TV',     [53,53,58]],
  [ 'bath',   [BATH,BATH1,BATH2,BATH3],         'Bath',   [55,55,59]],
  [ 'sink',   [SINK,SINK1,SINK2,SINK3],         'Sink',   [55,55,60]],
- [ 'toilet', [TOILET,TOILET1,TOILET2,TOILET3], 'Toilet', [55,55,61]]
+ [ 'toilet', [TOILET,TOILET1,TOILET2,TOILET3], 'Toilet', [55,55,61]],
+ [ 'plate',  [PLATE,PLATE1,PLATE2,PLATE3],     'Plate',  [64,64,70]],
+ [ 'dinner', [DINNER,DINNER1,DINNER2,DINNER3], 'Dinner', [66,66,71]]
 ].forEach(function(f){
   FAMILY[f[0]]=f[1];
   f[1].forEach(function(id,dir){
-    DEFS[id]={name:f[2], tiles:f[3], prop:f[0], family:f[0], dir:dir};
+    DEFS[id]={name:f[2], tiles:f[3], prop:f[0], family:f[0], dir:dir,
+              /* a knife and fork are not something to bump into */
+              passable:(f[0]==='plate'||f[0]==='dinner'),
+              /* how far up its own block the seat is, for the ones you can sit on:
+                 the chair's seat, the toilet's, and the bottom of the bath, which
+                 he will want and which is the same line of code */
+              seatY:{chair:0.56, toilet:0.62, bath:0.20}[f[0]]};
   });
 });
 
@@ -996,7 +1016,8 @@ var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,R
 /* The second drawer. Everything that furnishes a building rather than makes one
    goes here, so the row of blocks along the bottom stops growing every time he
    asks for something. */
-var FURNITURE=[FURNACE,BED,TABLE,CHAIR,LAMP,RUG,TV,BATH,SINK,TOILET,TILES,DOOR];
+var FURNITURE=[FURNACE,BED,TABLE,CHAIR,LAMP,RUG,TV,BATH,SINK,TOILET,TILES,DOOR,
+               PLATE,DINNER,CAKE,CUP];
 /* What the palette and the picker both show, one group at a time. Icons carry
    the meaning - he cannot read the labels yet. */
 var GROUPS=[{key:'blocks',    label:'Blocks',    icon:'🧱', ids:PALETTE},
@@ -1675,6 +1696,82 @@ function buildAtlas(){
     x.fillStyle='#7a5227'; x.fillRect(4,3,6,13);
     x.fillStyle='#8c6132'; x.fillRect(5,5,4,4); x.fillRect(5,10,4,4);
     x.fillStyle='#f2c231'; x.fillRect(9,9,1,2);
+  });
+  /* 64 china - a white plate with a faint ring round it */
+  tile(64,function(x,r){
+    fill(x,'#fbfbf7');
+    x.fillStyle='#e6e6df'; x.fillRect(1,1,14,14);
+    x.fillStyle='#fbfbf7'; x.fillRect(3,3,10,10);
+    x.fillStyle='#d8d8d0'; x.fillRect(0,15,16,1);
+  });
+  /* 65 silver - the knife and the fork */
+  tile(65,function(x,r){
+    fill(x,'#c9ccd2'); speck(x,r,['#bcc0c7','#dde0e5'],40);
+    x.fillStyle='#a8acb4'; x.fillRect(0,15,16,1);
+  });
+  /* 66 dinner - what is on the plate, seen from above. Peas, carrots and mash,
+     which is the dinner a five-year-old draws when you ask him to draw a dinner. */
+  tile(66,function(x,r){
+    fill(x,'#fbfbf7');
+    x.fillStyle='#e6e6df'; x.fillRect(1,1,14,14);
+    x.fillStyle='#f4ecd2'; x.fillRect(3,7,6,6);          /* mash */
+    x.fillStyle='#e8dcb4'; x.fillRect(4,9,3,2);
+    x.fillStyle='#5fa83c'; x.fillRect(9,3,4,4);          /* peas */
+    x.fillStyle='#74c24d'; x.fillRect(10,4,1,1); x.fillRect(11,5,1,1);
+    x.fillStyle='#e8802a'; x.fillRect(9,9,4,3);          /* carrots */
+    x.fillStyle='#f2953f'; x.fillRect(9,10,4,1);
+  });
+  /* 67 icing, and 68 the sponge under it */
+  tile(67,function(x,r){
+    fill(x,'#f7e3ea'); speck(x,r,['#f2d8e1','#fdeef3'],40);
+    x.fillStyle='#e8b9cb'; x.fillRect(0,14,16,2);
+  });
+  tile(68,function(x,r){
+    fill(x,'#d9a961'); speck(x,r,['#cc9c56','#e4b872'],50);
+    x.fillStyle='#c08f4a'; x.fillRect(0,6,16,1); x.fillRect(0,12,16,1);
+  });
+  /* 69 a cup - cream with a band round it */
+  tile(69,function(x,r){
+    fill(x,'#fbfbf7');
+    x.fillStyle='#3f8fd6'; x.fillRect(0,4,16,3);
+    x.fillStyle='#d8d8d0'; x.fillRect(0,15,16,1);
+  });
+  /* 70-73: the drawer pictures, each seen from where it makes sense - the table
+     things from above, the cake and the cup from the side. */
+  /* 70 a place setting */
+  tile(70,function(x,r){
+    fill(x,'#c49a5f');
+    x.fillStyle='#fbfbf7'; x.fillRect(4,4,8,8);
+    x.fillStyle='#e6e6df'; x.fillRect(6,6,4,4);
+    x.fillStyle='#c9ccd2'; x.fillRect(1,4,2,8); x.fillRect(13,4,2,8);
+    x.fillStyle='#a8acb4'; x.fillRect(1,10,2,2); x.fillRect(13,10,2,2);
+  });
+  /* 71 a dinner */
+  tile(71,function(x,r){
+    fill(x,'#c49a5f');
+    x.fillStyle='#fbfbf7'; x.fillRect(3,3,10,10);
+    x.fillStyle='#f4ecd2'; x.fillRect(4,7,4,4);
+    x.fillStyle='#5fa83c'; x.fillRect(9,4,3,3);
+    x.fillStyle='#e8802a'; x.fillRect(9,8,3,3);
+    x.fillStyle='#c9ccd2'; x.fillRect(0,4,2,8); x.fillRect(14,4,2,8);
+  });
+  /* 72 a cake */
+  tile(72,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#d9a961'; x.fillRect(2,7,12,7);
+    x.fillStyle='#c08f4a'; x.fillRect(2,10,12,1);
+    x.fillStyle='#f7e3ea'; x.fillRect(1,4,14,3);
+    x.fillStyle='#e8b9cb'; x.fillRect(1,6,14,1);
+    x.fillStyle='#d94b3f'; x.fillRect(7,2,2,2);
+  });
+  /* 73 a cup */
+  tile(73,function(x,r){
+    fill(x,'#8ecdf0');
+    x.fillStyle='#fbfbf7'; x.fillRect(4,4,7,10);
+    x.fillStyle='#3f8fd6'; x.fillRect(4,7,7,2);
+    x.fillStyle='#d8d8d0'; x.fillRect(4,13,7,1);
+    x.fillStyle='#fbfbf7'; x.fillRect(11,6,2,5);
+    x.fillStyle='#8ecdf0'; x.fillRect(11,7,1,3);
   });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
@@ -2725,6 +2822,7 @@ var PAD=0.03;
 var BED_WOOD=45, BED_SHEET=44, BED_BLANKET=43, BED_PILLOW=46;
 var PALE_WOOD=47, LAMP_SHADE=48, RUG_TILE=49;
 var TV_BODY=53, TV_SCREEN=54, PORCELAIN=55, BATH_WATER=56, DOOR_WOOD=62;
+var CHINA=64, SILVER=65, DINNER_FOOD=66, ICING=67, SPONGE=68, CUP_TILE=69;
 /* The four quarter turns, in the order a facing id counts them. Index 0 is +X,
    which is the direction every shape below is written lying along. */
 var FACE4=[[1,0],[0,1],[-1,0],[0,-1]];
@@ -2816,6 +2914,31 @@ var PROP_SHAPE={
   ],
   /* The top half draws whatever the bottom half is doing - see propMesh. */
   doorTop:[],
+  /* A place setting, with whoever is eating it sitting at +X: plate in the middle,
+     fork one side and knife the other, all a sixteenth of a block thick so it lies
+     on the table rather than hovering over it. Dinner is the same three boxes with
+     food painted on the plate instead of china. */
+  plate:[
+    [5,0,5,    11,1.2,11,  CHINA],
+    [5,0,3,    11,0.6,4.4, SILVER],
+    [5,0,11.6, 11,0.6,13,  SILVER]
+  ],
+  dinner:[
+    [5,0,5,    11,1.4,11,  DINNER_FOOD],
+    [5,0,3,    11,0.6,4.4, SILVER],
+    [5,0,11.6, 11,0.6,13,  SILVER]
+  ],
+  /* a cake with icing and a cherry on it */
+  cake:[
+    [3,0,3,     13,4,13,     SPONGE],
+    [2.6,4,2.6, 13.4,5.2,13.4, ICING],
+    [7,5.2,7,   9,6.6,9,     DINNER_FOOD]
+  ],
+  /* a cup with a handle */
+  cup:[
+    [6,0,6,    10,4.6,10,  CUP_TILE],
+    [10,1.6,7.6, 11.6,3.6,8.4, CUP_TILE]
+  ],
   /* a toilet, sat on looking along +X, cistern behind at -X */
   toilet:[
     [4,0,4,   12,5,12,  PORCELAIN],
@@ -4038,7 +4161,7 @@ function updateParticles(dt){
 /* ---------------- player ---------------- */
 var PW=0.29, PH=1.5, EYE=1.34;
 var player={x:WX/2,y:20,z:WZ/2,vx:0,vy:0,vz:0,onGround:false,fly:false,walk:0,flyBoost:0,
-            kart:false,
+            kart:false, seat:null,
             /* drift: seconds held in the current slide, 0 when not drifting. tier: which
                spark colour it has reached, -1 for none yet. boost and star: seconds left
                of each. star makes grass as quick as tarmac - see the speed it picks. */
@@ -4377,6 +4500,7 @@ function clearKartMotion(){
 }
 
 function toggleKart(){
+  if(player.seat) standUp();
   player.kart=!player.kart;
   if(player.kart){
     /* Land him first. The fly buttons are hidden from the driving seat, so climbing into a
@@ -4577,6 +4701,8 @@ function updateLaps(dt){
 }
 
 function findSpawn(){
+  /* Whatever he was sitting on is not there any more. */
+  if(player.seat){ player.seat=null; paintSitButton(); }
   /* On a circuit he starts on the start line, facing the way the lap goes. Being put
      down in a field with the track somewhere over there is a worse first second. */
   if(trackInfo){
@@ -4618,7 +4744,98 @@ function findSpawn(){
 
 var input={fwd:0,strafe:0,jump:false,down:false};
 
+/* ---------------- sitting down ----------------
+   He asked to be able to sit at a table and on the toilet. A seat is a piece of
+   furniture with a `seatY` - how far up its own block the seat is - and sitting is
+   a chip that appears when one is within reach, the same way the kart button
+   appears only on a circuit. Not a press of BUILD: BUILD on a chair already turns
+   it, and a five-year-old who wants to sit down should not have to know that his
+   chair is now facing the wrong way because he tried.
+
+   Nothing about sitting can strand him. Pushing the stick stands him up, so the
+   control he already knows is always the way out, and standing up looks for
+   somewhere clear rather than assuming there is one. */
+function seatAt(x,y,z){
+  var d=DEFS[getBlock(x,y,z)];
+  return (d && d.seatY!==undefined) ? d : null;
+}
+/* The nearest seat he could drop into: his own cell first, then the four beside
+   him, at his feet and one below in case he is standing on something. */
+function seatNear(){
+  var fx=Math.floor(player.x), fy=Math.floor(player.y+0.1), fz=Math.floor(player.z);
+  var about=[[0,0],[1,0],[-1,0],[0,1],[0,-1]];
+  for(var dy=0;dy>=-1;dy--){
+    for(var i=0;i<about.length;i++){
+      var x=fx+about[i][0], y=fy+dy, z=fz+about[i][1];
+      if(seatAt(x,y,z)) return {x:x,y:y,z:z};
+    }
+  }
+  return null;
+}
+function sitDown(c){
+  var d=seatAt(c.x,c.y,c.z);
+  if(!d) return false;
+  player.seat={x:c.x,y:c.y,z:c.z};
+  player.x=c.x+0.5; player.z=c.z+0.5;
+  player.y=c.y+d.seatY;
+  player.vx=player.vy=player.vz=0;
+  player.onGround=true;
+  /* Facing whichever way the seat does, so sitting on a chair at a table looks at
+     the table rather than through the back of the chair. */
+  var f=propFacing(c.x,c.y,c.z,getBlock(c.x,c.y,c.z),d);
+  yaw=Math.atan2(-f[0],-f[1]);
+  paintSitButton();
+  sfx('place');
+  return true;
+}
+function standUp(){
+  if(!player.seat) return;
+  var s=player.seat;
+  player.seat=null;
+  /* Somewhere clear to stand: beside the seat first, then on top of it, then where
+     he already is. One of these is always true - the last one is where he was
+     sitting, which he fitted into. */
+  var tries=[[1,0],[-1,0],[0,1],[0,-1]];
+  for(var i=0;i<tries.length;i++){
+    var x=s.x+tries[i][0]+0.5, z=s.z+tries[i][1]+0.5;
+    if(boxFree(x,s.y,z)){ player.x=x; player.z=z; player.y=s.y; break; }
+  }
+  player.vx=player.vy=player.vz=0;
+  paintSitButton();
+}
+function paintSitButton(){
+  var b=document.getElementById('sitBtn');
+  if(!b) return;
+  var near=player.seat?player.seat:(player.kart?null:seatNear());
+  b.classList.toggle('hide',!near);
+  b.textContent=player.seat?'🧍':'🪑';
+  b.title=player.seat?'Stand up':'Sit down';
+}
+function toggleSit(){
+  if(player.seat){ standUp(); return; }
+  var c=seatNear();
+  if(c) sitDown(c);
+}
+
 function updatePlayer(dt){
+  /* Sitting still. The stick is the way out, so any real push on it stands him up
+     and this frame carries on as an ordinary walking frame. */
+  if(player.seat){
+    if(Math.abs(input.fwd)>0.3 || Math.abs(input.strafe)>0.3 || input.jump) standUp();
+    /* and if the seat is dug out from under him, he is standing again */
+    else if(!seatAt(player.seat.x,player.seat.y,player.seat.z)) standUp();
+    else {
+      /* Skip the walking, the gravity and the collision - he is sitting in a cell
+         that is solid, which physics would shove him straight back out of - but NOT
+         the posing and the camera below. Returning here was the first version, and
+         it froze the avatar and the camera where they were standing: he sat down and
+         the picture did not move. */
+      player.vx=player.vy=player.vz=0;
+      player.onGround=true;
+      poseAndCamera(dt,0);
+      return;
+    }
+  }
   var swim=inWater();
   var f=Math.max(-1,Math.min(1,input.fwd)), s=Math.max(-1,Math.min(1,input.strafe));
   /* A kart steers rather than strafes, and turns more the faster it is going, so it
@@ -4743,7 +4960,12 @@ function updatePlayer(dt){
 
   if(player.y<-6){ findSpawn(); toast('Whoops! Back to the start'); }
 
-  var moving=Math.hypot(player.vx,player.vz);
+  poseAndCamera(dt,Math.hypot(player.vx,player.vz));
+}
+
+/* Where he is drawn and where the camera goes. Its own function because sitting
+   down skips everything above it and still needs both. */
+function poseAndCamera(dt,moving){
   player.walk+=moving*dt*2.3;
 
   /* Henry's body + limb animation */
@@ -4757,6 +4979,12 @@ function updatePlayer(dt){
     hParts.armL.rotation.z=0; hParts.armR.rotation.z=0;
     hParts.armL.rotation.x=-1.15; hParts.armR.rotation.x=-1.15;
     hParts.legL.rotation.x=-1.25; hParts.legR.rotation.x=-1.25;
+  } else if(player.seat){
+    /* Sitting on a chair: knees out in front, hands resting in his lap rather than
+       held out on a steering wheel. */
+    hParts.armL.rotation.z=0; hParts.armR.rotation.z=0;
+    hParts.armL.rotation.x=-0.55; hParts.armR.rotation.x=-0.55;
+    hParts.legL.rotation.x=-1.35; hParts.legR.rotation.x=-1.35;
   } else if(player.fly){
     hParts.armL.rotation.x=0; hParts.armR.rotation.x=0;
     hParts.armL.rotation.z=1.25; hParts.armR.rotation.z=-1.25;
@@ -5958,6 +6186,7 @@ function setMuted(m){
 }
 el('btnView').addEventListener('click',function(){ setView(!firstPerson); });
 el('kartBtn').addEventListener('click',function(){ toggleKart(); });
+el('sitBtn').addEventListener('click',function(){ toggleSit(); });
 el('btnSound').addEventListener('click',function(){ setMuted(!muted); });
 
 /* ---------------- overlays ---------------- */
@@ -9012,6 +9241,9 @@ function frame(){
     if(playing){
       readKeys();
       updatePlayer(dt);
+      /* The sit chip follows him about, so it is there the moment he walks up to a
+         chair and gone the moment he walks away. Cheap: seatNear looks at ten cells. */
+      paintSitButton();
       if(digHeld){ digTime+=dt; if(digTime>0.23){ digTime=0; dig(); } }
       if(buildHeld){ buildTime+=dt; if(buildTime>0.23){ buildTime=0; build(); } }
       var h=aim();
@@ -9108,6 +9340,9 @@ window.__henrycraft={
        SNOW:SNOW,ICE:ICE,SANDSTONE:SANDSTONE,CACTUS:CACTUS,PINE:PINE,
        MUSHCAP:MUSHCAP,MUSHCAP2:MUSHCAP2,MUSHSTEM:MUSHSTEM,PORTAL:PORTAL,
        ROAD:ROAD,KERB:KERB,ROADLINE:ROADLINE,GRID:GRID,
+       PLATE:PLATE,PLATE1:PLATE1,PLATE2:PLATE2,PLATE3:PLATE3,
+       DINNER:DINNER,DINNER1:DINNER1,DINNER2:DINNER2,DINNER3:DINNER3,
+       CAKE:CAKE,CUP:CUP,
        FURNACE:FURNACE,BED:BED,BEDHEAD:BEDHEAD,
        TABLE:TABLE,CHAIR:CHAIR,CHAIR1:CHAIR1,CHAIR2:CHAIR2,CHAIR3:CHAIR3,
        LAMP:LAMP,RUG:RUG,
@@ -9393,6 +9628,22 @@ window.__henrycraft={
      driving seat and find that none of them does anything. */
   dig:dig, build:build, digDown:digDown, setFly:setFly,
   breakAt:breakAt, placeBed:placeBed, turnFurniture:turnFurniture,
+  seatNear:seatNear, sitDown:sitDown, standUp:standUp, toggleSit:toggleSit,
+  seatAtFor:function(x,y,z){ return seatAt(x,y,z); },
+  /* One frame of the real player update, with the time handed in. */
+  step:function(dt){ updatePlayer(dt); },
+  setInput:function(o){ for(var k in o) input[k]=o[k]; },
+  /* Where the avatar and the camera actually are, as opposed to where the player
+     record says he is. Sitting down froze both once, because the seated branch
+     returned before the code that moves them - and nothing that reads player()
+     could tell. */
+  avatarAt:function(){ return {x:+henry.position.x.toFixed(2), y:+henry.position.y.toFixed(2),
+                               z:+henry.position.z.toFixed(2),
+                               legs:+hParts.legL.rotation.x.toFixed(2),
+                               cam:{x:+camera.position.x.toFixed(2),
+                                    y:+camera.position.y.toFixed(2),
+                                    z:+camera.position.z.toFixed(2)}}; },
+  sitting:function(){ return player.seat?{x:player.seat.x,y:player.seat.y,z:player.seat.z}:null; },
   placeDoor:placeDoor, toggleDoor:toggleDoor, doorBase:doorBase,
   bedPlacements:function(c){ return bedPlacements(c); },
   setYaw:function(v){ yaw=v; },
