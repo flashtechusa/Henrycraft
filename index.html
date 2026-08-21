@@ -3415,10 +3415,15 @@ var LOOKS=[
   {shirt:0xc0392b, stripe:0xf4ecd9, collar:0x7b241c, shoe:0x2f3138,
    hairCol:0x2b2118, hairHi:0x3f3226, skinNum:0xe0aa7e, long:false,
    skin:'#e0aa7e', skinTop:'#cf9a6f', brow:'#2b2118', cheek:'#dd9075', freckle:'#c98a5e'},
-  /* 2 long blonde, blue top */
-  {shirt:0x2f7fd6, stripe:0xf2c231, collar:0x1b4f86, shoe:0xf4ecd9,
-   hairCol:0xe8c65a, hairHi:0xf6dd8a, skinNum:0xf5d3ae, long:true,
-   skin:'#f5d3ae', skinTop:'#e6c39c', brow:'#c9a33f', cheek:'#f4a795', freckle:'#dfae82'},
+  /* 2 JuJu - long strawberry blonde, round glasses, pale blue striped shirt.
+     Family, so she sits in the numbered list rather than at the end of it: a look
+     index IS the colour a player is on the wire, and appending would have shifted
+     everybody who is already using one. */
+  {name:'JuJu',
+   shirt:0xbcd0e6, stripe:0xf2f6fb, collar:0xa8c0dc, shoe:0xf0ece4,
+   hairCol:0xcf9d58, hairHi:0xebc287, skinNum:0xf2cfae, shortsCol:0xa8c0dc, long:true,
+   skin:'#f2cfae', skinTop:'#e2bf9e', brow:'#b08a4f', cheek:'#eda894',
+   freckle:'#dcb188', freckles:false, glasses:'#6f5f47'},
   /* 3 black hair, green top */
   {shirt:0x4fc04f, stripe:0x1e5c1e, collar:0xf4ecd9, shoe:0x8a5a2b,
    hairCol:0x171310, hairHi:0x2a2320, skinNum:0x8d5a3b, long:false,
@@ -3427,10 +3432,13 @@ var LOOKS=[
   {shirt:0xf2c231, stripe:0x8a5a2b, collar:0x5c3d15, shoe:0xc0392b,
    hairCol:0x5a3a20, hairHi:0x7a5230, skinNum:0xc98d63, long:true,
    skin:'#c98d63', skinTop:'#b87e57', brow:'#5a3a20', cheek:'#c07a5c', freckle:'#ad7449'},
-  /* 5 silver, purple top */
-  {shirt:0x9b59b6, stripe:0xf4ecd9, collar:0x5b2c6f, shoe:0x2f7fd6,
-   hairCol:0xd8d8de, hairHi:0xeeeef2, skinNum:0xf0c9a8, long:false,
-   skin:'#f0c9a8', skinTop:'#dfb896', brow:'#b9b9c2', cheek:'#eda593', freckle:'#d5a37c'},
+  /* 5 Papa - short white hair, white beard, coral shirt. Kept in slot 5, which was
+     already the silver-haired one, so nobody currently on it changes much. */
+  {name:'Papa',
+   shirt:0xe2825c, stripe:0xc76d49, collar:0xea9878, shoe:0x2b2b30,
+   hairCol:0xcdcac3, hairHi:0xe8e5df, skinNum:0xeac6a2, shortsCol:0x3a3a40,
+   skin:'#eac6a2', skinTop:'#dab692', brow:'#c2bdb5', cheek:'#e5a086',
+   freckle:'#d8b18b', freckles:false, beard:'#dedbd4'},
   /* 6 auburn, orange top */
   {shirt:0xe67e22, stripe:0x6e3410, collar:0xf4ecd9, shoe:0x4fc04f,
    hairCol:0x8c3b1b, hairHi:0xab4f28, skinNum:0xe8b98d, long:false,

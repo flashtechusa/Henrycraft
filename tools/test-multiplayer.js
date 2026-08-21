@@ -616,6 +616,7 @@ function requireNode22() {
               henryShirt: L[0].shirt, henryHair: L[0].hair, henrySkin: L[0].skin,
               byColour: cols.map(c => H.lookForColour(c).shirt),
               named: L.map(l => l.name).filter(Boolean),
+              byIndex: L.map(l => l.name || null),
               unknownColour: H.lookForColour('#not-a-colour').shirt};
     });
     check(`there are ${looks.n} characters: eight anyones and the family`,
@@ -634,8 +635,28 @@ function requireNode22() {
           new Set(looks.byColour).size === 8 && looks.unknownColour === 0xe4d7bb,
           JSON.stringify(looks.byColour.map(v => v.toString(16))));
     check(`everybody named is there (${looks.named.join(', ')})`,
-          looks.named.join(',') === 'Henry,Pops,GiGi,Jonathan,Dad,Mommy,Christian',
+          looks.named.join(',') ===
+            'Henry,JuJu,Papa,Pops,GiGi,Jonathan,Dad,Mommy,Christian',
           JSON.stringify(looks.named));
+
+    /* The two lists have to agree, slot for slot. The game draws the character and
+       the SERVER supplies the name - that split is the whole safety story, since it
+       is what stops a client claiming to be a real child. But it also means adding
+       somebody to one list and not the other fails silently and in the worst
+       direction: the person's own screen says JuJu while everybody else's says
+       Blue Fox. Nothing inside the game can notice, so the check reads the server's
+       source directly. */
+    const serverNames = (() => {
+      const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'index.js'), 'utf8');
+      const m = src.match(/const CHARACTER_NAMES = \[([\s\S]*?)\];/);
+      if (!m) return null;
+      return m[1].split(',').map(t => t.trim()).filter(t => t.length)
+                 .map(t => t === 'null' ? null : t.replace(/^['"]|['"]$/g, ''));
+    })();
+    check('the game and the server name the same people, slot for slot',
+          !!serverNames && serverNames.length === looks.byIndex.length &&
+          serverNames.every((n, i) => n === looks.byIndex[i]),
+          JSON.stringify({server: serverNames, game: looks.byIndex}));
 
     /* End to end: the character another player is drawn as has to follow from the
        colour that actually came over the wire. */

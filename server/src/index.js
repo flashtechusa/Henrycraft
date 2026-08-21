@@ -51,7 +51,7 @@ const COLOURS = ['#e4d7bb','#c0392b','#2f7fd6','#4fc04f','#f2c231','#9b59b6',
    client cannot arrive claiming to be Christian, or claiming that Christian is
    called something else. It sends a number; the server supplies the name. */
 const CHARACTER_NAMES = [
-  'Henry', null, null, null, null, null, null, null,
+  'Henry', null, 'JuJu', null, null, 'Papa', null, null,
   'Pops', 'GiGi', 'Jonathan', 'Dad', 'Mommy', 'Christian',
 ];
 function safeLook(v) {
