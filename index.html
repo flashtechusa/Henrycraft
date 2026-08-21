@@ -144,7 +144,7 @@ body.touch #palette{display:none}
    The whole right-hand cluster goes: Dig, Build, Dig Down and Dig Up do nothing from the
    driving seat, and Fly, Jump and Fly Lower are not what a kart is for. What is left is the
    stick, which steers, and the four chips along the top - one of which is the way out. */
-#palette.drivinghide,#hint.drivinghide,#pads.drivinghide{display:none}
+#palette.drivinghide,#hint.drivinghide,#pads.drivinghide,#crosshair.drivinghide{display:none}
 /* The block button needs the same weight as the rule that shows it. `body.touch #blockBtn`
    carries an element as well as an id and a class, so it beat `#blockBtn.drivinghide` and the
    button stayed on screen through the whole thing - which a test counting computed styles
@@ -4607,6 +4607,12 @@ function paintKartButton(){
      because half of what it lists is digging. Both come straight back when he gets out. */
   var pal=document.getElementById('palette');
   if(pal) pal.classList.toggle('drivinghide',driving);
+  /* The white cross in the middle goes too. It is an aiming mark for digging and building,
+     and from the driving seat there is nothing to aim at - the wireframe box it aims with
+     was already taken away. It was the one thing I left behind when everything else went,
+     which is why it suddenly stood out on the track. */
+  var xh=document.getElementById('crosshair');
+  if(xh) xh.classList.toggle('drivinghide',driving);
   /* The action pads and the block button that opens the picker. Same reason as the palette:
      a button that does nothing when tapped is worse than no button, and on a tablet they are
      the biggest thing on the screen after the track. */

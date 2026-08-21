@@ -599,6 +599,7 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
       const shown = () => ({
         palette: getComputedStyle(document.getElementById('palette')).display !== 'none',
         hint: getComputedStyle(document.getElementById('hint')).display !== 'none',
+        crosshair: getComputedStyle(document.getElementById('crosshair')).display !== 'none',
       });
       if (H.kart()) H.toggleKart();
       await frame();
@@ -651,6 +652,15 @@ function note(l) { notes.push(l); console.log(`        ${l}`); }
           cursor.chrome.back.palette === true &&
           cursor.chrome.walking.hint === true && cursor.chrome.driving.hint === false &&
           cursor.chrome.back.hint === true, JSON.stringify(cursor.chrome));
+    /* The white cross in the middle is an aiming mark, and there is nothing to aim at from
+       the driving seat. It was the one piece of building chrome I left behind when the rest
+       went, so on an empty track it was the only thing on the screen - which is exactly how
+       it got noticed. Computed style, not class names: the block button taught me that a
+       class can be set and the thing still drawn. */
+    check('and so does the aiming cross, which has nothing to aim at in a kart',
+          cursor.chrome.walking.crosshair === true &&
+          cursor.chrome.driving.crosshair === false &&
+          cursor.chrome.back.crosshair === true, JSON.stringify(cursor.chrome));
     /* And the lap chips must sit clear of the buttons on the right at every size he might
        hold the thing at, rather than under the one button he needs while driving. Letting
        the top row wrap put five chips down the left of a 390-wide phone and across the

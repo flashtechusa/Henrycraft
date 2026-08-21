@@ -132,6 +132,13 @@ them do nothing while driving and the other three are not what a kart is for. Wh
 the stick, which steers, and the four chips along the top, one of which is the way out. All
 seven come back the instant he steps out.
 
+The white cross in the middle of the screen goes with them. It is the aiming mark for digging
+and building, and from the driving seat there is nothing to aim at &mdash; the wireframe box it
+aims with was already gone. I missed it the first time round, and because everything else had
+been taken away it ended up the only thing left on an empty track, which is exactly how it got
+noticed. The check for it reads the computed style rather than the class name, for the reason
+the block button gives below.
+
 Climbing into a kart also lands him if he was flying, because the Fly Lower button goes with
 the rest &mdash; without that he could end up airborne with nothing on screen to bring him
 down. Nothing can be dug or placed at all. Hiding the box while leaving digging switched on would have
