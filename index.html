@@ -3693,12 +3693,50 @@ function updateAnimals(dt){
    respect for something that lives in a water volume. Nothing below touches
    animals[] or updateAnimals().
 
-   The one rule that outranks everything else here: neither of these may ever
+   The one rule that outranks everything else here: none of these may ever
    move towards Henry. A shark that follows a five-year-old around is the single
    worst thing this game could do, so the shark does not look at his position at
-   all - it swims a fixed circuit worked out when it spawns. */
+   all - it swims a fixed circuit worked out when it spawns.
+
+   The other three potter about instead, and they used to do it on Math.random().
+   That was safe - a random number is not Henry's position - but it could only be
+   argued, not shown, because two runs never matched and so there was nothing to
+   compare. They each carry their own seeded stream now, which makes a path
+   reproducible to the last digit, and that turns the promise into a test: run
+   the same world with Henry standing somewhere completely different and every
+   creature must trace exactly the same path. That check used to cover the shark
+   alone. It now covers all of them, and the crabs below. */
 var fish=[];
-var AXOLOTL=0, SHARK=1;
+var AXOLOTL=0, SHARK=1, TURTLE=2, MERMAID=3;
+
+/* Everything that differs between the four of them, in one table, so a fifth is
+   one row rather than four edits scattered down the file.
+     speed  blocks a second
+     room   how much water it needs below and above its middle. The mermaid is
+            over a block tall, and the old numbers were written for something
+            the size of a fish.
+     bob    [how fast it rises and falls, how far]
+     think  [shortest, longest] seconds between changes of mind, and how sharp a
+            turn - or null for the shark, which does not make decisions at all
+     wag    tail speed, and which way the tail swings: a fish sweeps its tail
+            side to side, a mermaid's goes up and down like a dolphin's */
+var FISH_KIND={};
+FISH_KIND[AXOLOTL]={name:'axolotl', speed:0.45, room:[0.45,0.45], bob:[1.6,0.22],
+                    think:[1.5,3.0,2.2], wag:[3.4,'y']};
+FISH_KIND[SHARK]  ={name:'shark',   speed:0.75, room:[0.60,0.60], bob:[0.5,0.22],
+                    think:null,      wag:[2.2,'y']};
+FISH_KIND[TURTLE] ={name:'turtle',  speed:0.28, room:[0.45,0.45], bob:[0.9,0.14],
+                    think:[3.0,4.0,1.2], wag:[2.6,'y']};
+FISH_KIND[MERMAID]={name:'mermaid', speed:0.55, room:[0.70,0.70], bob:[1.1,0.26],
+                    think:[2.0,3.5,1.6], wag:[2.0,'x']};
+
+/* Which kind goes in which slot. Indexed by how many are already swimming, so
+   opening the same district twice gives the same creatures in the same places.
+   The sharks stay at slots 2 and 7 for a reason: a shark needs a closed circuit
+   of deep water and can fail to find one, and the loop below retries the same
+   slot until it does. Putting one first would mean a pond with no room for a
+   circuit ended up with no fish at all. */
+var FISH_MIX=[AXOLOTL,TURTLE,SHARK,MERMAID,AXOLOTL,TURTLE,AXOLOTL,SHARK,TURTLE,MERMAID];
 
 /* The run of water in a column, or null if there is none. */
 function waterColumn(x,z){
@@ -3740,6 +3778,75 @@ function buildFish(kind){
     var mouth=box(0.10,0.02,0.02,0xc25f89); mouth.position.set(0,-0.02,0.385); g.add(mouth);
     tail=box(0.04,0.22,0.22,PINK_DK); tail.position.z=-0.30; g.add(tail);
     var fin=box(0.05,0.16,0.26,PINK_DK); fin.position.set(0,0.10,-0.08); g.add(fin);
+  } else if(kind===TURTLE){
+    /* A sea turtle: a low domed shell with a plate pattern on it, a small head
+       out the front and four flippers that paddle. Wider than it is long, which
+       is what makes it read as a turtle and not a fish from above - and from
+       above is how Henry mostly sees it, swimming over the top of one. */
+    var SHELL=0x4f8f57, SHELL_HI=0x76b878, SKIN=0x8fc07a, BELLY=0xe9dfb4;
+    var body=box(0.48,0.14,0.54,SHELL); g.add(body);
+    var under=box(0.42,0.06,0.48,BELLY); under.position.y=-0.09; g.add(under);
+    /* Three stepped layers, not one slab. Flat, the shell read as a floor tile
+       with a head on it from the side, which is the angle Henry mostly swims up
+       from - the dome is what makes it a turtle rather than a stingray. */
+    var mid=box(0.38,0.07,0.44,SHELL); mid.position.y=0.10; g.add(mid);
+    var dome=box(0.22,0.06,0.26,SHELL); dome.position.y=0.16; g.add(dome);
+    /* six plates over the dome, in two rows - a plain shell looked like a pebble */
+    [[-0.11,-0.13],[0.11,-0.13],[-0.13,0.06],[0.13,0.06],[0,-0.04],[0,0.15]]
+      .forEach(function(p){
+        var pl=box(0.12,0.05,0.14,SHELL_HI);
+        pl.position.set(p[0],0.13,p[1]); g.add(pl);
+      });
+    var head=box(0.18,0.15,0.18,SKIN); head.position.set(0,0.02,0.36); g.add(head);
+    var eL=box(0.04,0.04,0.03,0x1b1420); eL.position.set(-0.06,0.05,0.45); g.add(eL);
+    var eR=box(0.04,0.04,0.03,0x1b1420); eR.position.set( 0.06,0.05,0.45); g.add(eR);
+    var flippers=[];
+    /* front pair long and swept back, rear pair small - and each one is hung
+       from its shoulder rather than its middle, so a paddle pivots at the body
+       instead of the flipper sliding through it. */
+    [[-1,0.18,0.30,0.14],[1,0.18,0.30,0.14],[-1,-0.20,0.20,0.10],[1,-0.20,0.20,0.10]]
+      .forEach(function(p){
+        var s=p[0], fg=new THREE.BoxGeometry(p[2],0.05,p[3]);
+        fg.translate(s*p[2]/2,0,0);
+        var m=new THREE.Mesh(fg,new THREE.MeshLambertMaterial({color:srgb(SKIN)}));
+        m.position.set(s*0.22,-0.02,p[1]);
+        g.add(m); flippers.push(m);
+      });
+    g.userData.flippers=flippers;
+    tail=box(0.06,0.06,0.10,SKIN); tail.position.z=-0.32; g.add(tail);
+  } else if(kind===MERMAID){
+    /* Built standing up, not lying down like the fish. She drifts along upright
+       with the tail trailing under her, which is how a mermaid is drawn in every
+       book he owns - laid out flat like a shark she just read as a swimmer. */
+    var SKINC=0xf2cfae, TOP=0xe86fa8, SCALE=0x3fb8a8, SCALE_HI=0x6fe3d2,
+        HAIR=0xd4653a, HAIR_HI=0xef8f5c;
+    var torso=box(0.24,0.30,0.18,SKINC); torso.position.y=0.18; g.add(torso);
+    var shell=box(0.26,0.10,0.19,TOP); shell.position.set(0,0.24,0.005); g.add(shell);
+    [-1,1].forEach(function(s){
+      var arm=new THREE.BoxGeometry(0.07,0.26,0.07);
+      arm.translate(0,-0.13,0);
+      var m=new THREE.Mesh(arm,new THREE.MeshLambertMaterial({color:srgb(SKINC)}));
+      /* Out and a little forward. Straight down they read as a plank across her
+         front from the side, which is how she is mostly seen swimming past. */
+      m.position.set(s*0.16,0.30,0.01); m.rotation.z=s*0.28; m.rotation.x=-0.22; g.add(m);
+    });
+    var head=box(0.21,0.21,0.19,SKINC); head.position.y=0.45; g.add(head);
+    var eL2=box(0.04,0.04,0.03,0x1b1420); eL2.position.set(-0.05,0.47,0.10); g.add(eL2);
+    var eR2=box(0.04,0.04,0.03,0x1b1420); eR2.position.set( 0.05,0.47,0.10); g.add(eR2);
+    var smile=box(0.08,0.02,0.02,0xc9836d); smile.position.set(0,0.39,0.10); g.add(smile);
+    /* hair over the top and down the back, in two shades so it is not a slab */
+    var fringe=box(0.23,0.07,0.20,HAIR); fringe.position.set(0,0.56,0.005); g.add(fringe);
+    var backHair=box(0.23,0.34,0.09,HAIR); backHair.position.set(0,0.38,-0.11); g.add(backHair);
+    var strand=box(0.09,0.22,0.07,HAIR_HI); strand.position.set(-0.13,0.40,-0.03); g.add(strand);
+    var strand2=box(0.09,0.22,0.07,HAIR_HI); strand2.position.set(0.13,0.40,-0.03); g.add(strand2);
+    /* the tail, tapering down, and the fin hangs off the bottom of it */
+    var t1=box(0.21,0.22,0.17,SCALE); t1.position.y=-0.06; g.add(t1);
+    var t2=box(0.16,0.22,0.13,SCALE_HI); t2.position.y=-0.26; g.add(t2);
+    var t3=box(0.11,0.16,0.10,SCALE); t3.position.y=-0.44; g.add(t3);
+    var fluke=new THREE.BoxGeometry(0.40,0.05,0.20);
+    fluke.translate(0,-0.05,0);
+    tail=new THREE.Mesh(fluke,new THREE.MeshLambertMaterial({color:srgb(SCALE_HI)}));
+    tail.position.y=-0.52; g.add(tail);
   } else {
     var GREY=0x8d9aa8, GREY_DK=0x66727e, BELLY=0xe8eef2;
     var body=box(0.44,0.40,1.10,GREY); g.add(body);
@@ -3765,7 +3872,7 @@ function spawnFish(){
   fish.forEach(function(f){ scene.remove(f.mesh); });
   fish=[];
   var rnd=mulberry32((seed^0x5eaf00d)>>>0);
-  var want=7, tries=0;
+  var want=FISH_MIX.length, tries=0;
 
   while(fish.length<want && tries<4000){
     tries++;
@@ -3773,20 +3880,33 @@ function spawnFish(){
     var col=waterColumn(Math.floor(x),Math.floor(z));
     if(!col || col.depth<3) continue;                 /* 3 blocks of depth minimum */
 
-    var kind=(fish.length%3===2)?SHARK:AXOLOTL;       /* a couple of sharks, mostly axolotls */
+    /* A shark needs a closed circuit of deep water and can fail to find one, and
+       until it does the slot is retried rather than moved past - so in a world of
+       small ponds the search stalls on slot 2 and everything after it, mermaids
+       included, never gets built. After two thirds of the attempts are gone the
+       slot gives up and takes an axolotl, which needs nothing but a puddle. */
+    var kind=FISH_MIX[fish.length];
+    if(kind===SHARK && tries>2600) kind=AXOLOTL;
+    var K=FISH_KIND[kind];
     /* Keep well inside the water so the body never pokes through the surface
-       or the bed. */
-    var yMin=col.bottom+0.5, yMax=col.top+0.5;
-    if(yMax-yMin<0.6) continue;
+       or the bed. How far inside depends on the body: half a block was plenty
+       for an axolotl and leaves a mermaid's head in the air. */
+    var yMin=col.bottom+K.room[0], yMax=col.top+1-K.room[1];
+    if(yMax-yMin<0.1) continue;
     var y=yMin+rnd()*(yMax-yMin);
 
     var f={
       kind:kind, mesh:null, x:x, y:y, z:z,
       yaw:rnd()*6.283, phase:rnd()*6.283,
-      speed:kind===SHARK?0.75:0.45,
+      speed:K.speed,
       timer:rnd()*2,
       yMin:yMin, yMax:yMax,
-      bobBase:y
+      bobBase:y,
+      /* Its own stream of random numbers, drawn from the world seed so that
+         opening the district again gives the same creature the same life. This
+         is what makes the wander reproducible, and a reproducible wander is what
+         lets a test prove it is not following him. */
+      rnd:mulberry32(((seed^0x5eaf00d)+fish.length*0x9e3779b1)>>>0)
     };
 
     if(kind===SHARK){
@@ -3837,7 +3957,7 @@ function spawnFish(){
 
 function updateFish(dt,t){
   for(var i=0;i<fish.length;i++){
-    var f=fish[i];
+    var f=fish[i], K=FISH_KIND[f.kind];
 
     var step=f.speed*dt, nx, nz, ny, col;
 
@@ -3859,10 +3979,15 @@ function updateFish(dt,t){
       /* tangent of the circle, plus a quarter turn because +Z is forward */
       f.yaw=Math.atan2(-Math.sin(f.orbit)*f.dir,-Math.cos(f.orbit)*f.dir)+Math.PI/2;
     } else {
-      /* Axolotls potter about. They ignore Henry too - nothing in this game
-         follows him. */
+      /* Axolotls, turtles and mermaids potter about. They ignore Henry too -
+         nothing in this game follows him - and now they do it on their own
+         seeded stream rather than Math.random(), which is what lets a test say
+         so rather than merely believe it. */
       f.timer-=dt;
-      if(f.timer<=0){ f.timer=1.5+Math.random()*3; f.yaw+=(Math.random()-0.5)*2.2; }
+      if(f.timer<=0){
+        f.timer=K.think[0]+f.rnd()*(K.think[1]-K.think[0]);
+        f.yaw+=(f.rnd()-0.5)*K.think[2];
+      }
 
       nx=f.x+Math.sin(f.yaw)*step;
       nz=f.z+Math.cos(f.yaw)*step;
@@ -3871,8 +3996,8 @@ function updateFish(dt,t){
         /* Height is taken from the column being moved into, not the one left
            behind, so swimming towards a shallow shore lowers the fish instead
            of beaching it. */
-        var lo=col.bottom+0.45, hi=col.top+0.55;
-        ny=clamp(f.bobBase+Math.sin(t*1.6+f.phase)*0.22,lo,hi);
+        var lo=col.bottom+K.room[0], hi=col.top+1-K.room[1];
+        ny=clamp(f.bobBase+Math.sin(t*K.bob[0]+f.phase)*K.bob[1],lo,hi);
         if(isWaterAt(nx,ny,nz)){
           f.x=nx; f.y=ny; f.z=nz;
           f.yMin=lo; f.yMax=hi;
@@ -3882,16 +4007,192 @@ function updateFish(dt,t){
     }
 
     /* Hard invariant, whatever happened above: the body stays inside the water
-       column it is standing in. Nothing here can put a fish on land or in air. */
+       column it is standing in. Nothing here can put a fish on land or in air.
+       The margins come from the same table as everything else, because a number
+       that keeps an axolotl under the surface leaves a mermaid's head out of it.
+       A column too shallow to hold the body at all - which the spawn check will
+       not allow, but a dug-out lake bed could make later - parks it in the
+       middle rather than clamping to an inverted range. */
     col=waterColumn(Math.floor(f.x),Math.floor(f.z));
-    if(col) f.y=clamp(f.y,col.bottom+0.40,col.top+0.55);
+    if(col){
+      var flo=col.bottom+K.room[0], fhi=col.top+1-K.room[1];
+      f.y = fhi>flo ? clamp(f.y,flo,fhi) : (col.bottom+col.top+1)/2;
+    }
 
     f.mesh.position.set(f.x,f.y,f.z);
     f.mesh.rotation.y=f.yaw;
     f.mesh.rotation.z=Math.sin(t*1.3+f.phase)*0.07;
     if(f.mesh.userData.tail){
-      f.mesh.userData.tail.rotation.y=Math.sin(t*(f.kind===SHARK?2.2:3.4)+f.phase)*0.45;
+      var wag=Math.sin(t*K.wag[0]+f.phase)*0.45;
+      if(K.wag[1]==='x') f.mesh.userData.tail.rotation.x=wag*0.6;
+      else               f.mesh.userData.tail.rotation.y=wag;
     }
+    /* Turtles paddle. Front and back on each side move opposite ways, the way a
+       turtle's do, which is why the phase offset is per flipper and not shared. */
+    var fl=f.mesh.userData.flippers;
+    if(fl){
+      for(var q=0;q<fl.length;q++){
+        fl[q].rotation.z=Math.sin(t*K.wag[0]+f.phase+(q%2?Math.PI:0))*0.42*(q<2?1:-1);
+      }
+    }
+  }
+}
+
+/* ---------------- crabs ----------------
+   A third list, for the same reason the fish are a second one: a crab is neither
+   a land animal walking a height field nor a fish in a water volume. It lives on
+   the thin strip of sand where the two meet, it faces the sea, and it walks
+   sideways along the shore.
+
+   Sideways is the whole point of a crab, and it is why this cannot borrow the
+   land animals' movement: those turn to face wherever they are going. A crab
+   keeps looking at the water and shuffles left or right past it. Which way it
+   faces is worked out from the shape of the shoreline, and which way it shuffles
+   flips on its own timer - Henry's position is not read anywhere below. */
+var crabs=[];
+var CRAB_SHORE=4;             /* stays within this many blocks of water */
+
+/* The direction of the nearest water, or null if there is none within reach.
+   Rings outwards so the first hit really is the nearest, and steps by less than
+   a block at the outer radius so a one-block inlet is not stepped over. */
+function waterDir(x,z){
+  for(var r=1;r<=CRAB_SHORE;r++){
+    var n=Math.max(8,Math.ceil(6.283185*r/0.7));
+    for(var a=0;a<n;a++){
+      var ang=a/n*6.283185;
+      var wx=Math.floor(x+Math.sin(ang)*r), wz=Math.floor(z+Math.cos(ang)*r);
+      if(wx<0||wx>=WX||wz<0||wz>=WZ) continue;
+      if(waterColumn(wx,wz)) return ang;
+    }
+  }
+  return null;
+}
+/* Dry land a crab can stand on: above the water line, inside the world, and not
+   a cliff. Same shape of test the land animals use, and for the same reason. */
+function crabGround(x,z){
+  if(x<2||x>=WX-2||z<2||z>=WZ-2) return null;
+  var sy=surfaceY(Math.floor(x),Math.floor(z));
+  return sy>WATER_LEVEL ? sy : null;
+}
+
+function buildCrab(){
+  var g=new THREE.Group();
+  function box(w,h,d,col){
+    return new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
+                          new THREE.MeshLambertMaterial({color:srgb(col)}));
+  }
+  var SHELL=0xd94f2b, SHELL_HI=0xf4794b, DARK=0xa63a1e;
+  var body=box(0.36,0.16,0.26,SHELL); body.position.y=0.20; g.add(body);
+  var back=box(0.26,0.07,0.18,SHELL_HI); back.position.y=0.29; g.add(back);
+  /* eyes up on stalks, which is most of what makes it read as a crab */
+  [-1,1].forEach(function(s){
+    var stalk=box(0.03,0.10,0.03,SHELL_HI);
+    stalk.position.set(s*0.08,0.33,0.10); g.add(stalk);
+    var eye=box(0.06,0.06,0.06,0x1b1420);
+    eye.position.set(s*0.08,0.40,0.10); g.add(eye);
+  });
+  var mouth=box(0.10,0.02,0.02,DARK); mouth.position.set(0,0.16,0.13); g.add(mouth);
+  /* Claws hang off the shoulder rather than pivoting through the middle of the
+     body, so a wave swings the claw instead of sliding it through the shell. */
+  var claws=[];
+  [-1,1].forEach(function(s){
+    var arm=box(0.10,0.05,0.05,SHELL_HI);
+    arm.position.set(s*0.23,0.20,0.06); g.add(arm);
+    var cg=new THREE.BoxGeometry(0.11,0.13,0.10);
+    cg.translate(s*0.055,0,0);
+    var claw=new THREE.Mesh(cg,new THREE.MeshLambertMaterial({color:srgb(SHELL)}));
+    claw.position.set(s*0.28,0.21,0.10);
+    g.add(claw); claws.push(claw);
+  });
+  /* Three legs a side, hung from the top so they swing from the body. They start
+     outside the shell rather than under it: at the body's own half-width all six
+     were hidden behind it and a crab with no legs is a beetle. */
+  var legs=[];
+  [-1,1].forEach(function(s){
+    [-0.10,0.01,0.12].forEach(function(zz){
+      var lg=new THREE.BoxGeometry(0.04,0.22,0.04);
+      lg.translate(0,-0.11,0);
+      var m=new THREE.Mesh(lg,new THREE.MeshLambertMaterial({color:srgb(DARK)}));
+      m.position.set(s*0.20,0.22,zz);
+      m.rotation.z=s*0.38;
+      g.add(m); legs.push(m);
+    });
+  });
+  g.userData.legs=legs;
+  g.userData.claws=claws;
+  return g;
+}
+
+function spawnCrabs(){
+  crabs.forEach(function(c){ scene.remove(c.mesh); });
+  crabs=[];
+  var rnd=mulberry32((seed^0xc4ab17)>>>0);
+  var want=6, tries=0;
+  while(crabs.length<want && tries<3000){
+    tries++;
+    var x=4+rnd()*(WX-8), z=4+rnd()*(WZ-8);
+    var gy=crabGround(x,z);
+    if(gy===null) continue;
+    /* Only the beach. Somewhere up a hill with a lake in view is not a beach,
+       so the height above the water line is capped as well as the distance. */
+    if(gy>WATER_LEVEL+3) continue;
+    var face=waterDir(x,z);
+    if(face===null) continue;
+
+    var c={
+      x:x, z:z, y:gy, face:face,
+      dir:rnd()<0.5?-1:1,
+      speed:0.55+rnd()*0.25,
+      phase:rnd()*6.283,
+      timer:rnd()*2,
+      rnd:mulberry32(((seed^0xc4ab17)+crabs.length*0x9e3779b1)>>>0),
+      mesh:buildCrab()
+    };
+    c.mesh.position.set(c.x,c.y,c.z);
+    c.mesh.rotation.y=c.face;
+    scene.add(c.mesh);
+    crabs.push(c);
+  }
+}
+
+function updateCrabs(dt,t){
+  for(var i=0;i<crabs.length;i++){
+    var c=crabs[i];
+    c.timer-=dt;
+    if(c.timer<=0){
+      c.timer=1.2+c.rnd()*2.6;
+      /* Look at the water again - the shoreline bends, and a crab that kept its
+         first heading ended up shuffling inland along a curve. */
+      var fw=waterDir(c.x,c.z);
+      if(fw!==null) c.face=fw;
+      if(c.rnd()<0.35) c.dir=-c.dir;
+    }
+
+    /* Sideways, in its own frame: turning the group by `face` sends local +X to
+       (cos face, 0, -sin face), so that is the way it travels. */
+    var stp=c.speed*dt*c.dir;
+    var nx=c.x+Math.cos(c.face)*stp, nz=c.z-Math.sin(c.face)*stp;
+    var gy=crabGround(nx,nz);
+    var moving=false;
+    if(gy!==null && Math.abs(gy-c.y)<=1.2 && gy<=WATER_LEVEL+4 &&
+       waterDir(nx,nz)!==null){
+      c.x=nx; c.z=nz; c.y=gy; c.phase+=dt*9; moving=true;
+    } else {
+      /* Ran out of beach. Turn round and go back the way it came - which depends
+         on the shape of the sand and on nothing else. */
+      c.dir=-c.dir; c.timer=0.6;
+    }
+
+    c.mesh.position.set(c.x,c.y,c.z);
+    c.mesh.rotation.y=c.face;
+    var legs=c.mesh.userData.legs, sw=moving?Math.sin(c.phase)*0.30:0;
+    for(var q=0;q<legs.length;q++){
+      /* alternate legs lead, so the six of them ripple rather than march */
+      legs[q].rotation.x=sw*(q%2?-1:1);
+    }
+    var claws=c.mesh.userData.claws;
+    claws[0].rotation.z= Math.sin(t*2.0+c.phase)*0.30;
+    claws[1].rotation.z=-Math.sin(t*2.0+c.phase+1.4)*0.30;
   }
 }
 
@@ -7522,6 +7823,7 @@ function enterDistrict(rec){
   placeStars(rec.stars||null); placeItemBoxes();
   spawnAnimals();
   spawnFish();
+  spawnCrabs();
   recountFire();
   if(rec.p && rec.p.length>=3){
     player.x=rec.p[0]; player.y=rec.p[1]; player.z=rec.p[2]; yaw=rec.p[3]||0;
@@ -8379,7 +8681,7 @@ function mpAdoptServerCopy(){
     applyEdits();
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
-    placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); recountFire();
+    placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); spawnCrabs(); recountFire();
     resetLaps();
     portals=[]; reindexPortals();
     /* The room's portals go back on straight away, or a district that was adopted
@@ -9295,6 +9597,7 @@ function frame(){
     }
     updateAnimals(dt);
     updateFish(dt,now);
+    updateCrabs(dt,now);
     updateStars(dt,now);
     updateItemBoxes(dt,now);
     updateLaps(dt);
@@ -9466,8 +9769,30 @@ window.__henrycraft={
   movePlayer:function(x,y,z){ player.x=x; player.y=y; player.z=z; player.vx=player.vy=player.vz=0; },
   fish:function(){
     return fish.map(function(f){
-      return {kind:f.kind===SHARK?'shark':'axolotl',x:f.x,y:f.y,z:f.z,
+      return {kind:FISH_KIND[f.kind].name,x:f.x,y:f.y,z:f.z,
               radius:f.radius||null, period:f.period||null};
+    });
+  },
+  /* Where the crabs are, and what is underneath them - a crab standing on water
+     is the failure this exists to catch. */
+  crabs:function(){
+    return crabs.map(function(c){
+      return {x:+c.x.toFixed(3), y:+c.y.toFixed(3), z:+c.z.toFixed(3),
+              face:+c.face.toFixed(3),
+              standingOn:getBlock(Math.floor(c.x),Math.floor(c.y)-1,Math.floor(c.z)),
+              standingIn:getBlock(Math.floor(c.x),Math.floor(c.y),Math.floor(c.z)),
+              toWater:(function(){
+                for(var r=1;r<=8;r++){
+                  var n=Math.max(8,Math.ceil(6.283185*r/0.7));
+                  for(var a=0;a<n;a++){
+                    var ang=a/n*6.283185;
+                    var wx=Math.floor(c.x+Math.sin(ang)*r), wz=Math.floor(c.z+Math.cos(ang)*r);
+                    if(wx<0||wx>=WX||wz<0||wz>=WZ) continue;
+                    if(waterColumn(wx,wz)) return r;
+                  }
+                }
+                return 99;
+              })()};
     });
   },
   animals:function(){ return animals.length; },
@@ -10284,7 +10609,7 @@ window.__henrycraft={
     generateWorld();
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
-    placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
+    placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); spawnCrabs(); recountFire(); findSpawn();
     resetLaps();
     return {theme:theme.key,seed:seed,waterLevel:WATER_LEVEL};
   },
@@ -10327,7 +10652,7 @@ window.__henrycraft={
     generateWorld();
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
-    placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); recountFire(); findSpawn();
+    placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); spawnCrabs(); recountFire(); findSpawn();
     resetLaps();
     return seed;
   },
@@ -10361,10 +10686,22 @@ window.__henrycraft={
        spacing, so a coarse rate leaves enough noise to swamp the thing being
        measured. */
     var sampleEvery=Math.max(1,Math.round(0.1/dt));
-    var t=0, violations=[], samples=[], i, f;
+    var t=0, violations=[], samples=[], path=[], i, f, c;
+    /* Ground covered, not distance from where it started. A crab that shuffles
+       four blocks up the beach and four back finishes where it began, and a test
+       reading only the two ends would call that standing still - and then every
+       check about where crabs may walk would be passing on a crab that never
+       walked anywhere. */
+    var walked=[], was=crabs.map(function(k){ return [k.x,k.z]; });
+    for(i=0;i<crabs.length;i++) walked.push(0);
     for(var s=0;s<steps;s++){
       t+=dt;
       updateFish(dt,t);
+      updateCrabs(dt,t);
+      for(i=0;i<crabs.length;i++){
+        walked[i]+=Math.hypot(crabs[i].x-was[i][0],crabs[i].z-was[i][1]);
+        was[i][0]=crabs[i].x; was[i][1]=crabs[i].z;
+      }
       animateFire(dt);
       for(i=0;i<fish.length;i++){
         f=fish[i];
@@ -10372,9 +10709,25 @@ window.__henrycraft={
         if(b!==WATER){
           if(violations.length<40){
             violations.push({
-              step:s, t:+t.toFixed(2), kind:f.kind===SHARK?'shark':'axolotl',
+              step:s, t:+t.toFixed(2), kind:FISH_KIND[f.kind].name,
               x:+f.x.toFixed(2), y:+f.y.toFixed(2), z:+f.z.toFixed(2),
               block:(DEFS[b]?DEFS[b].name:'air')
+            });
+          } else { violations.push(1); }
+        }
+      }
+      /* The crab's version of the same failure, and the opposite one: it must be
+         standing on something solid, and not standing in water. */
+      for(i=0;i<crabs.length;i++){
+        c=crabs[i];
+        var under=getBlock(Math.floor(c.x),Math.floor(c.y)-1,Math.floor(c.z));
+        var inside=getBlock(Math.floor(c.x),Math.floor(c.y),Math.floor(c.z));
+        if(under===AIR||under===WATER||inside===WATER){
+          if(violations.length<40){
+            violations.push({
+              step:s, t:+t.toFixed(2), kind:'crab',
+              x:+c.x.toFixed(2), y:+c.y.toFixed(2), z:+c.z.toFixed(2),
+              block:(DEFS[under]?DEFS[under].name:'air')
             });
           } else { violations.push(1); }
         }
@@ -10382,18 +10735,29 @@ window.__henrycraft={
       if(s%sampleEvery===0){
         for(i=0;i<fish.length;i++){
           f=fish[i];
+          /* Every creature's position, for the check that says none of them
+             reacts to Henry. The shark used to be the only one this could be
+             asked of, because it was the only one whose path was reproducible. */
+          path.push('f'+i+':'+f.x.toFixed(4)+','+f.y.toFixed(4)+','+f.z.toFixed(4));
           if(f.kind!==SHARK) continue;
           samples.push({i:i,t:+t.toFixed(2),period:f.period,
             d:+Math.hypot(player.x-f.x,player.y-f.y,player.z-f.z).toFixed(4),
             /* the path itself, so a test can prove it is player-independent */
             x:+f.x.toFixed(4),y:+f.y.toFixed(4),z:+f.z.toFixed(4)});
         }
+        for(i=0;i<crabs.length;i++){
+          c=crabs[i];
+          path.push('c'+i+':'+c.x.toFixed(4)+','+c.y.toFixed(4)+','+c.z.toFixed(4));
+        }
       }
     }
-    return {steps:steps, seconds:steps*dt, fish:fish.length,
+    return {steps:steps, seconds:steps*dt, fish:fish.length, crabs:crabs.length,
+            crabWalk:walked.map(function(d){ return +d.toFixed(2); }),
             violationCount:violations.length,
             violations:violations.filter(function(v){return typeof v==='object';}),
-            sharkSamples:samples};
+            sharkSamples:samples,
+            /* one string for the whole cast, so comparing two runs is one === */
+            path:path.join('|')};
   },
   /* Straight down from a surface column: does the shaft pass anything worth
      finding? Mirrors what Q (dig down) actually walks through. */

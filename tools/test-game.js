@@ -1321,6 +1321,91 @@ function slope(pts) {
   check('the shark follows the same path wherever Henry stands (path is player-independent)',
         indep.ok, 'shark trajectory differed when the player moved');
 
+  // ---- 6b: turtles, mermaids and crabs -------------------------------------
+  // Henry asked for these three. The shark's promise now has to cover them, and
+  // the crabs have a promise of their own: a crab is the only creature in the
+  // game that walks on the line between land and water, so it is the only one
+  // that can end up in the wrong one.
+  console.log('6b. turtles, mermaids and crabs');
+  const zoo = [];
+  for (let s = 0; s < SEEDS; s++) {
+    const seed = 1000 + s * 7919;
+    zoo.push(await page.evaluate(({seed}) => {
+      const H = window.__henrycraft;
+      H.loadSeed(seed);
+      const kinds = {};
+      H.fish().forEach(f => { kinds[f.kind] = (kinds[f.kind] || 0) + 1; });
+      const crabs = H.crabs();
+      // 90 seconds of pottering, which is long enough for a crab to walk the
+      // length of a beach and meet both ends of it.
+      const sim = H.simulate(90);
+      const after = H.crabs();
+      return {seed, kinds, crabs: crabs.length,
+              // Ground covered, not distance from the start: a crab that shuffles
+              // up the beach and back finishes where it began. Without this every
+              // check below would pass on six crabs that never moved.
+              moved: sim.crabWalk,
+              // the shoreline rule, measured after the walking rather than at spawn
+              toWater: after.map(c => c.toWater),
+              onWater: after.filter(c => c.standingOn === 0 || c.standingIn !== 0).length,
+              violations: sim.violationCount,
+              first: sim.violations[0] || null};
+    }, {seed}));
+  }
+  const kindTotal = k => zoo.reduce((a, r) => a + (r.kinds[k] || 0), 0);
+  const worldsWith = k => zoo.filter(r => (r.kinds[k] || 0) > 0).length;
+  check(`turtles swim in all ${SEEDS} worlds`,
+        worldsWith('turtle') === SEEDS,
+        `${worldsWith('turtle')}/${SEEDS} worlds, ${kindTotal('turtle')} turtles`);
+  check(`mermaids swim in all ${SEEDS} worlds`,
+        worldsWith('mermaid') === SEEDS,
+        `${worldsWith('mermaid')}/${SEEDS} worlds, ${kindTotal('mermaid')} mermaids`);
+  check('the axolotls and sharks that were there before still are',
+        worldsWith('axolotl') === SEEDS && kindTotal('shark') > 0,
+        `${worldsWith('axolotl')}/${SEEDS} with axolotls, ${kindTotal('shark')} sharks`);
+  const crabTotal = zoo.reduce((a, r) => a + r.crabs, 0);
+  check(`crabs walk the shore in all ${SEEDS} worlds`,
+        zoo.every(r => r.crabs > 0), `crab counts ${zoo.map(r => r.crabs).join(',')}`);
+  // Without this the two checks below would pass on six crabs stood still.
+  const allMoved = zoo.flatMap(r => r.moved);
+  check('and they actually walk - every crab covered ground over the 90 seconds',
+        allMoved.every(d => d > 2),
+        `shortest walk ${Math.min(...allMoved).toFixed(2)} blocks`);
+  check('no crab ever stood in water or on it, at any step',
+        zoo.every(r => r.violations === 0 && r.onWater === 0),
+        JSON.stringify(zoo.find(r => r.violations || r.onWater)?.first || null));
+  const farthest = Math.max(...zoo.flatMap(r => r.toWater));
+  check('and none of them wandered inland away from the sea',
+        farthest <= 4, `farthest from water after 90s: ${farthest} blocks`);
+  note(`${kindTotal('turtle')} turtles, ${kindTotal('mermaid')} mermaids, ` +
+       `${kindTotal('axolotl')} axolotls, ${kindTotal('shark')} sharks and ${crabTotal} crabs ` +
+       `across ${SEEDS} worlds; crabs walked ${Math.min(...allMoved).toFixed(1)}-` +
+       `${Math.max(...allMoved).toFixed(1)} blocks and stayed within ${farthest} of water`);
+
+  // The promise that matters, extended to the whole cast. It used to cover the
+  // shark alone, because the shark was the only one whose path could be
+  // reproduced - the others wandered on Math.random() and so no two runs could
+  // be compared. Every creature carries a seeded stream now, so the strongest
+  // check in this file applies to all of them: put Henry somewhere completely
+  // different and not one of the fish, turtles, mermaids or crabs moves an inch
+  // differently.
+  const allIndep = await page.evaluate(({secs}) => {
+    const H = window.__henrycraft;
+    function run(x, y, z) {
+      H.loadSeed(555001);
+      H.movePlayer(x, y, z);
+      const sim = H.simulate(secs);
+      return {path: sim.path, n: sim.fish + sim.crabs};
+    }
+    const a = run(8, 20, 8), b = run(56, 34, 56);
+    return {ok: a.path.length > 0 && a.path === b.path, n: a.n, len: a.path.length};
+  }, {secs: 30});
+  check('no creature in the game moves differently when Henry moves',
+        allIndep.ok && allIndep.n > 0,
+        `${allIndep.n} creatures, ${allIndep.len} chars of path`);
+  note(`${allIndep.n} creatures traced byte-identically over 30s from two ` +
+       `positions 68 blocks apart`);
+
   // ---- 7: fire never spreads ----------------------------------------------
   console.log('7. fire never spreads');
   const fire = await page.evaluate(({secs}) => {

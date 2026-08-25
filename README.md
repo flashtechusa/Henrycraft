@@ -911,10 +911,34 @@ waiting to be dismissed. The diagrams are drawn from the same texture atlas the
 world is built from, so a block always looks the way it looks in his hands, and a
 test asserts that by comparing the pixels in a diagram against the atlas.
 
-**Animals.** Pigs, sheep and cows wander the land. Axolotls and sharks swim in
-any water at least three blocks deep. Nothing in this game can hurt Henry, and
-nothing chases him — the shark in particular swims a fixed circuit worked out
-when it spawns and never reads his position at all.
+**Animals.** Pigs, sheep and cows wander the land. Axolotls, turtles, mermaids
+and sharks swim in any water at least three blocks deep, and crabs scuttle
+sideways along the sand where the water meets the beach. Nothing in this game can
+hurt Henry, and nothing chases him — the shark in particular swims a fixed circuit
+worked out when it spawns and never reads his position at all.
+
+Turtles, mermaids and crabs are Henry's own request. A turtle paddles slowly with
+four flippers under a stepped, domed shell — flat, it read as a floor tile with a
+head on it from the side, which is the angle he mostly swims up from. A mermaid
+drifts upright with her tail trailing under her, which is how they are drawn in
+every book he owns, and the reason she is not built lying flat like the fish. A
+crab faces the sea and walks sideways past it: sideways is the whole point of a
+crab and the reason it could not borrow the land animals' movement, because those
+turn to face wherever they are going. Which way it faces is worked out from the
+shape of the shoreline, which way it shuffles flips on its own timer, and it never
+goes more than four blocks from the water.
+
+Those three came with a change to how *nothing follows him* is proved. The
+wandering creatures used to potter about on `Math.random()`. That was safe — a
+random number is not Henry's position — but it could only be argued, never shown,
+because two runs never matched and so there was nothing to compare. Every creature
+now carries its own stream of random numbers, drawn from the world seed so that
+opening a district again gives the same creature the same life. A reproducible
+wander turns the promise into a test: run the same world with Henry standing
+sixty-eight blocks away and every fish, turtle, mermaid and crab traces a
+byte-identical path. That check used to cover the shark alone. It covers all of
+them now, and it fails on a crab given a drift towards him of one thousandth of a
+radian.
 
 ## Controls
 
@@ -1015,9 +1039,10 @@ colours.
 asserts against the live world. It needs Playwright; set `PLAYWRIGHT_PATH` if it
 is installed somewhere unusual. It covers the atlas and UV bounds, the palette,
 the two picker drawers, ore generation and depth bands across 20 seeds, that no
-fish ever leaves the water over a minute of simulation per seed, that the shark's
-path does not depend on where Henry is, that fire never spreads, and the control
-layout at phone and desktop sizes.
+fish ever leaves the water over a minute of simulation per seed, that every kind
+of creature Henry asked for turns up in every world, that no crab ever stands in
+the water or wanders inland, that no creature at all moves differently when Henry
+moves, that fire never spreads, and the control layout at phone and desktop sizes.
 
 `node tools/test-portals.js` covers portals: frame detection at every size from
 1×2 to 21×21 in both vertical planes, a specific hint for each wrong shape, and
