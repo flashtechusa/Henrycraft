@@ -928,7 +928,52 @@ turn to face wherever they are going. Which way it faces is worked out from the
 shape of the shoreline, which way it shuffles flips on its own timer, and it never
 goes more than four blocks from the water.
 
-Those three came with a change to how *nothing follows him* is proved. The
+**A zoo.** A third drawer, **For a zoo**, holds a fence, a gate, a hay bale and a
+water trough. The fence is one block high — Henry can see over it and hop it —
+and no animal will cross it. That is not a height rule: a one-block wall of
+anything else is a step an animal takes without noticing, so the fence carries a
+`pen` flag and an animal simply refuses to stand on one. Two-block walls still
+hold them the way they always did, and both facts are checked, including the one
+that says a one-block stone wall does *not* hold, which is the whole reason the
+flag exists.
+
+The gate is the fence with a hinge. It costs four ids shut and four open, the
+same arithmetic as the door and for the same reason, and it borrows the door's
+machinery — including the guard that will not let it shut on him while he is
+standing in it. It swings so Henry can walk through, not so the animals can: a
+gate is a pen open or shut, because the first thing he would do with his own zoo
+is open the gate to go in, and a gate that emptied the pen would be a cruel joke.
+
+A fence reaches out to whatever it stands beside, so a run of them is a run
+rather than a row of posts. The shape is picked from the neighbours when the
+chunk is meshed — the same trick the top half of a door uses — so nothing about
+which way a fence joins goes into the save, a wall built beside one afterwards
+joins to it, and digging that wall out lets it go again. Written the obvious way
+first, with the rails fixed along one axis, which looked right along one wall of
+a square pen and like separate panels along the other two.
+
+**Carrying an animal.** A pen needs a way to get an animal into it. Leading one
+works — they walk towards him when he is close — but a pig that loses interest
+halfway across a field is an afternoon gone, so he can pick one up instead. Walk
+up to a pig, a sheep, a cow or a crab, and a 🫳 button appears (`G` on a
+keyboard); press it and the animal rides in his arms at two-thirds size until he
+puts it down in the cell he is looking at. One at a time. It stays the same animal
+throughout — the same entry in the same list with the same mesh, flagged `held` so
+its own update leaves it alone — so there is no way to lose one by picking it up.
+Putting one down into a wall or into the water is refused rather than forced, and
+he keeps hold of it.
+
+That last part turned up a bug in the crabs. A crab keeps to the shore by refusing
+any step that takes it away from the water, which — carried into a pen in the
+middle of a field — refused every step there was, and the crab stood still for
+ever. Worse, the check for "is there water near me" looked down whole columns, so
+a crab standing on a cliff twelve blocks above the sea found water one block away
+and froze in exactly the same way. A shore is where the land meets the water, not
+anywhere with a view of it: the search now ignores water more than three blocks
+below, and with no shore to keep to a crab simply potters about.
+
+Those three sea creatures came with a change to how *nothing follows him* is
+proved. The
 wandering creatures used to potter about on `Math.random()`. That was safe — a
 random number is not Henry's position — but it could only be argued, never shown,
 because two runs never matched and so there was nothing to compare. Every creature
@@ -943,8 +988,9 @@ radian.
 ## Controls
 
 **Computer** — `W A S D` walk, mouse looks, click digs, right-click builds,
-`Space` jumps, `Q` digs down, `E` digs up, `F` toggles flying (`Space` up,
-`Shift` down), `1`–`9` pick a block, `V` swaps view, `M` mutes, `Esc` pauses.
+`Space` jumps, `Q` digs down, `E` digs up, `G` picks an animal up and puts it
+down, `F` toggles flying (`Space` up, `Shift` down), `1`–`9` pick a block, `V`
+swaps view, `M` mutes, `Esc` pauses.
 
 **Tablet or phone** — left stick walks and turns, buttons on the right dig,
 build, jump and fly. Turn the device sideways.
@@ -1042,7 +1088,10 @@ the two picker drawers, ore generation and depth bands across 20 seeds, that no
 fish ever leaves the water over a minute of simulation per seed, that every kind
 of creature Henry asked for turns up in every world, that no crab ever stands in
 the water or wanders inland, that no creature at all moves differently when Henry
-moves, that fire never spreads, and the control layout at phone and desktop sizes.
+moves, that a fenced pen holds an animal for ten minutes while a pen with one
+block missing does not, that a gate holds open or shut, that an animal can be
+picked up and carried and put down again, that fire never spreads, and the control
+layout at phone and desktop sizes.
 
 `node tools/test-portals.js` covers portals: frame detection at every size from
 1×2 to 21×21 in both vertical planes, a specific hint for each wrong shape, and

@@ -451,7 +451,7 @@ body.touch #hint{display:none}
 }
 #portalHelp.on{opacity:1}
 #portalHelp small{font-size:12px;font-weight:800;opacity:.9;text-align:center}
-#portalHelpPic,#ideasPic,#ideasFurn{
+#portalHelpPic,#ideasPic,#ideasFurn,#ideasZoo{
   max-width:100%;height:auto;image-rendering:pixelated;
   image-rendering:-moz-crisp-edges;image-rendering:crisp-edges
 }
@@ -605,6 +605,8 @@ body.touch #hint{display:none}
     <!-- Only in a racing district. Nothing new appears anywhere else. -->
     <button class="chip icon blockbtn hide" id="kartBtn" title="Get in the kart">🏎️</button>
     <button class="chip icon blockbtn hide" id="sitBtn" title="Sit down">🪑</button>
+    <!-- Only when there is an animal within arm's reach, or one already in them. -->
+    <button class="chip icon blockbtn hide" id="holdBtn" title="Pick him up">🫳</button>
     <button class="chip icon blockbtn" id="btnView" title="Change view">🎥</button>
     <button class="chip icon blockbtn" id="btnSound" title="Sound">🔊</button>
     <button class="chip icon blockbtn" id="btnMenu" title="Menu">⚙️</button>
@@ -620,7 +622,7 @@ body.touch #hint{display:none}
       <div id="pickerGrid"></div>
     </div>
   </div>
-  <div id="hint">CLICK TO LOOK · W A S D MOVE · SPACE JUMP · CLICK DIG · RIGHT-CLICK BUILD · Q DIG DOWN · E DIG UP · F FLY (SPACE UP / SHIFT DOWN)</div>
+  <div id="hint">CLICK TO LOOK · W A S D MOVE · SPACE JUMP · CLICK DIG · RIGHT-CLICK BUILD · Q DIG DOWN · E DIG UP · G PICK UP AN ANIMAL · F FLY (SPACE UP / SHIFT DOWN)</div>
 
   <div id="touchUI">
     <div id="stick"><div id="knob"></div></div>
@@ -727,6 +729,14 @@ body.touch #hint{display:none}
       Press <b>BUILD</b> on a door to open it, or on a chair to turn it round. Plates
       and cake go on top of a table. When the <b>🪑</b> button appears you can sit
       down &mdash; on a chair, a toilet or in the bath.</small>
+    <div class="pickhead">A zoo, with animals in it</div>
+    <canvas id="ideasZoo"></canvas>
+    <small>Tap the block button, then <b>For a zoo</b>. Build a ring of <b>fence</b>
+      to make a pen &mdash; one block high is enough, because no animal will walk
+      over a fence even though you can jump it. Put a <b>gate</b> in the ring and
+      press <b>BUILD</b> on it to swing it open and shut. Then walk up to a pig, a
+      sheep, a cow or a crab: when the <b>🫳</b> button appears you can pick it up,
+      carry it to the pen and put it down inside.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -885,7 +895,23 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
        dinner off it. */
     PLATE=71,PLATE1=72,PLATE2=73,PLATE3=74,
     DINNER=75,DINNER1=76,DINNER2=77,DINNER3=78,
-    CAKE=79,CUP=80;
+    CAKE=79,CUP=80,
+    /* A zoo. Appended once more, so ids 0-80 keep their numbers and every district
+       saved before today still loads.
+
+       A fence is one block tall on purpose: Henry can see over it and hop it, and
+       an animal will not cross it. That is not a height rule - a one-block wall of
+       any other kind can be walked straight over - it is the `pen` flag below, and
+       it is the whole mechanism by which a pen is a pen.
+
+       The gate is the fence with a hinge. It costs four ids shut and four open,
+       the same arithmetic as the door for the same reason: which way it faces and
+       whether it is open are the only state there is, and the only place to keep
+       them is the id itself. One block tall, not two, because it is a gate. */
+    FENCE=81,
+    GATE=82,GATE1=83,GATE2=84,GATE3=85,
+    GATEOPEN=86,GATEOPEN1=87,GATEOPEN2=88,GATEOPEN3=89,
+    HAY=90,TROUGH=91;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -1013,6 +1039,24 @@ DEFS[DOORTOP]  ={name:'Door',    tiles:[62,62,63], prop:'doorTop'};
   });
 });
 
+/* The zoo. A fence and a gate, and two things to put in a pen with an animal.
+   `pen` is the flag an animal will not walk onto, and it is the only thing that
+   makes a pen hold: every other block in the game is kept out of by being two
+   high, which a fence he can see over is not. The gate carries it too, open or
+   shut - a gate swings so Henry can walk through, not so the animals can. */
+DEFS[FENCE]    ={name:'Fence',  tiles:[74,74,74], prop:'fence', pen:true};
+[[FAMILY.gate=[GATE,GATE1,GATE2,GATE3],                 'gate',     false],
+ [FAMILY.gateOpen=[GATEOPEN,GATEOPEN1,GATEOPEN2,GATEOPEN3], 'gateOpen', true]
+].forEach(function(f){
+  f[0].forEach(function(id,dir){
+    DEFS[id]={name:'Gate', tiles:[75,75,75], prop:f[2]?'gateOpen':'gate',
+              family:f[1], dir:dir, gate:true, open:f[2],
+              passable:f[2], pen:true};
+  });
+});
+DEFS[HAY]      ={name:'Hay',    tiles:[77,77,76]};
+DEFS[TROUGH]   ={name:'Trough', tiles:[78,78,78], prop:'trough'};
+
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
              COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
 /* The second drawer. Everything that furnishes a building rather than makes one
@@ -1020,10 +1064,14 @@ var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,R
    asks for something. */
 var FURNITURE=[FURNACE,BED,TABLE,CHAIR,LAMP,RUG,TV,BATH,SINK,TOILET,TILES,DOOR,
                PLATE,DINNER,CAKE,CUP];
+/* The third drawer, and the same argument again: a fence belongs with the other
+   things you build a zoo out of rather than in among the grass and the stone. */
+var ZOO=[FENCE,GATE,HAY,TROUGH];
 /* What the palette and the picker both show, one group at a time. Icons carry
    the meaning - he cannot read the labels yet. */
 var GROUPS=[{key:'blocks',    label:'Blocks',    icon:'🧱', ids:PALETTE},
-            {key:'furniture', label:'For a house', icon:'🛏️', ids:FURNITURE}];
+            {key:'furniture', label:'For a house', icon:'🛏️', ids:FURNITURE},
+            {key:'zoo',       label:'For a zoo',  icon:'🦁', ids:ZOO}];
 var group=0;
 function groupOf(id){
   for(var i=0;i<GROUPS.length;i++) if(GROUPS[i].ids.indexOf(id)>=0) return i;
@@ -1774,6 +1822,62 @@ function buildAtlas(){
     x.fillStyle='#d8d8d0'; x.fillRect(4,13,7,1);
     x.fillStyle='#fbfbf7'; x.fillRect(11,6,2,5);
     x.fillStyle='#8ecdf0'; x.fillRect(11,7,1,3);
+  });
+  /* 74 a fence: two posts and two rails, on nothing. The gaps really are gaps -
+     the prop is built from the same boxes, so what he sees through the fence is
+     the field behind it. This picture is only ever the swatch in the drawer, the
+     ghost's colour and the drawing on the ideas page. */
+  tile(74,function(x,r){
+    fill(x,'#8fbfe0');
+    x.fillStyle='#9a6b3c'; x.fillRect(2,2,3,14); x.fillRect(11,2,3,14);
+    x.fillStyle='#b07f4c'; x.fillRect(0,5,16,3); x.fillRect(0,11,16,3);
+    x.fillStyle='#7d5630'; x.fillRect(2,7,3,1); x.fillRect(11,13,3,1);
+  });
+  /* 75 a gate: the same fence with a latch on it, and one post standing clear so
+     it reads as the bit that swings rather than another panel of fence */
+  tile(75,function(x,r){
+    fill(x,'#8fbfe0');
+    /* Two rails with a real gap between them, not a filled panel: solid, the
+       swatch in the drawer read as a plain brown door and there was nothing to
+       tell it apart from the fence beside it. */
+    x.fillStyle='#9a6b3c'; x.fillRect(1,1,3,14);
+    x.fillStyle='#c08f58'; x.fillRect(4,4,11,3); x.fillRect(4,10,11,3);
+    x.fillStyle='#9a6b3c'; x.fillRect(4,4,11,1); x.fillRect(4,10,11,1);
+    /* the diagonal brace, which is what makes a gate a gate */
+    x.fillStyle='#b07f4c';
+    for(var i=0;i<6;i++) x.fillRect(5+i*1.6,12-i*1.3,2,2);
+    x.fillStyle='#e8dca8'; x.fillRect(12,7,3,2);
+  });
+  /* 76 the side of a hay bale - straw laid along, with the two bands round it */
+  tile(76,function(x,r){
+    fill(x,'#cfa138');
+    /* Deeper than the first go at it, which came out cream and read as a wooden
+       crate standing in the pen rather than a bale of hay. */
+    for(var i=0;i<16;i++){
+      var v=r();
+      x.fillStyle = v<.34?'#b88c28' : (v<.62?'#e2bd5c':'#cfa138');
+      x.fillRect(0,i,16,1);
+    }
+    for(var j=0;j<10;j++) { x.fillStyle='#a87d20'; x.fillRect(Math.floor(r()*16),Math.floor(r()*16),3,1); }
+    x.fillStyle='#6d4f18'; x.fillRect(4,0,1,16); x.fillRect(11,0,1,16);
+  });
+  /* 77 the end of the same bale, straw coiled rather than laid along */
+  tile(77,function(x,r){
+    fill(x,'#d8ab42');
+    for(var i=0;i<30;i++){
+      var v=r();
+      x.fillStyle = v<.45?'#b88c28':'#eccb70';
+      x.fillRect(Math.floor(r()*16),Math.floor(r()*16),1+Math.floor(r()*3),1);
+    }
+    x.fillStyle='#6d4f18'; x.fillRect(0,4,16,1); x.fillRect(0,11,16,1);
+  });
+  /* 78 a trough: planks, with the water sitting in it */
+  tile(78,function(x,r){
+    fill(x,'#8fbfe0');
+    x.fillStyle='#9a6b3c'; x.fillRect(0,6,16,10);
+    x.fillStyle='#b07f4c'; x.fillRect(0,6,16,2);
+    x.fillStyle='#7d5630'; x.fillRect(5,8,1,8); x.fillRect(11,8,1,8);
+    x.fillStyle='#3f8fd6'; x.fillRect(1,4,14,3);
   });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
@@ -2916,6 +3020,48 @@ var PROP_SHAPE={
   ],
   /* The top half draws whatever the bottom half is doing - see propMesh. */
   doorTop:[],
+  /* A fence is one post in the middle of its cell, and a pair of rails reaching
+     out to each neighbour that is also fence - filled in below, sixteen ways
+     round. Written the obvious way first, as a post at each end with the rails
+     running between them, and a wall built along X came out as a row of separate
+     panels facing the wrong way: rails have a direction, and a shape that ignores
+     its neighbours can only ever be right along one axis.
+
+     The gaps between the rails are real gaps - he can see the field through his
+     own fence, which is the point of a fence rather than a wall, and is exactly
+     why "an animal will not cross it" has to be a flag rather than a height.
+
+     The wood is the bed's, not the fence tile: tile 74 is a picture OF a fence for
+     the drawer, and painting it onto a post would put a little fence on the side
+     of every post. */
+  fence:[[6,0,6, 10,16,10, BED_WOOD]],
+  /* A gate, shut, hung across the opening and facing +X. Same hinge convention as
+     the door: the -Z edge. Paler wood than the fence, so the way out of the pen is
+     the thing that stands out in a long run of it. */
+  gate:[
+    [6,0,0,    10,16,3,  BED_WOOD],
+    [6.5,3,3,  9.5,7,16, PALE_WOOD],
+    [6.5,9,3,  9.5,13,16, PALE_WOOD],
+    [6.5,3,13, 9.5,13,16, PALE_WOOD]
+  ],
+  /* Open is the same gate swung a quarter turn about that hinge, so it lies along
+     -Z beside the post instead of across the way through. */
+  gateOpen:[
+    [6,0,0,    10,16,3,  BED_WOOD],
+    [3,3,0.5,  16,7,3.5, PALE_WOOD],
+    [3,9,0.5,  16,13,3.5, PALE_WOOD],
+    [13,3,0.5, 16,13,3.5, PALE_WOOD]
+  ],
+  /* A water trough: four sides, a floor and the water, low enough to be furniture
+     for a pen rather than another thing in the way. */
+  trough:[
+    [1,0,1,   15,3,15,  PALE_WOOD],
+    [1,3,1,   3,9,15,   PALE_WOOD],
+    [13,3,1,  15,9,15,  PALE_WOOD],
+    [3,3,1,   13,9,3,   PALE_WOOD],
+    [3,3,13,  13,9,15,  PALE_WOOD],
+    [3,3,3,   13,8,13,  BATH_WATER]
+  ],
   /* A place setting, with whoever is eating it sitting at +X: plate in the middle,
      fork one side and knife the other, all a sixteenth of a block thick so it lies
      on the table rather than hovering over it. Dinner is the same three boxes with
@@ -2950,6 +3096,27 @@ var PROP_SHAPE={
     [0,5,3,   3,14,13,  PORCELAIN]
   ]
 };
+
+/* The sixteen fences: a post, plus a pair of rails towards each side that joins.
+   Generated rather than written out - sixteen near-identical lists differing in
+   which four numbers appear is exactly the shape of thing a wrong digit hides in,
+   and the rails really are the same two boxes four ways round. */
+(function(){
+  var POST=[6,0,6, 10,16,10, BED_WOOD];
+  /* [+X, -X, +Z, -Z], in the bit order propMesh reads them. Each side is two
+     rails, low and high, reaching from the post to the edge of the cell. */
+  var ARMS=[
+    [[10,4,7, 16,7,9, BED_WOOD], [10,10,7, 16,13,9, BED_WOOD]],
+    [[0,4,7,  6,7,9,  BED_WOOD], [0,10,7,  6,13,9,  BED_WOOD]],
+    [[7,4,10, 9,7,16, BED_WOOD], [7,10,10, 9,13,16, BED_WOOD]],
+    [[7,4,0,  9,7,6,  BED_WOOD], [7,10,0,  9,13,6,  BED_WOOD]]
+  ];
+  for(var m=0;m<16;m++){
+    var s=[POST];
+    for(var b=0;b<4;b++) if(m&(1<<b)) s=s.concat(ARMS[b]);
+    PROP_SHAPE['fence'+m]=s;
+  }
+})();
 
 /* Which way a bed points is not stored anywhere - it is read off the fact that its
    other half is next door. Two ids instead of eight, nothing new in the save file,
@@ -3088,6 +3255,17 @@ function propBox(P,N,U,C,I,ox,oy,oz,box,tint,flat){
 /* Which way this one is turned. A bed reads it off its other half, because a bed is
    two blocks and each half can see the other. Anything with a `dir` carries it in
    its own id. Anything else does not turn at all. */
+/* What a fence will reach out to: another fence, a gate, or an ordinary solid
+   block, so a run of fencing meets the side of the barn instead of stopping a
+   handspan short of it. Not the props, whose shapes have nothing at the edge of
+   the cell for a rail to meet. */
+function fenceJoins(x,y,z){
+  if(!inside(x,y,z)) return false;
+  var b=getBlock(x,y,z), d=DEFS[b];
+  if(!d) return false;
+  if(d.pen) return true;
+  return !d.prop && !d.passable && b!==WATER && b!==AIR;
+}
 function propFacing(x,y,z,id,def){
   if(def.dir!==undefined) return FACE4[def.dir];
   if(id===BED||id===BEDHEAD) return bedFacing(x,y,z,id);
@@ -3109,6 +3287,19 @@ function propMesh(opq,glw,x,y,z,id,def,tint){
     if(!below || !below.door) return;
     shape=PROP_SHAPE[below.open?'doorOpen':'door'];
     face=FACE4[below.dir];
+  }
+  /* A fence reaches out to whatever it stands next to, so a run of them is a run
+     rather than a row of posts. Same trick as the door's top half: the shape is
+     chosen here from what is around it, so nothing about which way a fence joins
+     is written into the save - which means a wall built beside one afterwards
+     joins to it, and digging that wall out lets it go again. */
+  if(def.prop==='fence'){
+    var m=0;
+    if(fenceJoins(x+1,y,z)) m|=1;
+    if(fenceJoins(x-1,y,z)) m|=2;
+    if(fenceJoins(x,y,z+1)) m|=4;
+    if(fenceJoins(x,y,z-1)) m|=8;
+    shape=PROP_SHAPE['fence'+m];
   }
   if(!shape || !shape.length) return;
   for(var i=0;i<shape.length;i++){
@@ -3590,6 +3781,21 @@ var henry=built.group, hParts=built.parts;
 scene.add(henry);
 
 /* ---------------- friendly animals ---------------- */
+
+/* The one rule that makes a zoo a zoo: an animal will not stand on a fence.
+   `gy` is the surface of the column it wants to walk into - the first free cell -
+   so the block underneath it is what it would be standing on. A fence is one
+   block tall, and one block is a step an animal takes without noticing, so
+   nothing about height can hold it in: the flag is the mechanism.
+
+   Everything else in the game keeps animals out by being two blocks high, which
+   still works and is still checked. This is the extra way, and it is the one Henry
+   can see over. */
+function penned(x,y,z){
+  var b=getBlock(Math.floor(x),y-1,Math.floor(z));
+  return !!(DEFS[b] && DEFS[b].pen);
+}
+
 var animals=[];
 function buildAnimal(kind){
   var g=new THREE.Group(), c1,c2,bodyW,bodyH,bodyD,legH,headSize,headFwd,headY;
@@ -3632,6 +3838,10 @@ function buildAnimal(kind){
   return g;
 }
 function spawnAnimals(){
+  /* Every animal in the list is about to be thrown away and remade, so anything
+     in his arms goes with it. Without this he would still be "carrying" a mesh
+     that is no longer in the scene, and putting it down would put nothing down. */
+  if(player.carry) player.carry=null;
   animals.forEach(function(a){ scene.remove(a.mesh); });
   animals=[];
   var rnd=mulberry32(seed^0x5a5a);
@@ -3645,12 +3855,15 @@ function spawnAnimals(){
     var mesh=buildAnimal(kind);
     mesh.position.set(x,sy,z);
     scene.add(mesh);
-    animals.push({mesh:mesh,x:x,z:z,yaw:rnd()*6.28,timer:rnd()*3,phase:rnd()*6.28,kind:kind,speed:0.9+rnd()*0.5});
+    animals.push({mesh:mesh,x:x,y:sy,z:z,yaw:rnd()*6.28,timer:rnd()*3,phase:rnd()*6.28,
+                  kind:kind,speed:0.9+rnd()*0.5,
+                  rnd:mulberry32(((seed^0x5a5a)+animals.length*0x9e3779b1)>>>0)});
   }
 }
 function updateAnimals(dt){
   for(var i=0;i<animals.length;i++){
     var a=animals[i];
+    if(a.held) continue;                     /* it is in his arms - see carrying */
     a.timer-=dt;
     var dx=player.x-a.x, dz=player.z-a.z;
     var dist=Math.sqrt(dx*dx+dz*dz);
@@ -3661,9 +3874,14 @@ function updateAnimals(dt){
       var diff=((want-a.yaw+Math.PI*3)%(Math.PI*2))-Math.PI;
       a.yaw+=clamp(diff,-2.6*dt,2.6*dt);
     } else if(a.timer<=0){
-      a.timer=1.4+Math.random()*3;
-      a.yaw=Math.random()*6.28;
-      a.pause=Math.random()<0.25;
+      /* Its own seeded stream, like the fish and the crabs. These ones do read
+         his position - they walk over to say hello, which is the point of them -
+         so there is no path-independence to prove here. It is for the pen tests:
+         an escape that only happens on one run in fifty is one I want to be able
+         to run again. */
+      a.timer=1.4+a.rnd()*3;
+      a.yaw=a.rnd()*6.28;
+      a.pause=a.rnd()<0.25;
     }
     if(dist<=1.7) moving=false;
     if(a.pause && dist>=7) moving=false;
@@ -3673,11 +3891,13 @@ function updateAnimals(dt){
       var nz=a.z+Math.cos(a.yaw)*a.speed*dt;
       var gy=surfaceY(Math.floor(nx),Math.floor(nz));
       var cy=surfaceY(Math.floor(a.x),Math.floor(a.z));
-      var ok = nx>2 && nx<WX-2 && nz>2 && nz<WZ-2 && gy>WATER_LEVEL && Math.abs(gy-cy)<=1.2;
+      var ok = nx>2 && nx<WX-2 && nz>2 && nz<WZ-2 && gy>WATER_LEVEL &&
+               Math.abs(gy-cy)<=1.2 && !penned(nx,gy,nz);
       if(ok){ a.x=nx; a.z=nz; a.phase+=dt*7; }
       else { a.yaw+=2.3; a.timer=1.2; }
     }
     var groundY=surfaceY(Math.floor(a.x),Math.floor(a.z));
+    a.y=groundY;
     a.mesh.position.set(a.x,groundY,a.z);
     a.mesh.rotation.y=a.yaw;
     var sw=moving?Math.sin(a.phase)*0.55:0;
@@ -4052,27 +4272,44 @@ function updateFish(dt,t){
 var crabs=[];
 var CRAB_SHORE=4;             /* stays within this many blocks of water */
 
-/* The direction of the nearest water, or null if there is none within reach.
-   Rings outwards so the first hit really is the nearest, and steps by less than
-   a block at the outer radius so a one-block inlet is not stepped over. */
-function waterDir(x,z){
-  for(var r=1;r<=CRAB_SHORE;r++){
+/* The nearest water a crab standing at `fromY` could actually walk to, as a
+   direction and a distance, or null if there is none within `reach`.
+
+   Height matters, and leaving it out was a bug worth writing down. waterColumn
+   looks down a whole column, so a crab standing on a cliff twelve blocks above
+   the sea found water one block away - and then the shore rule, which also wants
+   it near the water line, refused every step it tried and it stood still for ever.
+   A shore is where the land meets the water, not anywhere with a view of it.
+
+   Rings outwards so the first hit really is the nearest, and steps by less than a
+   block at the outer radius so a one-block inlet is not stepped over. */
+function waterNear(x,z,fromY,reach){
+  for(var r=1;r<=reach;r++){
     var n=Math.max(8,Math.ceil(6.283185*r/0.7));
     for(var a=0;a<n;a++){
       var ang=a/n*6.283185;
       var wx=Math.floor(x+Math.sin(ang)*r), wz=Math.floor(z+Math.cos(ang)*r);
       if(wx<0||wx>=WX||wz<0||wz>=WZ) continue;
-      if(waterColumn(wx,wz)) return ang;
+      var col=waterColumn(wx,wz);
+      if(col && (fromY===null || Math.abs(col.top-fromY)<=3)) return {dir:ang, r:r};
     }
   }
   return null;
+}
+function waterDir(x,z,fromY){
+  var w=waterNear(x,z,fromY===undefined?null:fromY,CRAB_SHORE);
+  return w?w.dir:null;
 }
 /* Dry land a crab can stand on: above the water line, inside the world, and not
    a cliff. Same shape of test the land animals use, and for the same reason. */
 function crabGround(x,z){
   if(x<2||x>=WX-2||z<2||z>=WZ-2) return null;
   var sy=surfaceY(Math.floor(x),Math.floor(z));
-  return sy>WATER_LEVEL ? sy : null;
+  if(sy<=WATER_LEVEL) return null;
+  /* A fence holds a crab too. He will want one in the zoo, and a pen that let
+     the crab walk out from under him would be the same bug twice. */
+  if(penned(x,sy,z)) return null;
+  return sy;
 }
 
 function buildCrab(){
@@ -4124,6 +4361,7 @@ function buildCrab(){
 }
 
 function spawnCrabs(){
+  if(player.carry) player.carry=null;         /* same as spawnAnimals */
   crabs.forEach(function(c){ scene.remove(c.mesh); });
   crabs=[];
   var rnd=mulberry32((seed^0xc4ab17)>>>0);
@@ -4136,7 +4374,7 @@ function spawnCrabs(){
     /* Only the beach. Somewhere up a hill with a lake in view is not a beach,
        so the height above the water line is capped as well as the distance. */
     if(gy>WATER_LEVEL+3) continue;
-    var face=waterDir(x,z);
+    var face=waterDir(x,z,gy);
     if(face===null) continue;
 
     var c={
@@ -4158,13 +4396,19 @@ function spawnCrabs(){
 function updateCrabs(dt,t){
   for(var i=0;i<crabs.length;i++){
     var c=crabs[i];
+    if(c.held) continue;                     /* it is in his arms - see carrying */
     c.timer-=dt;
     if(c.timer<=0){
       c.timer=1.2+c.rnd()*2.6;
       /* Look at the water again - the shoreline bends, and a crab that kept its
-         first heading ended up shuffling inland along a curve. */
-      var fw=waterDir(c.x,c.z);
-      if(fw!==null) c.face=fw;
+         first heading ended up shuffling inland along a curve.
+
+         Away from any water there is nothing to look at, so it picks a direction
+         instead and potters. That case did not exist until he could pick a crab up
+         and carry it into a pen in the middle of a field: with the shore rule and
+         no shore, every step it tried was refused and it stood still for ever. */
+      var fw=waterDir(c.x,c.z,c.y);
+      c.face = fw!==null ? fw : c.face+(c.rnd()-0.5)*2.0;
       if(c.rnd()<0.35) c.dir=-c.dir;
     }
 
@@ -4174,8 +4418,11 @@ function updateCrabs(dt,t){
     var nx=c.x+Math.cos(c.face)*stp, nz=c.z-Math.sin(c.face)*stp;
     var gy=crabGround(nx,nz);
     var moving=false;
-    if(gy!==null && Math.abs(gy-c.y)<=1.2 && gy<=WATER_LEVEL+4 &&
-       waterDir(nx,nz)!==null){
+    /* The shore rule applies where there is a shore. Carried inland it keeps only
+       the rules that stop it walking into water or through a fence. */
+    var shore=waterDir(c.x,c.z,c.y)!==null;
+    if(gy!==null && Math.abs(gy-c.y)<=1.2 &&
+       (!shore || (gy<=WATER_LEVEL+4 && waterDir(nx,nz,gy)!==null))){
       c.x=nx; c.z=nz; c.y=gy; c.phase+=dt*9; moving=true;
     } else {
       /* Ran out of beach. Turn round and go back the way it came - which depends
@@ -4473,6 +4720,8 @@ function updateParticles(dt){
 var PW=0.29, PH=1.5, EYE=1.34;
 var player={x:WX/2,y:20,z:WZ/2,vx:0,vy:0,vz:0,onGround:false,fly:false,walk:0,flyBoost:0,
             kart:false, seat:null,
+            /* {kind, ref} for the animal in his arms, or null - see carrying */
+            carry:null,
             /* drift: seconds held in the current slide, 0 when not drifting. tier: which
                spark colour it has reached, -1 for none yet. boost and star: seconds left
                of each. star makes grass as quick as tarmac - see the speed it picks. */
@@ -5134,6 +5383,108 @@ function toggleSit(){
   if(c) sitDown(c);
 }
 
+/* ---------------- carrying an animal ----------------
+   The zoo needs a way to get an animal into the pen. Leading one there works -
+   they walk towards him when he is close - but it is slow, and a pig that loses
+   interest halfway across a field is a five-year-old's afternoon gone. So he can
+   pick one up, walk to the pen, and put it down.
+
+   One at a time, and the animal keeps being itself: the same entry in the same
+   list with the same mesh, flagged `held` so its own update leaves it alone while
+   its position is Henry's. Nothing is destroyed and recreated, so there is no way
+   to lose one by picking it up. */
+var CARRY_REACH=2.4;
+
+/* The nearest thing he could pick up, or null. Pigs, sheep, cows and crabs; not
+   the fish, who would not thank him for it. */
+function creatureNear(){
+  var best=null, bestD=CARRY_REACH*CARRY_REACH;
+  function look(list,kind){
+    for(var i=0;i<list.length;i++){
+      var a=list[i];
+      var dx=a.x-player.x, dz=a.z-player.z, dy=(a.y!==undefined?a.y:player.y)-player.y;
+      if(Math.abs(dy)>2.5) continue;
+      var d=dx*dx+dz*dz;
+      if(d<bestD){ bestD=d; best={kind:kind,ref:a}; }
+    }
+  }
+  look(animals,'animal');
+  look(crabs,'crab');
+  return best;
+}
+function pickUpCreature(){
+  if(player.carry) return false;
+  if(player.kart){ toast('Not from the kart!'); return false; }
+  var c=creatureNear();
+  if(!c) return false;
+  c.ref.held=true;
+  /* Two thirds the size while it is off the ground. Full size, a cow fills the
+     screen in first person and there is nothing to see past it - and the joke of
+     carrying one still lands at this size. Put down, it goes back to itself. */
+  c.ref.mesh.scale.setScalar(0.66);
+  player.carry=c;
+  paintCarryButton();
+  sfx('place');
+  return true;
+}
+/* Put down in the cell he is looking at, on whatever the ground is there. Refused
+   rather than forced: the two ways this could go wrong are dropping one inside a
+   wall and dropping one in the sea, and both are worse than being told no. */
+function putDownCreature(){
+  if(!player.carry) return false;
+  var d=lookDir();
+  var fx=Math.floor(player.x)+d[0], fz=Math.floor(player.z)+d[1];
+  if(fx<2||fx>=WX-2||fz<2||fz>=WZ-2){ toast('Not over the edge!'); return true; }
+  var gy=surfaceY(fx,fz);
+  if(gy<=WATER_LEVEL){ toast('Not in the water!'); return true; }
+  if(penned(fx,gy,fz)){ toast('Not on the fence!'); return true; }
+  /* Facing a wall or a cliff, the ground in front of him is its top - so putting
+     an animal "down" there would set it on the roof. Judged by the same step an
+     animal will take on its own, which is the honest measure of whether that
+     ground is really in front of him or above him. */
+  if(Math.abs(gy-player.y)>1.6){ toast('No room to put him down!'); return true; }
+  if(!cellFree(fx,gy,fz)){ toast('No room to put him down!'); return true; }
+
+  var c=player.carry, a=c.ref;
+  a.held=false;
+  a.mesh.scale.setScalar(1);
+  a.x=fx+0.5; a.z=fz+0.5; a.y=gy;
+  /* Facing back at him, which is what a put-down animal does and which also means
+     it is not immediately walking away into the fence behind it. */
+  a.yaw=Math.atan2(player.x-a.x,player.z-a.z);
+  if(c.kind==='crab'){ a.face=a.yaw; a.timer=0.4; }
+  else { a.timer=0.6; a.pause=false; }
+  a.mesh.position.set(a.x,a.y,a.z);
+  player.carry=null;
+  paintCarryButton();
+  sfx('place');
+  return true;
+}
+function toggleCarry(){
+  if(player.carry) putDownCreature();
+  else pickUpCreature();
+}
+/* Whatever he is carrying rides in front of him. Called from the render loop
+   rather than from either animal update, because it belongs to neither list and
+   because it has to keep up with him at frame rate rather than at theirs. */
+function updateCarried(){
+  if(!player.carry) return;
+  var a=player.carry.ref;
+  var fx=-Math.sin(yaw), fz=-Math.cos(yaw);
+  a.x=player.x+fx*0.55; a.z=player.z+fz*0.55;
+  a.y=player.y+0.62;
+  a.mesh.position.set(a.x,a.y,a.z);
+  a.mesh.rotation.y=yaw+Math.PI;      /* looking back at him */
+}
+function paintCarryButton(){
+  var b=document.getElementById('holdBtn');
+  if(!b) return;
+  var can=player.carry || (!player.kart && creatureNear());
+  b.classList.toggle('hide',!can);
+  b.textContent=player.carry?'⬇️':'🫳';
+  b.title=player.carry?'Put him down':'Pick him up';
+}
+
 function updatePlayer(dt){
   /* Sitting still. The stick is the way out, so any real push on it stands him up
      and this frame carries on as an ordinary walking frame. */
@@ -5548,11 +5899,14 @@ function placeDoor(c){
   setBlock(c.x,c.y+1,c.z,DOORTOP);
   return true;
 }
-/* Which cell of a door is the one that remembers anything. */
+/* Which cell of a door is the one that remembers anything. A gate is one block
+   tall, so the answer for a gate is always itself - but it goes through the same
+   function, because everything that swings is opened by the same code below and
+   two of these would be two places for the guard about shutting one on him. */
 function doorBase(x,y,z){
   var id=getBlock(x,y,z);
   if(id===DOORTOP && DEFS[getBlock(x,y-1,z)] && DEFS[getBlock(x,y-1,z)].door) return y-1;
-  return (DEFS[id] && DEFS[id].door) ? y : null;
+  return (DEFS[id] && (DEFS[id].door||DEFS[id].gate)) ? y : null;
 }
 /* Press BUILD on a door and it swings. Shutting it while he is standing in the
    doorway would seal him inside his own front door, so that is refused rather than
@@ -5565,10 +5919,11 @@ function toggleDoor(x,y,z){
      can seal him in. Written the other way round first, which refused to open a
      door he was standing in and shut one on him quite happily. */
   if(def.open && (cellHasPlayer(x,by,z) || cellHasPlayer(x,by+1,z))){
-    toast('Step out of the doorway first!');
+    toast(def.gate?'Step out of the gateway first!':'Step out of the doorway first!');
     return true;
   }
-  setBlock(x,by,z,FAMILY[def.open?'door':'doorOpen'][def.dir]);
+  var shut=def.gate?'gate':'door';
+  setBlock(x,by,z,FAMILY[def.open?shut:shut+'Open'][def.dir]);
   sfx('place');
   return true;
 }
@@ -5971,21 +6326,24 @@ function paintPortalRecipe(cv){
 }
 /* The two furniture swatches, drawn at the size they appear in the drawer. He
    cannot read "For a house", so what he is looking for has to be a picture. */
-function paintFurniture(cv){
+/* One drawer's worth of blocks, drawn as a row of labelled swatches. Takes the
+   list rather than reaching for FURNITURE, because there are two of these on the
+   page now and a second copy of the layout maths is a second place to fix it. */
+function paintDrawer(cv,list){
   var c=cv.getContext('2d');
   /* Six across, then wrap. The drawer is going to keep growing, and a row that only
      ever gets longer walks off the side of a phone. */
   var size=44, gap=22, pad=6, per=6, rowH=size+26;
-  var cols=Math.min(per,FURNITURE.length);
-  var rows=Math.ceil(FURNITURE.length/per);
+  var cols=Math.min(per,list.length);
+  var rows=Math.ceil(list.length/per);
   var W=pad*2+cols*size+(cols-1)*gap, H=rows*rowH;
   cv.width=W; cv.height=H;
   c.clearRect(0,0,W,H);
   c.imageSmoothingEnabled=false;
-  FURNITURE.forEach(function(id,i){
+  list.forEach(function(id,i){
     var col=i%per, row=Math.floor(i/per);
     /* a short last row sits under the middle of the one above rather than jammed left */
-    var inRow=Math.min(per,FURNITURE.length-row*per);
+    var inRow=Math.min(per,list.length-row*per);
     var rowW=inRow*size+(inRow-1)*gap;
     var x=pad+(W-pad*2-rowW)/2+col*(size+gap), y=row*rowH+3;
     drawTileAt(c,DEFS[id].tiles[2],x,y,size);
@@ -6000,7 +6358,8 @@ function paintFurniture(cv){
 }
 function showIdeas(){
   paintPortalRecipe(document.getElementById('ideasPic'));
-  paintFurniture(document.getElementById('ideasFurn'));
+  paintDrawer(document.getElementById('ideasFurn'),FURNITURE);
+  paintDrawer(document.getElementById('ideasZoo'),ZOO);
   el('ideas').classList.remove('hide');
 }
 
@@ -6338,6 +6697,7 @@ window.addEventListener('keydown',function(e){
   if(e.code==='KeyF') setFly(!player.fly);
   if(e.code==='KeyQ' && playing) digDown();
   if(e.code==='KeyE' && playing) digUp();
+  if(e.code==='KeyG' && playing) toggleCarry();   /* G for grab - pick an animal up */
   if(e.code==='KeyV') setView(!firstPerson);
   if(e.code==='KeyM') setMuted(!muted);
   var digits={Digit1:0,Digit2:1,Digit3:2,Digit4:3,Digit5:4,Digit6:5,Digit7:6,Digit8:7,Digit9:8,Digit0:9};
@@ -6504,6 +6864,7 @@ function setMuted(m){
 el('btnView').addEventListener('click',function(){ setView(!firstPerson); });
 el('kartBtn').addEventListener('click',function(){ toggleKart(); });
 el('sitBtn').addEventListener('click',function(){ toggleSit(); });
+el('holdBtn').addEventListener('click',function(){ toggleCarry(); });
 el('btnSound').addEventListener('click',function(){ setMuted(!muted); });
 
 /* ---------------- overlays ---------------- */
@@ -9562,6 +9923,9 @@ function frame(){
       /* The sit chip follows him about, so it is there the moment he walks up to a
          chair and gone the moment he walks away. Cheap: seatNear looks at ten cells. */
       paintSitButton();
+      /* And the pick-up chip, for the same reason and at the same cost. */
+      paintCarryButton();
+      updateCarried();
       if(digHeld){ digTime+=dt; if(digTime>0.23){ digTime=0; dig(); } }
       if(buildHeld){ buildTime+=dt; if(buildTime>0.23){ buildTime=0; build(); } }
       var h=aim();
@@ -9672,7 +10036,11 @@ window.__henrycraft={
        TILES:TILES,
        DOOR:DOOR,DOOR1:DOOR1,DOOR2:DOOR2,DOOR3:DOOR3,
        DOOROPEN:DOOROPEN,DOOROPEN1:DOOROPEN1,DOOROPEN2:DOOROPEN2,DOOROPEN3:DOOROPEN3,
-       DOORTOP:DOORTOP},
+       DOORTOP:DOORTOP,
+       FENCE:FENCE,
+       GATE:GATE,GATE1:GATE1,GATE2:GATE2,GATE3:GATE3,
+       GATEOPEN:GATEOPEN,GATEOPEN1:GATEOPEN1,GATEOPEN2:GATEOPEN2,GATEOPEN3:GATEOPEN3,
+       HAY:HAY,TROUGH:TROUGH},
   FAMILY:FAMILY,
   propFacing:function(x,y,z,id){ return propFacing(x,y,z,id,DEFS[id]); },
   facingId:facingId,
@@ -9781,21 +10149,61 @@ window.__henrycraft={
               face:+c.face.toFixed(3),
               standingOn:getBlock(Math.floor(c.x),Math.floor(c.y)-1,Math.floor(c.z)),
               standingIn:getBlock(Math.floor(c.x),Math.floor(c.y),Math.floor(c.z)),
+              /* The same question the crab asks itself, so the test and the game
+                 agree on what "near the water" means. 99 for none in reach. */
               toWater:(function(){
-                for(var r=1;r<=8;r++){
-                  var n=Math.max(8,Math.ceil(6.283185*r/0.7));
-                  for(var a=0;a<n;a++){
-                    var ang=a/n*6.283185;
-                    var wx=Math.floor(c.x+Math.sin(ang)*r), wz=Math.floor(c.z+Math.cos(ang)*r);
-                    if(wx<0||wx>=WX||wz<0||wz>=WZ) continue;
-                    if(waterColumn(wx,wz)) return r;
-                  }
-                }
-                return 99;
+                var w=waterNear(c.x,c.z,c.y,8);
+                return w?w.r:99;
               })()};
     });
   },
   animals:function(){ return animals.length; },
+  /* Where the land animals are, and what he is holding. The pen tests need both:
+     one to see whether anything got out, the other to see that picking one up
+     really took it out of the world's hands and gave it to his. */
+  animalList:function(){
+    return animals.map(function(a,i){
+      return {i:i, kind:a.kind, held:!!a.held,
+              x:+a.x.toFixed(3), y:+a.y.toFixed(3), z:+a.z.toFixed(3)};
+    });
+  },
+  carrying:function(){
+    if(!player.carry) return null;
+    var a=player.carry.ref;
+    return {kind:player.carry.kind,
+            x:+a.x.toFixed(3), y:+a.y.toFixed(3), z:+a.z.toFixed(3),
+            scale:+a.mesh.scale.x.toFixed(3)};
+  },
+  pickUp:pickUpCreature, putDown:putDownCreature, toggleCarry:toggleCarry,
+  penned:penned,
+  /* Stand an animal somewhere, so a pen test can put one in the pen without
+     driving it there. It is the only way in: nothing else writes an animal's
+     position from outside its own update. */
+  moveAnimal:function(i,x,z){
+    var a=animals[i];
+    if(!a) return false;
+    a.x=x; a.z=z; a.y=surfaceY(Math.floor(x),Math.floor(z));
+    a.mesh.position.set(a.x,a.y,a.z);
+    return true;
+  },
+  moveCrab:function(i,x,z){
+    var c=crabs[i];
+    if(!c) return false;
+    c.x=x; c.z=z; c.y=surfaceY(Math.floor(x),Math.floor(z));
+    c.mesh.position.set(c.x,c.y,c.z);
+    return true;
+  },
+  /* Ids by name, so a test does not have to know that a fence is 81 - except the
+     one test whose whole job is to know that a fence is 81. */
+  blockId:function(name){
+    for(var k in DEFS) if(DEFS[k].name===name) return +k;
+    return null;
+  },
+  blockIds:function(){
+    var out={};
+    for(var k in DEFS) if(out[DEFS[k].name]===undefined) out[DEFS[k].name]=+k;
+    return out;
+  },
   fireCount:function(){ return ANIM[0].n; },
 
   /* ---- districts ---- */
@@ -10694,10 +11102,34 @@ window.__henrycraft={
        walked anywhere. */
     var walked=[], was=crabs.map(function(k){ return [k.x,k.z]; });
     for(i=0;i<crabs.length;i++) walked.push(0);
+    /* Every corner each land animal ever reached. A pen test wants "it never got
+       out", not "it was inside at the end" - an animal that walks out through the
+       fence and back in again would pass the second and mean nothing. */
+    var box=animals.map(function(a){
+      return {minX:a.x,maxX:a.x,minZ:a.z,maxZ:a.z,minY:a.y,maxY:a.y,
+              /* The columns as well as the coordinates. An animal pressed against
+                 the inside of a fence sits at x = 27.9996, which rounds to the
+                 fence's own number when it is reported - and a pen test that
+                 floors the rounded figure reads it as standing on the fence. The
+                 column is what the question is actually about. */
+              minCX:Math.floor(a.x),maxCX:Math.floor(a.x),
+              minCZ:Math.floor(a.z),maxCZ:Math.floor(a.z)};
+    });
     for(var s=0;s<steps;s++){
       t+=dt;
       updateFish(dt,t);
       updateCrabs(dt,t);
+      updateAnimals(dt);
+      updateCarried();
+      for(i=0;i<animals.length;i++){
+        var an=animals[i], bx=box[i];
+        if(an.x<bx.minX) bx.minX=an.x; if(an.x>bx.maxX) bx.maxX=an.x;
+        if(an.z<bx.minZ) bx.minZ=an.z; if(an.z>bx.maxZ) bx.maxZ=an.z;
+        if(an.y<bx.minY) bx.minY=an.y; if(an.y>bx.maxY) bx.maxY=an.y;
+        var cx=Math.floor(an.x), cz=Math.floor(an.z);
+        if(cx<bx.minCX) bx.minCX=cx; if(cx>bx.maxCX) bx.maxCX=cx;
+        if(cz<bx.minCZ) bx.minCZ=cz; if(cz>bx.maxCZ) bx.maxCZ=cz;
+      }
       for(i=0;i<crabs.length;i++){
         walked[i]+=Math.hypot(crabs[i].x-was[i][0],crabs[i].z-was[i][1]);
         was[i][0]=crabs[i].x; was[i][1]=crabs[i].z;
@@ -10753,6 +11185,14 @@ window.__henrycraft={
     }
     return {steps:steps, seconds:steps*dt, fish:fish.length, crabs:crabs.length,
             crabWalk:walked.map(function(d){ return +d.toFixed(2); }),
+            animals:animals.length,
+            animalBox:box.map(function(b){
+              return {minX:+b.minX.toFixed(3), maxX:+b.maxX.toFixed(3),
+                      minZ:+b.minZ.toFixed(3), maxZ:+b.maxZ.toFixed(3),
+                      minY:+b.minY.toFixed(3), maxY:+b.maxY.toFixed(3),
+                      minCX:b.minCX, maxCX:b.maxCX,
+                      minCZ:b.minCZ, maxCZ:b.maxCZ};
+            }),
             violationCount:violations.length,
             violations:violations.filter(function(v){return typeof v==='object';}),
             sharkSamples:samples,

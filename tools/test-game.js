@@ -135,6 +135,10 @@ function slope(pts) {
     PLATE: 71, PLATE1: 72, PLATE2: 73, PLATE3: 74,
     DINNER: 75, DINNER1: 76, DINNER2: 77, DINNER3: 78,
     CAKE: 79, CUP: 80,
+    FENCE: 81,
+    GATE: 82, GATE1: 83, GATE2: 84, GATE3: 85,
+    GATEOPEN: 86, GATEOPEN1: 87, GATEOPEN2: 88, GATEOPEN3: 89,
+    HAY: 90, TROUGH: 91,
   };
   const ids = await page.evaluate(() => window.__henrycraft.ids);
   const moved = Object.keys(ID_TABLE).filter(k => ids[k] !== ID_TABLE[k])
@@ -273,10 +277,10 @@ function slope(pts) {
       selAfter: H.selected(), openAfter: H.groups().open,
     };
   });
-  check('there are two drawers, blocks and furniture',
-        drawers.keys.join(',') === 'blocks,furniture', drawers.keys.join(','));
+  check('there are three drawers: blocks, furniture and the zoo',
+        drawers.keys.join(',') === 'blocks,furniture,zoo', drawers.keys.join(','));
   check('both the palette and the picker carry the tabs',
-        drawers.palTabs.length === 2 && drawers.pickTabs.length === 2,
+        drawers.palTabs.length === 3 && drawers.pickTabs.length === 3,
         `palette ${drawers.palTabs.length}, picker ${drawers.pickTabs.length}`);
   /* Nineteen, written out rather than read back from PALETTE. Comparing the grid
      against PALETTE.length only proves the palette renders what it is given - it
@@ -1405,6 +1409,351 @@ function slope(pts) {
         `${allIndep.n} creatures, ${allIndep.len} chars of path`);
   note(`${allIndep.n} creatures traced byte-identically over 30s from two ` +
        `positions 68 blocks apart`);
+
+  // ---- 6c: a zoo -----------------------------------------------------------
+  // Henry wants to build a pen and keep animals in it, so the thing to prove is
+  // that a pen holds. Every check below runs with Henry stood just outside the
+  // wall, because animals walk towards him when he is near: that is the hardest
+  // the pen ever gets pushed, and standing him far away would have made all of
+  // this pass on animals that never went near a fence.
+  console.log('6c. a pen keeps the animals in it');
+  const PEN = 9;                       // outside measurement, so 7x7 of room inside
+  const pen = await page.evaluate(async ({PEN}) => {
+    const H = window.__henrycraft;
+    const ids = H.ids;
+    /* Flatten a patch first. Henry does this with the dig buttons; there is no
+       flat 9x9 anywhere in a hilly world to find, and a pen built across a slope
+       would be testing the height rule rather than the fence. */
+    function clearing(px, pz, y, n) {
+      for (let a = -3; a < n + 3; a++) for (let b = -3; b < n + 3; b++) {
+        for (let yy = y - 4; yy < y; yy++) H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.GRASS : ids.DIRT);
+        for (let yy = y; yy < y + 6; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+      }
+    }
+    /* One run: build a wall out of `wall` (as many blocks high as `high`), stand
+       an animal in the middle, put Henry outside, and run the clock. */
+    function run(opts) {
+      H.loadSeed(4242);
+      const px = 20, pz = 20, y = 14, n = opts.n || PEN;
+      clearing(px, pz, y, n);
+      for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
+        if (!(a === 0 || a === n - 1 || b === 0 || b === n - 1)) continue;
+        if (opts.gapAt && opts.gapAt[0] === a && opts.gapAt[1] === b) continue;
+        const id = (opts.gateAt && opts.gateAt[0] === a && opts.gateAt[1] === b)
+          ? opts.gateId : opts.wall;
+        for (let h = 0; h < (opts.high || 1); h++) H.setBlock(px + a, y + h, pz + b, id);
+      }
+      H.moveAnimal(0, px + n / 2, pz + n / 2);
+      /* Just outside the wall he is nearest, well within the 7 blocks at which
+         they start walking over. */
+      H.movePlayer(px + n + 1.5, y, pz + n / 2);
+      const sim = H.simulate(opts.secs || 300);
+      const b = sim.animalBox[0];
+      /* Compared by column, and by columns the simulation itself recorded: an
+         animal pressed against the inside of the fence sits at x = 27.9996, which
+         rounds to the fence's own number on the way out. The question is which
+         block it is standing on, so that is what is counted. */
+      return {
+        px, pz, y, n,
+        minCol: [b.minCX - px, b.minCZ - pz],
+        maxCol: [b.maxCX - px, b.maxCZ - pz],
+        inside: b.minCX >= px + 1 && b.maxCX <= px + n - 2 &&
+                b.minCZ >= pz + 1 && b.maxCZ <= pz + n - 2,
+        roamed: +Math.max(b.maxX - b.minX, b.maxZ - b.minZ).toFixed(2),
+      };
+    }
+    return {
+      fence:      run({wall: ids.FENCE}),
+      gap:        run({wall: ids.FENCE, gapAt: [4, 0]}),
+      gateShut:   run({wall: ids.FENCE, gateAt: [4, 0], gateId: ids.GATE}),
+      gateOpen:   run({wall: ids.FENCE, gateAt: [4, 0], gateId: ids.GATEOPEN}),
+      stone2:     run({wall: ids.STONE, high: 2}),
+      stone1:     run({wall: ids.STONE, high: 1}),
+      big:        run({wall: ids.FENCE, n: 17, secs: 600}),
+    };
+  }, {PEN});
+  check('a fence pen holds an animal for five minutes with Henry stood outside it',
+        pen.fence.inside,
+        `reached columns ${pen.fence.minCol} to ${pen.fence.maxCol} of a ${pen.fence.n}-wide pen`);
+  /* The control. Without it every check here would pass on an animal that never
+     walked far enough to test anything, and I would not know. */
+  check('and one fence block missing lets it straight out, so the check above can see an escape',
+        !pen.gap.inside,
+        `with a gap it still reached only ${pen.gap.minCol} to ${pen.gap.maxCol}`);
+  check('it uses the whole pen rather than standing in the middle of it',
+        pen.fence.roamed > 4, `roamed ${pen.fence.roamed} blocks across a 7-block yard`);
+  check('a shut gate in the wall holds it too', pen.gateShut.inside,
+        `reached ${pen.gateShut.minCol} to ${pen.gateShut.maxCol}`);
+  /* A gate swings so Henry can walk through it, not so the animals can. If an
+     open gate were a hole, the first thing he did with his own zoo would empty it.
+   */
+  check('and so does an open one - a gate is for Henry, not for the animals',
+        pen.gateOpen.inside, `reached ${pen.gateOpen.minCol} to ${pen.gateOpen.maxCol}`);
+  check('a wall two blocks high still holds, the way it always did',
+        pen.stone2.inside, `reached ${pen.stone2.minCol} to ${pen.stone2.maxCol}`);
+  /* And the reason the fence needed a flag of its own rather than a height: one
+     block of anything else is a step, not a wall. */
+  check('a wall one block high does not, which is why a fence is a flag and not a height',
+        !pen.stone1.inside, 'a one-block stone wall held it in, so the fence flag is doing nothing');
+  check('a seventeen-wide pen holds for ten minutes', pen.big.inside,
+        `reached ${pen.big.minCol} to ${pen.big.maxCol}, roamed ${pen.big.roamed}`);
+  note(`fence pen: roamed ${pen.fence.roamed} blocks over 5 minutes and never left ` +
+       `columns ${pen.fence.minCol}-${pen.fence.maxCol}; with a one-block gap it reached ` +
+       `${pen.gap.minCol} to ${pen.gap.maxCol}`);
+
+  /* The gate is the door's machinery on a one-block block, so the things that
+     went wrong with the door are the things to check here: that it is one block
+     and not two, that opening really clears the way, and that the guard which
+     stops a door being shut on him came along with it. */
+  const gate = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids, out = {};
+    H.loadThemeSeed('meadow', 51);
+    const gy = 24;
+    for (let x = 28; x <= 40; x++) for (let z = 28; z <= 40; z++) {
+      for (let y = gy; y < gy + 6; y++) H.setBlock(x, y, z, ids.AIR);
+      H.setBlock(x, gy - 1, z, ids.PLANKS);
+    }
+    const openIds = [ids.GATEOPEN, ids.GATEOPEN1, ids.GATEOPEN2, ids.GATEOPEN3];
+    const shutIds = [ids.GATE, ids.GATE1, ids.GATE2, ids.GATE3];
+    const isOpen = () => openIds.indexOf(H.getBlock(34, gy, 34)) >= 0;
+
+    H.movePlayer(34.5, gy + 0.05, 36.5);
+    H.setYaw(0);                                     // looking -Z, at the gate
+    H.selectBlock(ids.GATE);
+    H.setBlock(34, gy, 34, H.facingId(ids.GATE));
+    out.placed = {one: shutIds.indexOf(H.getBlock(34, gy, 34)) >= 0,
+                  nothingAbove: H.getBlock(34, gy + 1, 34) === ids.AIR,
+                  facing: H.propFacing(34, gy, 34, H.getBlock(34, gy, 34))};
+    out.shut = {solid: H.isSolidAt(34, gy, 34), canPass: H.boxFree(34.5, gy, 34.5)};
+
+    H.toggleDoor(34, gy, 34);
+    out.open = {isOpen: isOpen(), solid: H.isSolidAt(34, gy, 34),
+                canPass: H.boxFree(34.5, gy, 34.5)};
+
+    H.movePlayer(34.5, gy + 0.05, 34.5);
+    const refused = H.toggleDoor(34, gy, 34);
+    out.onSelf = {handled: refused, stillOpen: isOpen(),
+                  said: document.getElementById('toast').textContent};
+
+    H.movePlayer(34.5, gy + 0.05, 36.5);
+    H.toggleDoor(34, gy, 34);
+    out.shutAgain = {isShut: !isOpen(), solid: H.isSolidAt(34, gy, 34)};
+
+    /* Digging a gate takes the gate. The door clears two cells, and a gate going
+       through the same toggle must not have picked that up as well - it would
+       take a bite out of whatever is above it. */
+    H.setBlock(34, gy + 1, 34, ids.BRICK);
+    H.breakAt(34, gy, 34);
+    out.dug = {gate: H.getBlock(34, gy, 34), above: H.getBlock(34, gy + 1, 34),
+               wantAbove: ids.BRICK};
+
+    /* Open or shut, an animal treats it as fence. This is the flag rather than the
+       walking, which the pen runs above cover. */
+    H.setBlock(34, gy, 34, ids.GATE);
+    out.pennedShut = H.penned(34.5, gy + 1, 34.5);
+    H.setBlock(34, gy, 34, ids.GATEOPEN);
+    out.pennedOpen = H.penned(34.5, gy + 1, 34.5);
+    H.setBlock(34, gy, 34, ids.FENCE);
+    out.pennedFence = H.penned(34.5, gy + 1, 34.5);
+    H.setBlock(34, gy, 34, ids.PLANKS);
+    out.pennedPlanks = H.penned(34.5, gy + 1, 34.5);
+
+    /* A fence reaches out to what it stands next to, so a run of them is a run
+       and not a row of posts. Counted in triangles rather than read off a flag,
+       because what is drawn is the whole question - the first version had rails
+       fixed along Z, which looked right along one wall of a pen and like separate
+       panels along the other two. A post is one box; each side that joins adds
+       two rails. */
+    const wipe = () => {
+      for (let x = 30; x <= 38; x++) for (let z = 30; z <= 38; z++)
+        H.setBlock(x, gy, z, ids.AIR);
+    };
+    wipe();
+    const bare = H.chunkTriangles();
+    H.setBlock(34, gy, 34, ids.FENCE);
+    out.lone = H.chunkTriangles() - bare;
+    H.setBlock(35, gy, 34, ids.FENCE);
+    out.pairX = H.chunkTriangles() - bare;
+    wipe();
+    for (let x = 32; x <= 36; x++) H.setBlock(x, gy, 34, ids.FENCE);
+    out.runX = H.chunkTriangles() - bare;
+    wipe();
+    for (let z = 32; z <= 36; z++) H.setBlock(34, gy, z, ids.FENCE);
+    out.runZ = H.chunkTriangles() - bare;
+    wipe();
+    /* One fence with a wall on one side and a rug on the other: it should meet
+       the wall and ignore the rug, which has nothing at the edge of its cell for
+       a rail to reach. The neighbour's own geometry is measured first and taken
+       off - counting it as part of the fence is what made the first version of
+       this check read 44 triangles for a post and two rails. */
+    H.setBlock(35, gy, 34, ids.PLANKS);
+    const wallOnly = H.chunkTriangles() - bare;
+    H.setBlock(34, gy, 34, ids.FENCE);
+    out.toWall = H.chunkTriangles() - bare - wallOnly;
+    wipe();
+    H.setBlock(33, gy, 34, ids.RUG);
+    const rugOnly = H.chunkTriangles() - bare;
+    H.setBlock(34, gy, 34, ids.FENCE);
+    out.toRug = H.chunkTriangles() - bare - rugOnly;
+    wipe();
+    return out;
+  });
+  check('a gate is one block, not two, and it faces him',
+        gate.placed.one && gate.placed.nothingAbove &&
+        gate.placed.facing[0] === 0 && gate.placed.facing[1] === 1,
+        JSON.stringify(gate.placed));
+  check('shut, he cannot walk through it',
+        gate.shut.solid && !gate.shut.canPass, JSON.stringify(gate.shut));
+  check('open, he can', gate.open.isOpen && !gate.open.solid && gate.open.canPass,
+        JSON.stringify(gate.open));
+  check('and it will not shut on him while he is standing in it',
+        gate.onSelf.handled && gate.onSelf.stillOpen &&
+        /gateway/i.test(gate.onSelf.said), JSON.stringify(gate.onSelf));
+  check('it shuts again behind him', gate.shutAgain.isShut && gate.shutAgain.solid,
+        JSON.stringify(gate.shutAgain));
+  check('digging a gate takes the gate and nothing above it',
+        gate.dug.gate === 0 && gate.dug.above === gate.dug.wantAbove,
+        JSON.stringify(gate.dug));
+  check('a fence and a gate are pens, open or shut; planks are not',
+        gate.pennedShut && gate.pennedOpen && gate.pennedFence && !gate.pennedPlanks,
+        JSON.stringify({shut: gate.pennedShut, open: gate.pennedOpen,
+                        fence: gate.pennedFence, planks: gate.pennedPlanks}));
+  /* A post is 12 triangles; each side that joins adds two rails, so 24 more. */
+  check('a fence on its own is a post', gate.lone === 12, `${gate.lone} triangles`);
+  check('two side by side reach out to each other', gate.pairX === 12 * 2 + 24 * 2,
+        `${gate.pairX} triangles, wanted ${12 * 2 + 24 * 2}`);
+  /* Five in a row: two ends with one arm each, three middles with two - and the
+     same answer along X and along Z, which is the thing the first version got
+     wrong. */
+  check('a run of five joins up, and the same along either axis',
+        gate.runX === 5 * 12 + 8 * 24 && gate.runZ === gate.runX,
+        `along X ${gate.runX}, along Z ${gate.runZ}, wanted ${5 * 12 + 8 * 24}`);
+  check('it meets a wall but not a rug',
+        gate.toWall === 12 + 24 && gate.toRug === 12,
+        `to a wall ${gate.toWall}, to a rug ${gate.toRug}`);
+
+  // ---- 6d: carrying an animal to the pen -----------------------------------
+  console.log('6d. picking an animal up and carrying it');
+  const carry = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadSeed(4242);
+    const px = 20, pz = 20, y = 14;
+    for (let a = -3; a < 14; a++) for (let b = -3; b < 14; b++) {
+      for (let yy = y - 4; yy < y; yy++) H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.GRASS : ids.DIRT);
+      for (let yy = y; yy < y + 6; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+    }
+    H.moveAnimal(0, px + 1.5, pz + 1.5);
+    /* Out of reach first: the button must not offer to pick up an animal on the
+       other side of the field. */
+    H.movePlayer(px + 8.5, y, pz + 8.5);
+    const farOff = H.pickUp();
+    /* Now next to it. */
+    H.movePlayer(px + 2.2, y, pz + 1.5);
+    const gotIt = H.pickUp();
+    const held = H.carrying();
+    const listedHeld = H.animalList()[0].held;
+    /* Carry it right across the clearing. Ten seconds of simulation while it is
+       held: it must not walk out of his arms. */
+    H.movePlayer(px + 10.5, y, pz + 10.5);
+    H.setYaw(0);                                  /* looking down -Z */
+    H.simulate(10);
+    const stillHeld = H.carrying();
+    const wentWalking = Math.hypot(stillHeld.x - (px + 10.5), stillHeld.z - (pz + 10.5)) > 2;
+    /* Put it down in the cell he is looking at, which at yaw 0 is one to -Z. */
+    const putIt = H.putDown();
+    const after = H.animalList()[0];
+    const landed = Math.hypot(after.x - (px + 10.5), after.z - (pz + 9.5)) < 1.2;
+    /* And it is an animal again: not held, back to full size, and walking. */
+    /* Step away first. An animal stands still while he is within a couple of
+       blocks of it - it has come over to see him - so simulating with Henry stood
+       on top of it would have measured that rather than whether it can walk. */
+    H.movePlayer(px + 1.5, y, pz + 1.5);
+    const before = {x: after.x, z: after.z};
+    H.simulate(30);
+    const now = H.animalList()[0];
+    const walking = Math.hypot(now.x - before.x, now.z - before.z) > 0.5;
+    return {farOff, gotIt, held, listedHeld, stillHeld, wentWalking, putIt,
+            after, landed, walking, scale: after.held};
+  });
+  check('an animal across the field cannot be picked up', carry.farOff === false);
+  check('one at arm\'s length can be, and it goes into his arms',
+        carry.gotIt === true && carry.held !== null && carry.listedHeld === true,
+        JSON.stringify(carry.held));
+  check('it stays in his arms while he walks - it does not go back to wandering',
+        carry.stillHeld !== null && carry.wentWalking === false,
+        JSON.stringify(carry.stillHeld));
+  check('putting it down leaves it in front of him, on the ground',
+        carry.putIt === true && carry.landed === true,
+        JSON.stringify(carry.after));
+  check('and it walks about again afterwards, at its own size',
+        carry.walking === true && carry.after.held === false,
+        JSON.stringify(carry.after));
+
+  const refuse = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadSeed(4242);
+    const px = 20, pz = 20, y = 14;
+    for (let a = -3; a < 10; a++) for (let b = -3; b < 10; b++) {
+      for (let yy = y - 4; yy < y; yy++) H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.GRASS : ids.DIRT);
+      for (let yy = y; yy < y + 6; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+    }
+    H.moveAnimal(0, px + 2.5, pz + 2.5);
+    H.movePlayer(px + 3.2, y, pz + 2.5);
+    H.pickUp();
+    const got = H.carrying() !== null;
+    /* A wall right in front of him. There is nowhere to put an animal down, and
+       forcing it would push a cow into a stone block. */
+    H.setYaw(0);
+    for (let h = 0; h < 3; h++) H.setBlock(px + 3, y + h, pz + 1, ids.STONE);
+    const intoWall = H.putDown();
+    const stillHolding = H.carrying() !== null;
+    /* And over water. Same answer, different reason - an animal cannot swim. */
+    for (let h = 0; h < 3; h++) H.setBlock(px + 3, y + h, pz + 1, ids.AIR);
+    for (let yy = y - 4; yy < y; yy++) H.setBlock(px + 3, yy, pz + 1, ids.WATER);
+    const intoWater = H.putDown();
+    const stillHolding2 = H.carrying() !== null;
+    /* Somewhere with room, and it goes down. */
+    for (let yy = y - 4; yy < y; yy++) H.setBlock(px + 3, yy, pz + 1, yy === y - 1 ? ids.GRASS : ids.DIRT);
+    const ok = H.putDown();
+    return {got, intoWall, stillHolding, intoWater, stillHolding2, ok,
+            free: H.carrying() === null};
+  });
+  check('putting one down into a wall is refused, and he keeps hold of it',
+        refuse.got && refuse.intoWall === true && refuse.stillHolding === true);
+  check('and into the water, for the same reason',
+        refuse.intoWater === true && refuse.stillHolding2 === true);
+  check('somewhere with room, it goes down', refuse.ok === true && refuse.free === true);
+
+  /* The bug this feature introduced. A crab keeps to the shore by refusing every
+     step that takes it away from water - which, carried into a pen in the middle
+     of a field, refused every step there was, and the crab stood still for ever.
+     It potters instead when there is no shore to keep to. */
+  const inlandCrab = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadSeed(4242);
+    const px = 20, pz = 20, y = 20;             // high and dry, far above the sea
+    /* Wide enough that the whole of the crab's own eight-block search for water
+       lands on the plateau. A narrower one would leave the sea just in reach and
+       the crab would still have a shore to keep to, which is not this test. */
+    for (let a = -14; a < 24; a++) for (let b = -14; b < 24; b++) {
+      for (let yy = y - 6; yy < y; yy++) H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.GRASS : ids.DIRT);
+      for (let yy = y; yy < y + 6; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+    }
+    const before = H.crabs()[0];
+    if (!before) return null;
+    H.movePlayer(px + 4.5, y, pz + 4.5);
+    /* Stand the crab on the plateau by hand - the same thing carrying it there
+       and putting it down amounts to. */
+    H.moveCrab(0, px + 4.5, pz + 4.5);
+    const placed = H.crabs()[0];
+    const sim = H.simulate(60);
+    return {toWater: placed.toWater, walked: sim.crabWalk[0], after: H.crabs()[0]};
+  });
+  check('a crab carried away from the sea still walks about instead of freezing',
+        inlandCrab !== null && inlandCrab.toWater > 4 && inlandCrab.walked > 5,
+        JSON.stringify(inlandCrab));
+  note(`crab ${inlandCrab.toWater} blocks from any water covered ` +
+       `${inlandCrab.walked} blocks in a minute`);
 
   // ---- 7: fire never spreads ----------------------------------------------
   console.log('7. fire never spreads');
