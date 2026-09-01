@@ -972,6 +972,47 @@ and froze in exactly the same way. A shore is where the land meets the water, no
 anywhere with a view of it: the search now ignores water more than three blocks
 below, and with no shore to keep to a crab simply potters about.
 
+**A zoo has to still be a zoo when you come back to it, and on the other screen.**
+Both of those were broken the day the pen was built, and neither showed up in any
+test, because both tests and pen lived on one device in one sitting.
+
+The first: the animals were spawned from the world seed on every load and were
+saved nowhere, so a pen Henry filled in the evening came back in the morning with
+the fence still standing and the pigs back out in the field. Their positions are
+part of the district record now — animals and crabs, the two kinds he can pick up,
+and not the fish, since a shark swims a circuit worked out at spawn and putting one
+back at a saved coordinate would drop it off its own lap. A record written before
+today has no such field, which reads as "spawn them from the seed" — exactly what
+used to happen, so nothing he has already built loads any differently.
+
+The second was his dad's, in his own words: *"when Henry traps some animals in
+blocks he can only see them. If I go over to the area they are not there."* Every
+device walked its own copy of the animals about, and each copy walked towards the
+player sitting in front of it. Same seed, same spawn, and then straight apart:
+Henry penned three sheep and they were **his** sheep, while his dad's copies were
+out in a field being followed by his dad.
+
+So exactly one connected player moves them and tells everybody else — the keeper.
+It is the longest-standing connection, which needs no election and no agreement,
+and it moves on by itself when that player leaves. Picking an animal up also claims
+the job, because whoever is carrying a pig across a field is obviously the person
+who should be saying where the pig is. Everyone else glides their bodies to the
+positions they are told about, four times a second, the same way the other players
+glide. The room remembers the last set, so the first person in tomorrow starts with
+the herd where it was left rather than where the seed first put it.
+
+None of that changes playing alone, and nothing new is trusted: the positions are
+four numbers each, bounded to the size of a district, with no names, no text and no
+ids in them. Against an older Worker the game gets no keeper at all and falls back
+to every client walking its own copy — worse, but no worse than it was, and better
+than nothing moving.
+
+The check for it is written the way the bug was found: two real browsers in one
+district, one builds a pen and puts three animals and a crab in it, and the other
+is asked what it can see. Turning the sharing off again puts the other screen's
+animals at (7.9, 49), (13.9, 28.6) and (26.6, 55.1) — a pen at 20 to 29 with
+nothing in it, which is the report exactly.
+
 Those three sea creatures came with a change to how *nothing follows him* is
 proved. The
 wandering creatures used to potter about on `Math.random()`. That was safe — a
@@ -1090,8 +1131,9 @@ of creature Henry asked for turns up in every world, that no crab ever stands in
 the water or wanders inland, that no creature at all moves differently when Henry
 moves, that a fenced pen holds an animal for ten minutes while a pen with one
 block missing does not, that a gate holds open or shut, that an animal can be
-picked up and carried and put down again, that fire never spreads, and the control
-layout at phone and desktop sizes.
+picked up and carried and put down again, that a pen he filled still has the
+animals in it after leaving the district and coming back, that fire never spreads,
+and the control layout at phone and desktop sizes.
 
 `node tools/test-portals.js` covers portals: frame detection at every size from
 1×2 to 21×21 in both vertical planes, a specific hint for each wrong shape, and
@@ -1122,8 +1164,10 @@ is the one that gets deployed &mdash; and drives real browser pages against it: 
 clients exchanging edits, a third and fourth arriving to find everything already
 built, eight filling a district and a ninth being turned away, a client dropping
 mid-session and reconnecting without losing a block, a hostile name fed
-straight into the client to prove it never reaches the screen, and the whole of
-[travelling together](#travelling-together). It needs `npm ci` in `server/` first.
+straight into the client to prove it never reaches the screen, one player building
+a pen and putting animals in it while the other is asked what it can see, and the
+whole of [travelling together](#travelling-together). It needs `npm ci` in
+`server/` first.
 
 Two of those checks used to be timing-dependent and went red on a loaded CI runner
 while passing on a quiet laptop, which is worse than either failing or passing

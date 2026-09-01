@@ -3861,6 +3861,10 @@ function spawnAnimals(){
   }
 }
 function updateAnimals(dt){
+  /* Somebody else is moving them. Follow rather than decide - two devices each
+     walking their own copy towards their own player is exactly the bug this
+     replaced, and running both would put the two back in a tug of war. */
+  if(!mpZooMine()){ zooFollow(dt); return; }
   for(var i=0;i<animals.length;i++){
     var a=animals[i];
     if(a.held) continue;                     /* it is in his arms - see carrying */
@@ -4394,6 +4398,9 @@ function spawnCrabs(){
 }
 
 function updateCrabs(dt,t){
+  /* zooFollow does the crabs as well as the animals, so it is called from
+     updateAnimals only - both lists travel in one pass. */
+  if(!mpZooMine()) return;
   for(var i=0;i<crabs.length;i++){
     var c=crabs[i];
     if(c.held) continue;                     /* it is in his arms - see carrying */
@@ -5424,6 +5431,10 @@ function pickUpCreature(){
   c.ref.mesh.scale.setScalar(0.66);
   player.carry=c;
   paintCarryButton();
+  /* Where the animals are is part of the district now, and picking one up is the
+     start of moving it somewhere deliberate. */
+  scheduleSave();
+  mpClaimZoo();
   sfx('place');
   return true;
 }
@@ -5457,6 +5468,7 @@ function putDownCreature(){
   a.mesh.position.set(a.x,a.y,a.z);
   player.carry=null;
   paintCarryButton();
+  scheduleSave();
   sfx('place');
   return true;
 }
@@ -8089,6 +8101,51 @@ function uniqueName(name){
 
 function scheduleSave(){ saveDirty=true; }
 
+/* ---------------- where the animals are ----------------
+   Saved and restored with the district, and shared with the other players. Both
+   of those exist for the same reason: a pen Henry filled has to still have the
+   animals in it - tomorrow, and on his dad's screen.
+
+   Only the animals and the crabs. They are the two kinds he can pick up and put
+   somewhere, so they are the two that can be anywhere other than where the seed
+   put them. The fish cannot be carried, and a shark in particular swims a circuit
+   worked out at spawn - dropping one back at a saved coordinate would put it off
+   its own lap, which is the one thing about the shark that must never wobble. */
+function zooToSave(){
+  function pack(list){
+    return list.map(function(a){
+      return [+a.x.toFixed(2), +a.y.toFixed(2), +a.z.toFixed(2),
+              +(a.yaw!==undefined?a.yaw:a.face).toFixed(2)];
+    });
+  }
+  return {a:pack(animals), c:pack(crabs)};
+}
+/* Stand them where the record says. Indexes line up because the lists are rebuilt
+   from the same seed in the same order every time - and anything the record does
+   not cover is simply left where the seed put it, which is what makes a record
+   written before today load correctly rather than emptying the world. */
+function zooFromSave(z){
+  if(!z || typeof z!=='object') return;
+  function place(list,rows,key){
+    if(!Array.isArray(rows)) return;
+    for(var i=0;i<list.length && i<rows.length;i++){
+      var r=rows[i], a=list[i];
+      if(!Array.isArray(r) || r.length<3) continue;
+      if(!isFinite(r[0])||!isFinite(r[1])||!isFinite(r[2])) continue;
+      /* Clamped into the world it is being loaded into. A record written when a
+         racing district was 64 blocks across is opened at 128 and the other way
+         about, and an animal outside the array is one that never draws again. */
+      a.x=clamp(r[0],2,WX-2); a.z=clamp(r[2],2,WZ-2);
+      a.y=surfaceY(Math.floor(a.x),Math.floor(a.z));
+      if(isFinite(r[3])) a[key]=r[3];
+      a.mesh.position.set(a.x,a.y,a.z);
+      a.mesh.rotation.y=a[key];
+    }
+  }
+  place(animals,z.a,'yaw');
+  place(crabs,z.c,'face');
+}
+
 /* Everything about the current district worth keeping. */
 function snapshot(){
   return {
@@ -8117,6 +8174,12 @@ function snapshot(){
     /* Frames that used to be portals, so a broken one can be lit again and still lead
        where it led. Absent from older records, which reads as none. */
     spent:spentToSave(),
+    /* Where the animals are standing. Without this a zoo is empty by morning: the
+       animals were spawned from the world seed on every load, so a pen Henry
+       filled yesterday came back with the fence still there and the pigs back out
+       in the field. Absent from every record written before today, which reads as
+       "spawn them from the seed", which is exactly what used to happen. */
+    zoo:zooToSave(),
     created:current&&current.created?current.created:null,
     lastPlayed:null            /* stamped by saveCurrent, which has a clock */
   };
@@ -8185,6 +8248,10 @@ function enterDistrict(rec){
   spawnAnimals();
   spawnFish();
   spawnCrabs();
+  /* After the spawn, never instead of it: the spawn is what builds the meshes and
+     gives each animal its kind and its own stream of random numbers. This only
+     moves them to where they were left. */
+  zooFromSave(rec.zoo);
   recountFire();
   if(rec.p && rec.p.length>=3){
     player.x=rec.p[0]; player.y=rec.p[1]; player.z=rec.p[2]; yaw=rec.p[3]||0;
@@ -8507,7 +8574,31 @@ var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
            us it can do; `switching` and `arriving` mark the one arrival that keeps
            the session rather than ending it; `pendingReturn` is a way home waiting
            to be registered with the room he has just walked into. */
-        portalsShared:false, switching:false, arriving:false, pendingReturn:null};
+        portalsShared:false, switching:false, arriving:false, pendingReturn:null,
+        /* Who is walking the animals about. `keeper` is that player's id, or null
+           against a Worker too old to have an opinion - and null means every
+           client walks its own copy, which is what they all did before today.
+           `zooClock` paces how often the keeper says where they got to. */
+        keeper:null, zooShared:false, zooClock:0};
+
+/* Four times a second. Animals amble; they are not karts, and a pig arriving in
+   ten jumps a second would cost eight times the traffic to look no better. The
+   gliding below is what makes four updates a second read as walking. */
+var MP_ZOO=0.25;
+
+/* Am I the one moving the animals? True when playing alone - there is nobody to
+   disagree with - and true in a room whose server is too old to nominate anybody,
+   because everyone doing their own thing is better than nothing moving at all. */
+function mpZooMine(){
+  if(!mp.wanted || !mp.zooShared) return true;
+  return mp.keeper!==null && mp.keeper===mp.me;
+}
+/* "Let me be the one saying where the animals are." Sent when he picks one up:
+   whoever is carrying a pig across a field is plainly the person who should be
+   deciding where that pig is. */
+function mpClaimZoo(){
+  if(mp.wanted && mp.zooShared && mp.keeper!==mp.me) mpSend({type:'keep'});
+}
 
 function mpOn(){ return mp.wanted; }
 function mpSetStatus(s){ mp.status=s; mpPaintPanel(); }
@@ -8890,6 +8981,8 @@ function mpMessage(raw){
   mp.heard=Date.now();          /* proof the socket is alive, whatever this was */
   if(m.type==='pong'){ mp.pongs++; return; }
   if(m.type==='moved'){ mpMoved(m); return; }
+  if(m.type==='keeper'){ mp.keeper=(typeof m.id==='string')?m.id:null; return; }
+  if(m.type==='zoo'){ if(!mpZooMine()) zooApply(m); return; }
   if(m.type==='edited'){ mpRemoteEdit(m); return; }
   if(m.type==='portal'){ mpPortalIn(m.portal); return; }
   if(m.type==='portalOut'){ mpPortalOut(m.key); return; }
@@ -8907,6 +9000,17 @@ function mpWelcome(w){
      tell an old server apart from an old client. Setting it afterwards had the first
      welcome of a session blaming the server for a stale phone. */
   mp.portalsShared=Array.isArray(w.portals);
+  /* Whether this server has an opinion about who moves the animals, asked the same
+     way: by whether it sent the field at all. An older Worker does not, and then
+     every client walks its own copy about - which is what they all did before
+     today, and is better than nothing moving at all. */
+  mp.zooShared=(w.keeper!==undefined);
+  mp.keeper=(typeof w.keeper==='string')?w.keeper:null;
+  /* Where the room last saw the animals. Adopted whoever we turn out to be: if we
+     are the keeper we carry on walking them from there rather than from wherever
+     the seed first put them, and if we are not, we are standing them where the
+     keeper already has them. */
+  if(w.zoo) zooApply(w.zoo);
   mpClearPlayers();
   (w.players||[]).forEach(mpAddPlayer);
   mp.ever=true;
@@ -9515,7 +9619,92 @@ function mpUpdate(dt){
     }
   }
 
+  /* Where the animals got to, from whichever of us is moving them. Its own clock
+     rather than the move clock: four times a second against ten, because a sheep
+     is not a go-kart. */
+  mp.zooClock+=dt;
+  if(mp.zooClock>=MP_ZOO){
+    mp.zooClock=0;
+    if(mp.zooShared && mpZooMine() && (animals.length||crabs.length)){
+      var z=zooToSave();
+      mpSend({type:'zoo', a:z.a, c:z.c});
+    }
+  }
+
   mpStepAvatars(dt);
+}
+
+/* ---------------- following somebody else's animals ----------------
+   The other half of mpZooMine. When somebody else is the keeper this runs
+   instead of updateAnimals and updateCrabs: nothing is decided here, the bodies
+   simply travel towards the last place they were said to be.
+
+   Gliding rather than jumping, for the same reason the other players glide - four
+   updates a second placed straight down reads as a stop-motion animal. A gap too
+   big to be a walk is a put-down or a fresh arrival, so that one is placed. */
+var ZOO_SNAP=6;                    /* blocks: further than an animal walks between updates */
+function zooFollowOne(a,dt,key){
+  if(a.tx===undefined) return false;
+  var dx=a.tx-a.x, dz=a.tz-a.z, dy=a.ty-a.y;
+  var far=Math.sqrt(dx*dx+dz*dz);
+  if(far>ZOO_SNAP){ a.x=a.tx; a.y=a.ty; a.z=a.tz; a[key]=a.tf; return false; }
+  var k=Math.min(1,dt/MP_ZOO);
+  a.x+=dx*k; a.y+=dy*k; a.z+=dz*k;
+  var d=a.tf-a[key];
+  while(d>Math.PI) d-=Math.PI*2;
+  while(d<-Math.PI) d+=Math.PI*2;
+  a[key]+=d*k;
+  return far>0.02;
+}
+function zooFollow(dt){
+  var i,a,moving;
+  for(i=0;i<animals.length;i++){
+    a=animals[i];
+    if(a.held) continue;            /* in somebody's arms - updateCarried has it */
+    moving=zooFollowOne(a,dt,'yaw');
+    if(moving) a.phase+=dt*7;
+    a.mesh.position.set(a.x,a.y,a.z);
+    a.mesh.rotation.y=a.yaw;
+    var sw=moving?Math.sin(a.phase)*0.55:0, legs=a.mesh.userData.legs;
+    legs[0].rotation.x=sw; legs[3].rotation.x=sw;
+    legs[1].rotation.x=-sw; legs[2].rotation.x=-sw;
+  }
+  for(i=0;i<crabs.length;i++){
+    var c=crabs[i];
+    if(c.held) continue;
+    moving=zooFollowOne(c,dt,'face');
+    if(moving) c.phase+=dt*9;
+    c.mesh.position.set(c.x,c.y,c.z);
+    c.mesh.rotation.y=c.face;
+    var cs=moving?Math.sin(c.phase)*0.30:0, cl=c.mesh.userData.legs;
+    for(var q=0;q<cl.length;q++) cl[q].rotation.x=cs*(q%2?-1:1);
+  }
+}
+/* What arrived: the keeper's positions, kept as targets rather than applied, so
+   the gliding above has somewhere to travel to. Indexes line up because every
+   client builds its lists from the same seed in the same order; anything longer
+   than our own list is ignored rather than trusted. */
+function zooApply(m){
+  function take(list,rows,key){
+    if(!Array.isArray(rows)) return;
+    for(var i=0;i<list.length && i<rows.length;i++){
+      var r=rows[i], a=list[i];
+      if(!Array.isArray(r) || r.length<3) continue;
+      if(!isFinite(r[0])||!isFinite(r[1])||!isFinite(r[2])) continue;
+      a.tx=clamp(r[0],0,WX); a.ty=clamp(r[1],0,WY); a.tz=clamp(r[2],0,WZ);
+      a.tf=isFinite(r[3])?r[3]:a[key];
+      /* First word about this one: stand it there rather than gliding it in from
+         wherever the seed happened to put it, which would be a pig walking across
+         the whole district on arrival. */
+      if(a.seen===undefined){
+        a.seen=1; a.x=a.tx; a.y=a.ty; a.z=a.tz; a[key]=a.tf;
+        a.mesh.position.set(a.x,a.y,a.z);
+        a.mesh.rotation.y=a[key];
+      }
+    }
+  }
+  take(animals,m.a,'yaw');
+  take(crabs,m.c,'face');
 }
 
 /* Drawing only, and split out from the sending half so a test can drive it with a
@@ -10175,6 +10364,8 @@ window.__henrycraft={
             scale:+a.mesh.scale.x.toFixed(3)};
   },
   pickUp:pickUpCreature, putDown:putDownCreature, toggleCarry:toggleCarry,
+  zooToSave:zooToSave, zooFromSave:zooFromSave,
+  keeper:function(){ return {shared:mp.zooShared, id:mp.keeper, me:mp.me, mine:mpZooMine()}; },
   penned:penned,
   /* Stand an animal somewhere, so a pen test can put one in the pen without
      driving it there. It is the only way in: nothing else writes an animal's

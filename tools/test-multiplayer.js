@@ -2168,6 +2168,122 @@ function requireNode22() {
       if (pg) { await pg.ctx.close(); pages.splice(pages.indexOf(pg), 1); }
     }
 
+    /* The bug this section exists for, in his dad's words: "when Henry traps some
+       animals in blocks he can only see them. If I go over to the area they are
+       not there."
+
+       Every device used to walk its own copy of the animals about, and each copy
+       walked towards the player sitting in front of it. So Henry penned three
+       sheep and they were his sheep; his dad's copies were out in a field being
+       followed by his dad. Same seed, same spawn, and then straight apart.
+
+       One connected player moves them now and tells everybody else. This is the
+       whole point of that, tested the way it broke: build a pen on one screen, put
+       the animals in it, and look at the other screen. */
+    console.log('\nA pen on one screen is a pen on the other');
+    const zc = code();
+    const Z1 = await newPlayer('Z1');
+    const Z2 = await newPlayer('Z2');
+    await Z1.evaluate(c => window.__henrycraft.mp.join(c), zc);
+    await waitFor(Z1, () => window.__henrycraft.mp.status() === 'sharing');
+    await Z2.evaluate(c => window.__henrycraft.mp.join(c), zc);
+    await waitTogether(Z2);
+    await waitTogether(Z1);
+
+    const keepers = {
+      one: await Z1.evaluate(() => window.__henrycraft.keeper()),
+      two: await Z2.evaluate(() => window.__henrycraft.keeper()),
+    };
+    check('exactly one of the two is moving the animals',
+          keepers.one.shared && keepers.two.shared &&
+          keepers.one.id === keepers.two.id &&
+          keepers.one.mine !== keepers.two.mine,
+          JSON.stringify(keepers));
+    /* Whichever of them it is, the other must not be simulating - that is what
+       "one keeper" means, and running both is the bug. */
+    const follower = keepers.one.mine ? Z2 : Z1;
+    const owner = keepers.one.mine ? Z1 : Z2;
+
+    /* The keeper builds the pen and puts three animals and a crab in it. Blocks
+       travel already; the animals are the new part. */
+    const PEN = await owner.evaluate(async () => {
+      const H = window.__henrycraft, ids = H.ids;
+      const px = 20, pz = 20, y = H.surfaceY(24, 24), n = 9;
+      for (let a = -3; a < n + 3; a++) for (let b = -3; b < n + 3; b++) {
+        for (let yy = y - 4; yy < y; yy++) H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.GRASS : ids.DIRT);
+        for (let yy = y; yy < y + 6; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+      }
+      for (let a = 0; a < n; a++) for (let b = 0; b < n; b++)
+        if (a === 0 || a === n - 1 || b === 0 || b === n - 1) H.setBlock(px + a, y, pz + b, ids.FENCE);
+      H.moveAnimal(0, px + 3.5, pz + 3.5);
+      H.moveAnimal(1, px + 5.5, pz + 4.5);
+      H.moveAnimal(2, px + 4.5, pz + 6.5);
+      H.moveCrab(0, px + 6.5, pz + 6.5);
+      /* Stand well clear, so nothing here is animals walking over to say hello. */
+      H.movePlayer(px + 24, y, pz + 24);
+      return {px, pz, y, n};
+    });
+
+    const inPen = (list, P) => list.every(a =>
+      a.x > P.px && a.x < P.px + P.n - 1 && a.z > P.pz && a.z < P.pz + P.n - 1);
+
+    const sawPen = await waitFor(follower, P => {
+      const H = window.__henrycraft;
+      const a = H.animalList().slice(0, 3), c = H.crabs().slice(0, 1);
+      const ok = v => v.x > P.px && v.x < P.px + P.n - 1 && v.z > P.pz && v.z < P.pz + P.n - 1;
+      return a.every(ok) && c.every(ok);
+    }, PEN, 30000);
+    const onFollower = await follower.evaluate(() => ({
+      a: window.__henrycraft.animalList().slice(0, 3),
+      c: window.__henrycraft.crabs().slice(0, 1),
+    }));
+    check('the animals he penned are in the pen on the other screen too',
+          sawPen && inPen(onFollower.a, PEN) && inPen(onFollower.c, PEN),
+          JSON.stringify(onFollower.a.map(a => [+a.x.toFixed(1), +a.z.toFixed(1)])));
+
+    /* And they are alive on that screen rather than frozen where they landed: the
+       keeper is still walking them, and the follower is still being told. */
+    const zBefore = await follower.evaluate(() => window.__henrycraft.animalList()[0]);
+    await sleep(3000);
+    const zAfter = await follower.evaluate(() => window.__henrycraft.animalList()[0]);
+    const stillPenned = await follower.evaluate(P => {
+      const a = window.__henrycraft.animalList().slice(0, 3);
+      return a.every(v => v.x > P.px && v.x < P.px + P.n - 1 &&
+                          v.z > P.pz && v.z < P.pz + P.n - 1);
+    }, PEN);
+    check('and they keep moving about in it rather than freezing where they landed',
+          Math.hypot(zAfter.x - zBefore.x, zAfter.z - zBefore.z) > 0.05 && stillPenned,
+          `moved ${Math.hypot(zAfter.x - zBefore.x, zAfter.z - zBefore.z).toFixed(2)} blocks, ` +
+          `still in the pen: ${stillPenned}`);
+    note(`a penned animal moved ${Math.hypot(zAfter.x - zBefore.x, zAfter.z - zBefore.z).toFixed(2)} ` +
+         `blocks in three seconds on the screen that is only being told about it`);
+
+    /* Picking one up claims the job, because the person carrying a pig across a
+       field is obviously the person who should be saying where the pig is. */
+    const claimed = await follower.evaluate(async P => {
+      const H = window.__henrycraft;
+      const a = H.animalList()[0];
+      H.movePlayer(a.x + 0.6, a.y, a.z);
+      const got = H.pickUp();
+      await new Promise(r => setTimeout(r, 1200));
+      return {got, keeper: H.keeper()};
+    }, PEN);
+    check('picking an animal up makes you the one who says where the animals are',
+          claimed.got === true && claimed.keeper.mine === true,
+          JSON.stringify(claimed));
+    const yielded = await waitFor(owner, () => window.__henrycraft.keeper().mine === false,
+                                  null, 20000);
+    check('and the other one steps back rather than both moving them at once',
+          yielded, JSON.stringify(await owner.evaluate(() => window.__henrycraft.keeper())));
+
+    /* The keeper leaving must hand the job on, or the animals stand still for
+       ever on every screen that is left. */
+    await follower.evaluate(() => window.__henrycraft.mp.stop());
+    const tookOver = await waitFor(owner, () => window.__henrycraft.keeper().mine === true,
+                                   null, 25000);
+    check('when the one moving them leaves, somebody else takes over',
+          tookOver, JSON.stringify(await owner.evaluate(() => window.__henrycraft.keeper())));
+
     console.log('\nUndeployed and unreachable: the button still cannot break anything');
     const dead = 8799;
     const D = await newPlayer('dead', null, `http://127.0.0.1:${port}/index.html?sync=127.0.0.1:${dead}`);

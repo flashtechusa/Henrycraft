@@ -86,6 +86,39 @@ function safeDistrictName(raw) {
   return /^[A-Z][a-z]{1,11} [A-Z][a-z]{1,11}$/.test(raw) ? raw : null;
 }
 
+/* Where the animals are: two lists of [x, y, z, facing], one per animal and one
+   per crab, in the order the client's own lists are built. Four numbers and
+   nothing else - no names, no text, no ids of any kind, so there is no way to
+   smuggle anything a child would read through the herd.
+
+   Bounded on both counts and on every number. A district is at most 128 blocks
+   across and 40 tall, so anything outside that is a client that has gone wrong or
+   is lying, and either way it is dropped rather than stored and handed on. */
+const ZOO_MAX = 32;
+function safeZooRow(r) {
+  if (!Array.isArray(r) || r.length < 3) return null;
+  const x = num(r[0]), y = num(r[1]), z = num(r[2]), f = num(r[3]);
+  if (x === null || y === null || z === null) return null;
+  if (x < -1 || x > 129 || z < -1 || z > 129 || y < -1 || y > 41) return null;
+  return [x, y, z, f === null ? 0 : f];
+}
+function safeZooList(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const r of v.slice(0, ZOO_MAX)) {
+    const row = safeZooRow(r);
+    if (!row) return null;                 // one bad row spoils the message
+    out.push(row);
+  }
+  return out;
+}
+function safeZoo(msg) {
+  const a = safeZooList(msg.a), c = safeZooList(msg.c);
+  if (a === null || c === null) return null;
+  if (!a.length && !c.length) return null;
+  return {a, c};
+}
+
 /* ---------------- portals ----------------
 
    A portal is the only thing in this game that moves somebody from one district
@@ -153,7 +186,7 @@ export default {
          see under `wrangler dev`, where there is no commit to name. */
       const commit = typeof env.COMMIT === 'string' && env.COMMIT ? env.COMMIT : 'dev';
       return new Response('ok look=1 characters=' + CHARACTER_NAMES.length +
-                          ' portals=1 standings=1 karts=1 reask=1' +
+                          ' portals=1 standings=1 karts=1 reask=1 zoo=1' +
                           ' commit=' + commit.slice(0, 40),
                           {headers: {'content-type': 'text/plain'}});
     }
@@ -183,22 +216,65 @@ export class District {
     this.edits = null;         // Map<"x,y,z", blockId>, loaded lazily
     this.meta = null;          // {seed, starSeed, theme}
     this.portals = null;       // Map<frameKey, {…frame, dest:{code,seed,starSeed,theme}}>
+    /* Where the animals are: {a:[[x,y,z,yaw],…], c:[…]} or null for "never told".
+       Held here rather than worked out, because nothing on this side simulates
+       anything - one of the connected players does the walking and the rest of us,
+       this object included, are told where they got to. See the keeper below. */
+    this.zoo = null;
+    /* Who was last told they were the keeper, and who has claimed it by picking an
+       animal up. Both are plain fields: this object can be evicted between
+       messages, and losing either one only costs a repeated announcement or a
+       fall back to connection order, both of which are correct. */
+    this.lastKeeper = null;
+    this.keeperClaim = null;
     this.persistTimer = null;
     this.nextId = 1;
+  }
+
+  /* Whose animals are the real ones.
+
+     Every device used to walk its own copy of the animals about, and each copy
+     walked towards the player sitting in front of it - so Henry penned three
+     sheep, his dad came over, and the pen was empty. They were his dad's sheep,
+     out in the field where his dad's game had walked them.
+
+     So exactly one connected player moves them and tells everybody else: the
+     keeper. It is the longest-standing connection, which needs no election and no
+     agreement - the roster is in connection order and the first entry wins - and
+     it moves on by itself when that player leaves. Picking an animal up also
+     claims it, because the person carrying a pig somewhere is obviously the person
+     who should be deciding where the pig is. */
+  keeperId(except) {
+    const r = this.roster(except);
+    /* A claim only counts while the claimant is still here. Checked against the
+       live roster rather than trusted, so a player who picked a pig up and then
+       closed the lid cannot leave the animals belonging to nobody. */
+    if (this.keeperClaim && r.some(p => p.id === this.keeperClaim)) return this.keeperClaim;
+    return r.length ? r[0].id : null;
+  }
+  /* Says who it is, but only when that has actually changed - this is called on
+     every arrival and departure, and an unchanged keeper is not news. */
+  announceKeeper(except) {
+    const id = this.keeperId(except);
+    if (id === this.lastKeeper) return;
+    this.lastKeeper = id;
+    this.broadcast({type: 'keeper', id}, except);
   }
 
   async load() {
     if (this.edits) return;
     await this.ctx.blockConcurrencyWhile(async () => {
       if (this.edits) return;
-      const [meta, edits, portals] = await Promise.all([
+      const [meta, edits, portals, zoo] = await Promise.all([
         this.ctx.storage.get('meta'),
         this.ctx.storage.get('edits'),
         this.ctx.storage.get('portals'),
+        this.ctx.storage.get('zoo'),
       ]);
       this.meta = meta || null;
       this.edits = new Map(Object.entries(edits || {}));
       this.portals = new Map(Object.entries(portals || {}));
+      this.zoo = zoo || null;
     });
   }
 
@@ -219,6 +295,10 @@ export class District {
     await this.ctx.storage.put('edits', Object.fromEntries(this.edits));
     if (this.meta) await this.ctx.storage.put('meta', this.meta);
     await this.ctx.storage.put('portals', Object.fromEntries(this.portals));
+    /* So an empty room still knows where the animals were left. Without it the
+       first person back in the morning would be the keeper of a herd that had
+       gone back to wherever the seed first put them. */
+    if (this.zoo) await this.ctx.storage.put('zoo', this.zoo);
   }
 
   async fetch(request) {
@@ -254,9 +334,13 @@ export class District {
       try { ws.send(s); } catch (e) { /* a dead socket is closed below anyway */ }
     }
   }
-  roster() {
+  /* `except` is the socket that is on its way out. webSocketClose still sees it in
+     getWebSockets(), so without this the departing keeper would be re-elected as
+     the keeper and the animals would stand still for ever. */
+  roster(except) {
     const out = [];
     for (const ws of this.ctx.getWebSockets()) {
+      if (ws === except) continue;
       const a = ws.deserializeAttachment();
       if (a && a.id) out.push({id: a.id, name: a.name, colour: a.colour,
                                look: safeLook(a.look)});
@@ -336,8 +420,17 @@ export class District {
         portals: [...this.portals.values()],
         players: this.roster().filter(p => p.id !== id),
         max: MAX_PLAYERS,
+        /* Who is moving the animals, and where they are. A client that gets
+           neither field is talking to an older Worker and falls back to walking
+           its own copy about, which is what every client did until today. */
+        keeper: this.keeperId(),
+        zoo: this.zoo,
       }));
       this.broadcast({type: 'joined', player: {id, name, colour, look}}, ws);
+      /* The joiner may be the first in, and so the keeper. Announced to everyone
+         including them, because "you are the keeper" is exactly what a lone first
+         arrival needs to hear. */
+      this.announceKeeper();
       return;
     }
 
@@ -358,6 +451,32 @@ export class District {
       // Advisory only. Broadcast for drawing and for the standings; never applied to
       // anyone's physics, so a remote player cannot push, trap or move anybody.
       this.broadcast({type: 'moved', id: att.id, x, y, z, yaw: yaw ?? 0, lap, prog, kart}, ws);
+      return;
+    }
+
+    /* Where the animals got to, from the one player who moves them. Anyone else
+       sending this is ignored rather than merged: two clients writing positions
+       for the same pig is exactly the disagreement the keeper exists to end.
+
+       Advisory, like a move: it is drawn, and it is remembered so the next person
+       through the door starts with the animals where they were left. Nothing here
+       touches anybody's blocks or anybody's physics. */
+    if (msg.type === 'zoo') {
+      if (att.id !== this.keeperId()) return;
+      const zoo = safeZoo(msg);
+      if (!zoo) return;
+      this.zoo = zoo;
+      this.schedulePersist();
+      this.broadcast({type: 'zoo', a: zoo.a, c: zoo.c}, ws);
+      return;
+    }
+
+    /* "I have just picked an animal up, so let me be the one saying where the
+       animals are." Nothing else about it: it does not name the animal, and it
+       cannot move anything on its own. */
+    if (msg.type === 'keep') {
+      this.keeperClaim = att.id;
+      this.announceKeeper();
       return;
     }
 
@@ -477,6 +596,11 @@ export class District {
     let att = null;
     try { att = ws.deserializeAttachment(); } catch (e) {}
     if (att && att.id) this.broadcast({type: 'left', id: att.id}, ws);
+    /* If the keeper has gone, somebody else has to start walking the animals or
+       they stand still for ever. The claim goes with them, so the fallback rule -
+       longest-standing connection - takes over again. */
+    if (att && att.id === this.keeperClaim) this.keeperClaim = null;
+    this.announceKeeper(ws);
     this.ctx.waitUntil(this.persist());
   }
 }

@@ -1755,6 +1755,74 @@ function slope(pts) {
   note(`crab ${inlandCrab.toWater} blocks from any water covered ` +
        `${inlandCrab.walked} blocks in a minute`);
 
+  // ---- 6e: the zoo is still there tomorrow ---------------------------------
+  /* The animals used to be spawned from the world seed on every load, so a pen
+     Henry filled in the evening came back in the morning with the fence still
+     standing and the pigs back out in the field. Their positions go in the
+     district record now. Checked by leaving the district and coming back, which
+     is the same code path as closing the tab and opening it again. */
+  console.log('6e. a pen he filled still has the animals in it tomorrow');
+  const kept = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids;
+    H.loadSeed(4242);
+    const px = 20, pz = 20, y = 14, n = 9;
+    for (let a = -3; a < n + 3; a++) for (let b = -3; b < n + 3; b++) {
+      for (let yy = y - 4; yy < y; yy++) H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.GRASS : ids.DIRT);
+      for (let yy = y; yy < y + 6; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+    }
+    for (let a = 0; a < n; a++) for (let b = 0; b < n; b++)
+      if (a === 0 || a === n - 1 || b === 0 || b === n - 1) H.setBlock(px + a, y, pz + b, ids.FENCE);
+    /* Three of them penned, and one crab, so both lists are covered. */
+    H.moveAnimal(0, px + 3.5, pz + 3.5);
+    H.moveAnimal(1, px + 5.5, pz + 4.5);
+    H.moveAnimal(2, px + 4.5, pz + 6.5);
+    H.moveCrab(0, px + 6.5, pz + 6.5);
+    const before = {a: H.animalList().slice(0, 3).map(a => [a.x, a.z]),
+                    c: H.crabs().slice(0, 1).map(c => [c.x, c.z])};
+    await H.saveNow();
+
+    /* Out of the district and back, which is what a reload does to a world. */
+    const other = await H.createDistrict('Zoo Test', 'meadow');
+    const here = H.districts().list.map(d => d.slug).find(s => s !== other);
+    await H.switchDistrict(other);
+    await H.switchDistrict(here);
+
+    const after = {a: H.animalList().slice(0, 3).map(a => [a.x, a.z]),
+                   c: H.crabs().slice(0, 1).map(c => [c.x, c.z])};
+    const inPen = after.a.every(p => p[0] > px && p[0] < px + n - 1 &&
+                                     p[1] > pz && p[1] < pz + n - 1) &&
+                  after.c.every(p => p[0] > px && p[0] < px + n - 1 &&
+                                     p[1] > pz && p[1] < pz + n - 1);
+    const moved = after.a.map((p, i) => Math.hypot(p[0] - before.a[i][0], p[1] - before.a[i][1]));
+    /* And the fence is still standing, so "in the pen" means something. */
+    const fence = H.getBlock(px, y, pz + 4) === ids.FENCE;
+    return {before, after, inPen, moved: Math.max(...moved), fence};
+  });
+  check('the animals come back where they were left, not where the seed put them',
+        kept.inPen && kept.moved < 0.2 && kept.fence,
+        JSON.stringify(kept));
+  note(`three animals and a crab came back within ${kept.moved.toFixed(3)} blocks ` +
+       `of where they were penned`);
+
+  /* The control: a record with no zoo field is every district saved before today,
+     and it has to load rather than come up empty. */
+  const oldRec = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    H.loadSeed(4242);
+    const seeded = H.animalList().map(a => [a.x, a.z]);
+    /* Ask the loader to place from a record that has no zoo in it at all. */
+    H.zooFromSave(undefined);
+    const same = H.animalList().every((a, i) =>
+      Math.abs(a.x - seeded[i][0]) < 1e-9 && Math.abs(a.z - seeded[i][1]) < 1e-9);
+    /* And one that is nonsense, which must be ignored rather than believed. */
+    H.zooFromSave({a: [['x', null, {}], [1]], c: 'nope'});
+    const stillSame = H.animalList().every((a, i) =>
+      Math.abs(a.x - seeded[i][0]) < 1e-9 && Math.abs(a.z - seeded[i][1]) < 1e-9);
+    return {n: seeded.length, same, stillSame};
+  });
+  check('a district saved before today loads with its animals where the seed put them',
+        oldRec.n > 0 && oldRec.same && oldRec.stillSame, JSON.stringify(oldRec));
+
   // ---- 7: fire never spreads ----------------------------------------------
   console.log('7. fire never spreads');
   const fire = await page.evaluate(({secs}) => {
