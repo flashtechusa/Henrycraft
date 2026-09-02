@@ -8579,7 +8579,11 @@ var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
            against a Worker too old to have an opinion - and null means every
            client walks its own copy, which is what they all did before today.
            `zooClock` paces how often the keeper says where they got to. */
-        keeper:null, zooShared:false, zooClock:0};
+        keeper:null, zooShared:false, zooClock:0,
+        /* How many times this device has said where the animals are, and been
+           told. Both should be climbing on somebody in a shared room; a pair of
+           zeroes says the two sides disagree about who is moving them. */
+        zooOut:0, zooIn:0};
 
 /* Four times a second. Animals amble; they are not karts, and a pig arriving in
    ten jumps a second would cost eight times the traffic to look no better. The
@@ -8982,7 +8986,7 @@ function mpMessage(raw){
   if(m.type==='pong'){ mp.pongs++; return; }
   if(m.type==='moved'){ mpMoved(m); return; }
   if(m.type==='keeper'){ mp.keeper=(typeof m.id==='string')?m.id:null; return; }
-  if(m.type==='zoo'){ if(!mpZooMine()) zooApply(m); return; }
+  if(m.type==='zoo'){ mp.zooIn++; if(!mpZooMine()) zooApply(m); return; }
   if(m.type==='edited'){ mpRemoteEdit(m); return; }
   if(m.type==='portal'){ mpPortalIn(m.portal); return; }
   if(m.type==='portalOut'){ mpPortalOut(m.key); return; }
@@ -9146,7 +9150,19 @@ function mpAdoptServerCopy(){
     applyEdits();
     for(var i=0;i<chunks.length;i++) chunks[i].dirty=true;
     rebuildAll();
+    /* Where the animals were, before the respawn below throws them away. Kept
+       only if this is the same world by seed: adopting a genuinely different
+       district makes local animal positions meaningless. */
+    var sameWorld=((w.seed>>>0)===(seed>>>0)), localZoo=sameWorld?zooToSave():null;
     placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); spawnCrabs(); recountFire();
+    /* And put them back. spawnAnimals stands every animal where the world seed
+       first put it, which is right for a district being seen for the first time
+       and quite wrong for one being rejoined: it emptied the pen on the screen of
+       whoever adopted the room's copy - and then, if that player happened to be
+       the one moving the animals, their seeded positions went back up to the room
+       and emptied it for everybody. The room's word first, this device's last
+       memory of the same world second, the seed only if there is neither. */
+    zooApply(w.zoo||localZoo||{});
     resetLaps();
     portals=[]; reindexPortals();
     /* The room's portals go back on straight away, or a district that was adopted
@@ -9627,7 +9643,7 @@ function mpUpdate(dt){
     mp.zooClock=0;
     if(mp.zooShared && mpZooMine() && (animals.length||crabs.length)){
       var z=zooToSave();
-      mpSend({type:'zoo', a:z.a, c:z.c});
+      if(mpSend({type:'zoo', a:z.a, c:z.c})) mp.zooOut++;
     }
   }
 
@@ -10114,7 +10130,6 @@ function frame(){
       paintSitButton();
       /* And the pick-up chip, for the same reason and at the same cost. */
       paintCarryButton();
-      updateCarried();
       if(digHeld){ digTime+=dt; if(digTime>0.23){ digTime=0; dig(); } }
       if(buildHeld){ buildTime+=dt; if(buildTime>0.23){ buildTime=0; build(); } }
       var h=aim();
@@ -10148,6 +10163,13 @@ function frame(){
       henry.rotation.y+=dt*0.35;
       henry.visible=true;
     }
+    /* Whatever is in his arms travels with him. This sat up in the input half of
+       the loop with the button that puts it there, which meant it only ran while
+       the game was actually being played - so on any other screen the animal in
+       his arms stayed where he picked it up, and that was the position the room
+       was being told about. It belongs here, beside the update for every other
+       animal, and before the two that read where they all are. */
+    updateCarried();
     updateAnimals(dt);
     updateFish(dt,now);
     updateCrabs(dt,now);
@@ -10365,7 +10387,8 @@ window.__henrycraft={
   },
   pickUp:pickUpCreature, putDown:putDownCreature, toggleCarry:toggleCarry,
   zooToSave:zooToSave, zooFromSave:zooFromSave,
-  keeper:function(){ return {shared:mp.zooShared, id:mp.keeper, me:mp.me, mine:mpZooMine()}; },
+  keeper:function(){ return {shared:mp.zooShared, id:mp.keeper, me:mp.me, mine:mpZooMine(),
+                             out:mp.zooOut, in:mp.zooIn}; },
   penned:penned,
   /* Stand an animal somewhere, so a pen test can put one in the pen without
      driving it there. It is the only way in: nothing else writes an animal's

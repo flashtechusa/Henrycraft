@@ -204,6 +204,18 @@ function requireNode22() {
     pages.push({label, page, ctx});
     return page;
   }
+  /* Shut a page down when its section is finished with it. Every open page is a
+     software-rasterised voxel world, and by the end of this file there are enough
+     of them that opening one more times out loading the game at all - which is
+     what happened when the zoo sections added four. */
+  async function retire(...ps) {
+    for (const target of ps) {
+      const i = pages.findIndex(r => r.page === target);
+      if (i < 0) continue;
+      try { await pages[i].ctx.close(); } catch (_) {}
+      pages.splice(i, 1);
+    }
+  }
   const waitFor = (page, fn, arg, ms) =>
     page.waitForFunction(fn, arg, {timeout: ms || 20000}).then(() => true).catch(() => false);
   /* "In the same world together" is two facts, and the second one lags: the socket has
@@ -2283,6 +2295,233 @@ function requireNode22() {
                                    null, 25000);
     check('when the one moving them leaves, somebody else takes over',
           tookOver, JSON.stringify(await owner.evaluate(() => window.__henrycraft.keeper())));
+    await retire(Z1, Z2);
+
+    /* "If he picks up an animal I do not see him holding the animal."
+
+       The keeper sends where every animal is, and one in somebody's arms is at
+       that person's chest - so this ought to have followed from the sync alone.
+       It did not, and nothing above would have caught it: the pen checks all look
+       at animals standing on the ground. */
+    console.log('\nSeeing him carry an animal');
+    const cc = code();
+    const C1 = await newPlayer('C1');
+    const C2 = await newPlayer('C2');
+    /* Press Play on both. Everything about carrying happens in the render loop of
+       a game being played, and a page sitting on the title screen is not running
+       it - which is how the first version of this check passed the "he is holding
+       it" line while the animal had not moved an inch. */
+    await C1.click('#playBtn'); await C2.click('#playBtn');
+    await sleep(600);
+    await C1.evaluate(c => window.__henrycraft.mp.join(c), cc);
+    await waitFor(C1, () => window.__henrycraft.mp.status() === 'sharing');
+    await C2.evaluate(c => window.__henrycraft.mp.join(c), cc);
+    await waitTogether(C2);
+    await waitTogether(C1);
+
+    /* The one who is NOT already moving the animals does the carrying, so this
+       covers the handover as well as the drawing. */
+    const c1Keeps = (await C1.evaluate(() => window.__henrycraft.keeper())).mine;
+    const carrier = c1Keeps ? C2 : C1;
+    const watcher = c1Keeps ? C1 : C2;
+
+    /* A small flat pad to put the animal down on, levelled once, up front, and
+       then left alone. Two earlier versions of this got it wrong in opposite
+       directions: one levelled nothing and asked him to set a cow down on a
+       hillside, which the game refuses for good reason; the next levelled a
+       28-block field, which is eleven thousand block edits still draining to the
+       room while the animal's position was trying to reach it. Small, early, and
+       given time to settle. */
+    const PAD = await carrier.evaluate(async () => {
+      const H = window.__henrycraft, ids = H.ids;
+      const fx = 44, fz = 44, fy = H.surfaceY(fx, fz);
+      for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) {
+        for (let yy = fy - 2; yy < fy; yy++) H.setBlock(fx + a, yy, fz + b, yy === fy - 1 ? ids.GRASS : ids.DIRT);
+        for (let yy = fy; yy < fy + 4; yy++) H.setBlock(fx + a, yy, fz + b, ids.AIR);
+      }
+      return {fx, fz, fy};
+    });
+    await sleep(3000);                 // those edits reach the room before anything else
+
+    const lifted = await carrier.evaluate(async () => {
+      const H = window.__henrycraft;
+      const a = H.animalList()[0];
+      H.movePlayer(a.x + 0.6, a.y, a.z);
+      const got = H.pickUp();
+      await new Promise(r => setTimeout(r, 2500));
+      const p = H.player(), held = H.carrying();
+      return {got, held, me: {x: p.x, y: p.y, z: p.z},
+              gap: held ? Math.hypot(held.x - p.x, held.z - p.z) : null,
+              lift: held ? held.y - p.y : null};
+    });
+    /* Off the ground as well as close by. Gap alone passes on an animal he is
+       merely standing next to, which is exactly how this first fooled itself. */
+    check('he is holding it on his own screen',
+          lifted.got === true && lifted.gap < 1 && lifted.lift > 0.2,
+          JSON.stringify(lifted));
+
+    /* And now the whole point: the other screen.
+
+       Waited for rather than slept for. Everything here travels four times a
+       second in a real game, but these pages are software-rasterised voxel worlds
+       drawing well under a frame a second, and that update rides the render loop -
+       so on this machine it goes out about once every two seconds. Fixed sleeps
+       against that raced: the same check passed one run and failed the next, and
+       the run where it "failed" had a perfectly correct animal that simply had not
+       been told about yet. The same trap the avatar glide check fell into.
+
+       Measured against where the carrier actually is, read from his own page,
+       rather than against his avatar here - the avatar sits at the origin until
+       the first move message lands. */
+    const carrierAt = () => carrier.evaluate(() => {
+      const p = window.__henrycraft.player();
+      return {x: p.x, y: p.y, z: p.z};
+    });
+    const nearHim = (page, him, ms) => waitFor(page, h => {
+      const a = window.__henrycraft.animalList()[0];
+      return Math.hypot(a.x - h.x, a.z - h.z) < 1.6 && a.y - h.y > 0.2;
+    }, him, ms || 40000);
+    const animalOn = (page, him) => page.evaluate(h => {
+      const a = window.__henrycraft.animalList()[0];
+      return {a: {x: +a.x.toFixed(2), y: +a.y.toFixed(2), z: +a.z.toFixed(2)},
+              gap: +Math.hypot(a.x - h.x, a.z - h.z).toFixed(2),
+              lift: +(a.y - h.y).toFixed(2)};
+    }, him);
+
+    let him = await carrierAt();
+    const sawArms = await nearHim(watcher, him);
+    const inArms = await animalOn(watcher, him);
+    const sides = {carrier: await carrier.evaluate(() => window.__henrycraft.keeper()),
+                   watcher: await watcher.evaluate(() => window.__henrycraft.keeper())};
+    check('and the other screen draws the animal in his arms, not left on the ground',
+          sawArms && inArms.gap < 1.6 && inArms.lift > 0.2,
+          JSON.stringify(inArms) + ' keepers ' + JSON.stringify(sides));
+
+    /* Walking with it: it has to come too, rather than staying where he picked it
+       up. Onto the pad, which is where it will be set down. */
+    await carrier.evaluate(async P => {
+      window.__henrycraft.movePlayer(P.fx + 0.5, P.fy, P.fz + 0.5);
+      await new Promise(r => setTimeout(r, 800));
+    }, PAD);
+    him = await carrierAt();
+    const followedOk = await nearHim(watcher, him);
+    const followed = await animalOn(watcher, him);
+    check('it travels with him rather than staying where he found it',
+          followedOk && followed.gap < 2.5, JSON.stringify(followed));
+
+    /* Putting it down hands it back, and the other screen sees it standing.
+       Checked that it really went down first: putDown answers the same whether it
+       placed the animal or refused with "no room to put him down", and a refusal
+       leaves it in his arms at exactly the carrying height - which is what an
+       earlier version of this read and reported as a failure to draw it. */
+    const dropped = await carrier.evaluate(async () => {
+      const H = window.__henrycraft;
+      H.setYaw(0);
+      H.putDown();
+      await new Promise(r => setTimeout(r, 600));
+      const p = H.player();
+      return {stillHolding: H.carrying() !== null, me: {x: p.x, y: p.y, z: p.z},
+              said: document.getElementById('toast').textContent};
+    });
+    check('he can actually put it down where he is standing',
+          dropped.stillHolding === false, JSON.stringify(dropped));
+    const settled = await waitFor(watcher, h => {
+      const a = window.__henrycraft.animalList()[0];
+      return a.y - h.y < 0.3;
+    }, dropped.me, 40000);
+    const grounded = await animalOn(watcher, dropped.me);
+    check('and when he puts it down the other screen sees it on the ground again',
+          dropped.stillHolding === false && settled && grounded.lift < 0.3,
+          JSON.stringify(grounded));
+
+    await retire(C1, C2);
+
+    /* "If we make a zoo and leave and come back later all the animals are gone."
+
+       Rejoining a district the room already has takes a different path from the
+       one the pen test above exercises: the room's copy wins and the world is
+       rebuilt from it. Everything above was tested inside one continuous session,
+       so none of it went near this. */
+    console.log('\nComing back to a zoo they made together');
+    const zooCode = code();
+    const RP = await newPlayer('RZ');
+    await RP.click('#playBtn');
+    await RP.evaluate(c => window.__henrycraft.mp.join(c), zooCode);
+    await waitFor(RP, () => window.__henrycraft.mp.status() === 'sharing');
+    const RPEN = await RP.evaluate(async () => {
+      const H = window.__henrycraft, ids = H.ids;
+      const px = 20, pz = 20, y = H.surfaceY(24, 24), n = 9;
+      for (let a = -3; a < n + 3; a++) for (let b = -3; b < n + 3; b++) {
+        for (let yy = y - 4; yy < y; yy++) H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.GRASS : ids.DIRT);
+        for (let yy = y; yy < y + 6; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+      }
+      for (let a = 0; a < n; a++) for (let b = 0; b < n; b++)
+        if (a === 0 || a === n - 1 || b === 0 || b === n - 1) H.setBlock(px + a, y, pz + b, ids.FENCE);
+      H.moveAnimal(0, px + 3.5, pz + 3.5);
+      H.moveAnimal(1, px + 5.5, pz + 4.5);
+      H.moveAnimal(2, px + 4.5, pz + 6.5);
+      H.movePlayer(px + 24, y, pz + 24);
+      await H.saveNow();
+      return {px, pz, y, n};
+    });
+    await sleep(2000);                    // long enough for the room to be told
+    const inRPen = P => v => v.x > P.px && v.x < P.px + P.n - 1 &&
+                             v.z > P.pz && v.z < P.pz + P.n - 1;
+
+    /* Everybody goes home, and comes back tomorrow on a fresh page. */
+    await RP.evaluate(() => window.__henrycraft.mp.stop());
+    await sleep(1200);
+    await RP.reload({waitUntil: 'load'});
+    await RP.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
+                             {timeout: 150000});
+    await RP.click('#playBtn');
+    await RP.evaluate(c => window.__henrycraft.mp.join(c), zooCode);
+    await waitFor(RP, () => window.__henrycraft.mp.status() === 'sharing', null, 45000);
+    await sleep(2500);
+    const back = await RP.evaluate(P => {
+      const H = window.__henrycraft, list = H.animalList();
+      const ok = v => v.x > P.px && v.x < P.px + P.n - 1 && v.z > P.pz && v.z < P.pz + P.n - 1;
+      return {n: list.length, penned: list.filter(ok).length,
+              first: list.slice(0, 3).map(a => [+a.x.toFixed(1), +a.z.toFixed(1)]),
+              fence: H.getBlock(P.px, P.y, P.pz + 4) === H.ids.FENCE};
+    }, RPEN);
+    check('the fence they built is still there when they come back', back.fence,
+          JSON.stringify(back));
+    check('and so are the animals they put in it', back.penned >= 3, JSON.stringify(back));
+
+    /* And the case that actually broke: the other person. He joins by the code
+       with nothing of his own, so the room's copy replaces his world outright -
+       a different path from the one above, and the one that rebuilt the world and
+       stood every animal back where the seed first put it. Worse, if he then
+       turned out to be the one moving them, those seeded positions went back up
+       to the room and emptied the pen for everybody. */
+    const SP = await newPlayer('SZ');
+    await SP.click('#playBtn');
+    await SP.evaluate(c => window.__henrycraft.mp.join(c), zooCode);
+    await waitFor(SP, () => window.__henrycraft.mp.status() === 'sharing', null, 45000);
+    await sleep(3000);
+    const joiner = await SP.evaluate(P => {
+      const H = window.__henrycraft, list = H.animalList();
+      const ok = v => v.x > P.px && v.x < P.px + P.n - 1 && v.z > P.pz && v.z < P.pz + P.n - 1;
+      return {n: list.length, penned: list.filter(ok).length,
+              first: list.slice(0, 3).map(a => [+a.x.toFixed(1), +a.z.toFixed(1)]),
+              fence: H.getBlock(P.px, P.y, P.pz + 4) === H.ids.FENCE,
+              keeper: H.keeper()};
+    }, RPEN);
+    check('somebody joining by the code sees the pen with the animals still in it',
+          joiner.fence && joiner.penned >= 3, JSON.stringify(joiner));
+
+    /* And he has not emptied it for the person who built it. */
+    await sleep(2500);
+    const stillThere = await RP.evaluate(P => {
+      const H = window.__henrycraft, list = H.animalList();
+      const ok = v => v.x > P.px && v.x < P.px + P.n - 1 && v.z > P.pz && v.z < P.pz + P.n - 1;
+      return {penned: list.filter(ok).length,
+              first: list.slice(0, 3).map(a => [+a.x.toFixed(1), +a.z.toFixed(1)])};
+    }, RPEN);
+    check('and his arrival has not emptied it for the one who built it',
+          stillThere.penned >= 3, JSON.stringify(stillThere));
+    await retire(RP, SP);
 
     console.log('\nUndeployed and unreachable: the button still cannot break anything');
     const dead = 8799;

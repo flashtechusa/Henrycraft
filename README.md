@@ -1013,6 +1013,44 @@ is asked what it can see. Turning the sharing off again puts the other screen's
 animals at (7.9, 49), (13.9, 28.6) and (26.6, 55.1) — a pen at 20 to 29 with
 nothing in it, which is the report exactly.
 
+**Two more, reported the next day, and both my fault in the same way: everything
+above was tested inside one continuous session on one device.**
+
+*"If he picks up an animal I do not see him holding the animal."* The code that
+keeps a carried animal in his arms sat in the input half of the render loop,
+beside the button that puts it there. It ran — but only on a screen actively
+being played, and after the position had already gone out over the wire. So what
+the room was told, four times a second, was always the spot he lifted it from. It
+lives with the other animal updates now, and before the two things that read where
+they all are.
+
+*"If we make a zoo and leave and come back later all the animals are gone."*
+Rejoining takes different paths depending on what you have of your own. The person
+who owns the district resyncs, which was fine. The person who joins by the code
+has nothing, so the room's copy replaces their world outright — and that path
+rebuilt the world and stood every animal back where the seed first put it. Worse,
+if that person then turned out to be the keeper, those seeded positions went
+straight back up to the room and emptied the pen for everybody. The rebuild now
+puts the animals back: the room's word first, this device's last memory of the
+same world second, the seed only if there is neither.
+
+My first attempt to reproduce that one **passed**, which is how I found out the
+test was wrong rather than the code being right: it used one player who owned the
+district, and the bug needs a second player arriving with nothing. The check now
+has one.
+
+Two of these checks also had to stop watching the clock. Everything about the
+animals travels four times a second in a real game, but a test page is a
+software-rasterised voxel world drawing well under a frame a second, and that
+update rides the render loop — so on the test machine it goes out about once every
+two seconds. Fixed sleeps raced it: the same check passed one run and failed the
+next, and the run where it "failed" had a perfectly correct animal that simply had
+not been told about yet. They wait for the state now, like the avatar glide check
+that fell into the identical trap. And one of them was passing for the wrong
+reason as well — it measured only how *close* the animal was, and he was standing
+right next to it, so it passed on an animal that had not moved at all. It checks
+the animal is off the ground now.
+
 Those three sea creatures came with a change to how *nothing follows him* is
 proved. The
 wandering creatures used to potter about on `Math.random()`. That was safe — a
@@ -1165,9 +1203,11 @@ clients exchanging edits, a third and fourth arriving to find everything already
 built, eight filling a district and a ninth being turned away, a client dropping
 mid-session and reconnecting without losing a block, a hostile name fed
 straight into the client to prove it never reaches the screen, one player building
-a pen and putting animals in it while the other is asked what it can see, and the
-whole of [travelling together](#travelling-together). It needs `npm ci` in
-`server/` first.
+a pen and putting animals in it while the other is asked what it can see, one
+carrying an animal across a field while the other watches it travel, a zoo left
+overnight and rejoined - by the person who built it and by somebody arriving on
+the code with nothing - and the whole of
+[travelling together](#travelling-together). It needs `npm ci` in `server/` first.
 
 Two of those checks used to be timing-dependent and went red on a loaded CI runner
 while passing on a quiet laptop, which is worse than either failing or passing
