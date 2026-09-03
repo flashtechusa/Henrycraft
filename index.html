@@ -105,6 +105,17 @@ body>canvas{display:block;position:fixed;inset:0}
   display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:min(96vw,900px);
   pointer-events:auto;
 }
+/* The basket: one chip in the HUD rows, holding a little picture of everything in
+   it and what it comes to. The number is the point, and he can read a number. */
+#basketChip{display:flex;align-items:center;gap:7px}
+#basketItems{display:inline-flex;gap:3px;flex-wrap:wrap;max-width:min(60vw,420px)}
+#basketItems .bitem{
+  width:26px;height:26px;border-radius:5px;border:2px solid var(--ink);
+  background-size:100% 100%;image-rendering:pixelated;
+}
+#basketTotal{color:var(--sun);white-space:nowrap}
+/* Driving is not shopping either. */
+#basket.drivinghide{display:none}
 .slot{
   width:58px;height:58px;border-radius:10px;border:3px solid var(--ink);
   background-size:100% 100%;image-rendering:pixelated;
@@ -451,7 +462,7 @@ body.touch #hint{display:none}
 }
 #portalHelp.on{opacity:1}
 #portalHelp small{font-size:12px;font-weight:800;opacity:.9;text-align:center}
-#portalHelpPic,#ideasPic,#ideasFurn,#ideasZoo{
+#portalHelpPic,#ideasPic,#ideasFurn,#ideasZoo,#ideasShop{
   max-width:100%;height:auto;image-rendering:pixelated;
   image-rendering:-moz-crisp-edges;image-rendering:crisp-edges
 }
@@ -578,9 +589,22 @@ body.touch #hint{display:none}
    <div class="hudrow">
     <div class="chip" id="logo">HENRY'S BLOCK</div>
     <div class="chip" id="starChip">⭐ <b><span id="starNum">0</span>/<span id="starTot">10</span></b></div>
+    <!-- His money. Always there, because it is his whether or not there is a shop
+         to spend it in, and nothing in the game can take it off him. -->
+    <div class="chip" id="coinChip">🪙 <b><span id="coinNum">0</span></b></div>
     <div class="chip" id="districtChip">Home</div>
     <!-- Only there while sharing. Tap it for who. -->
     <button class="chip hide" id="peopleChip" title="Who is here">👥 <b><span id="peopleNum">1</span></b></button>
+   </div>
+   <!-- What is in his basket, and what it comes to. Its own row up here rather
+        than above the row of blocks, where the first version put it: the palette
+        is three rows tall on a narrow screen and swallowed it whole. -->
+   <div class="hudrow hide" id="basket">
+    <div class="chip" id="basketChip">
+      <span>🧺</span>
+      <span id="basketItems"></span>
+      <b id="basketTotal">🪙 0</b>
+    </div>
    </div>
    <!-- Both only on a circuit, and only while driving: the lap he is on, the clock for it,
         and the best he has ever done here. The lap he has just finished is said in the toast
@@ -607,6 +631,8 @@ body.touch #hint{display:none}
     <button class="chip icon blockbtn hide" id="sitBtn" title="Sit down">🪑</button>
     <!-- Only when there is an animal within arm's reach, or one already in them. -->
     <button class="chip icon blockbtn hide" id="holdBtn" title="Pick him up">🫳</button>
+    <!-- Only near something to buy, or at the till with a full basket. -->
+    <button class="chip icon blockbtn hide" id="shopBtn" title="Put it in the basket">🛒</button>
     <button class="chip icon blockbtn" id="btnView" title="Change view">🎥</button>
     <button class="chip icon blockbtn" id="btnSound" title="Sound">🔊</button>
     <button class="chip icon blockbtn" id="btnMenu" title="Menu">⚙️</button>
@@ -622,7 +648,7 @@ body.touch #hint{display:none}
       <div id="pickerGrid"></div>
     </div>
   </div>
-  <div id="hint">CLICK TO LOOK · W A S D MOVE · SPACE JUMP · CLICK DIG · RIGHT-CLICK BUILD · Q DIG DOWN · E DIG UP · G PICK UP AN ANIMAL · F FLY (SPACE UP / SHIFT DOWN)</div>
+  <div id="hint">CLICK TO LOOK · W A S D MOVE · SPACE JUMP · CLICK DIG · RIGHT-CLICK BUILD · Q DIG DOWN · E DIG UP · G PICK UP AN ANIMAL · B BASKET · F FLY (SPACE UP / SHIFT DOWN)</div>
 
   <div id="touchUI">
     <div id="stick"><div id="knob"></div></div>
@@ -737,6 +763,15 @@ body.touch #hint{display:none}
       press <b>BUILD</b> on it to swing it open and shut. Then walk up to a pig, a
       sheep, a cow or a crab: when the <b>🫳</b> button appears you can pick it up,
       carry it to the pen and put it down inside.</small>
+    <div class="pickhead">A shop, with a till that pays</div>
+    <canvas id="ideasShop"></canvas>
+    <small>Tap the block button, then <b>For a shop</b>. Build <b>shelves</b> and put
+      food on top of them &mdash; bread, apples, milk, and the cake and cups from
+      <b>For a house</b> all work. Stand at a shelf and the <b>🛒</b> button
+      appears: press it to put that thing in your basket. Then stand at the
+      <b>register</b> and press <b>🧾</b> to ring it all up &mdash; it beeps
+      once for every thing and pays you the total. Every ⭐ you find is worth
+      <b>5 coins</b> too, and nothing in the game can take them off you.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -911,7 +946,19 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
     FENCE=81,
     GATE=82,GATE1=83,GATE2=84,GATE3=85,
     GATEOPEN=86,GATEOPEN1=87,GATEOPEN2=88,GATEOPEN3=89,
-    HAY=90,TROUGH=91;
+    HAY=90,TROUGH=91,
+    /* A shop. Appended once more, so ids 0-91 keep their numbers and every
+       district saved before today still loads.
+
+       He has been building grocery stores and asked for a cash register, money,
+       and shelves with food on them to sell. The shelf and the register both have
+       a front, so both cost four ids; the groceries look the same from every side
+       and cost one each. They are `passable` and sit a sixteenth of a block above
+       whatever they are on, like the plates and the cake - a loaf of bread on a
+       shelf is not something to walk into. */
+    SHELF=92,SHELF1=93,SHELF2=94,SHELF3=95,
+    REGISTER=96,REGISTER1=97,REGISTER2=98,REGISTER3=99,
+    BREAD=100,APPLES=101,MILK=102;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -1057,6 +1104,34 @@ DEFS[FENCE]    ={name:'Fence',  tiles:[74,74,74], prop:'fence', pen:true};
 DEFS[HAY]      ={name:'Hay',    tiles:[77,77,76]};
 DEFS[TROUGH]   ={name:'Trough', tiles:[78,78,78], prop:'trough'};
 
+/* A shop. The shelf and the register are ordinary props with a front; the
+   groceries are the same shape of thing as the cake, a sixteenth of a block of
+   food sitting on top of whatever is under them. */
+[[ 'shelf',    [SHELF,SHELF1,SHELF2,SHELF3],                 'Shelf',    [79,45,79]],
+ [ 'register', [REGISTER,REGISTER1,REGISTER2,REGISTER3],     'Register', [81,81,80]]
+].forEach(function(f){
+  FAMILY[f[0]]=f[1];
+  f[1].forEach(function(id,dir){
+    DEFS[id]={name:f[2], tiles:f[3], prop:f[0], family:f[0], dir:dir};
+  });
+});
+DEFS[BREAD]    ={name:'Bread',  tiles:[82,82,82], prop:'bread',  passable:true};
+DEFS[APPLES]   ={name:'Apples', tiles:[83,83,83], prop:'apples', passable:true};
+DEFS[MILK]     ={name:'Milk',   tiles:[84,84,84], prop:'milk',   passable:true};
+
+/* What things are worth at the till, in coins.
+
+   A price is also what makes something shoppable: the basket looks for blocks
+   that have one, so the food he already had - a cake on a table, a cup, a place
+   setting - can go on a shelf and be rung up too, without any of it needing to
+   know that shops exist. Small numbers on purpose. He is five, and a basket that
+   comes to eleven is a number he can read out. */
+var PRICE={};
+PRICE[BREAD]=2; PRICE[APPLES]=3; PRICE[MILK]=2;
+PRICE[CAKE]=4;  PRICE[CUP]=1;
+PRICE[DINNER]=5; PRICE[DINNER1]=5; PRICE[DINNER2]=5; PRICE[DINNER3]=5;
+PRICE[PLATE]=1;  PRICE[PLATE1]=1;  PRICE[PLATE2]=1;  PRICE[PLATE3]=1;
+
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
              COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
 /* The second drawer. Everything that furnishes a building rather than makes one
@@ -1067,11 +1142,16 @@ var FURNITURE=[FURNACE,BED,TABLE,CHAIR,LAMP,RUG,TV,BATH,SINK,TOILET,TILES,DOOR,
 /* The third drawer, and the same argument again: a fence belongs with the other
    things you build a zoo out of rather than in among the grass and the stone. */
 var ZOO=[FENCE,GATE,HAY,TROUGH];
+/* The fourth drawer. The cake and the cup stay in the house drawer where he
+   already knows to find them - they belong on a table as much as on a shelf, and
+   moving them would take them away from where he has been getting them. */
+var SHOP=[SHELF,REGISTER,BREAD,APPLES,MILK];
 /* What the palette and the picker both show, one group at a time. Icons carry
    the meaning - he cannot read the labels yet. */
 var GROUPS=[{key:'blocks',    label:'Blocks',    icon:'🧱', ids:PALETTE},
             {key:'furniture', label:'For a house', icon:'🛏️', ids:FURNITURE},
-            {key:'zoo',       label:'For a zoo',  icon:'🦁', ids:ZOO}];
+            {key:'zoo',       label:'For a zoo',  icon:'🦁', ids:ZOO},
+            {key:'shop',      label:'For a shop', icon:'🛒', ids:SHOP}];
 var group=0;
 function groupOf(id){
   for(var i=0;i<GROUPS.length;i++) if(GROUPS[i].ids.indexOf(id)>=0) return i;
@@ -1878,6 +1958,59 @@ function buildAtlas(){
     x.fillStyle='#b07f4c'; x.fillRect(0,6,16,2);
     x.fillStyle='#7d5630'; x.fillRect(5,8,1,8); x.fillRect(11,8,1,8);
     x.fillStyle='#3f8fd6'; x.fillRect(1,4,14,3);
+  });
+  /* 79 a shelf unit: two boards on uprights with something on each. Only ever the
+     swatch in the drawer, the ghost's colour and the drawing on the ideas page. */
+  tile(79,function(x,r){
+    fill(x,'#8fbfe0');
+    x.fillStyle='#9a6b3c'; x.fillRect(1,1,2,14); x.fillRect(13,1,2,14);
+    x.fillStyle='#c49a5f'; x.fillRect(1,7,14,2); x.fillRect(1,13,14,2);
+    /* a loaf, an apple and a bottle standing on the boards */
+    x.fillStyle='#c88a4a'; x.fillRect(3,4,4,3);
+    x.fillStyle='#d33f36'; x.fillRect(8,4,3,3);
+    x.fillStyle='#f2f6fb'; x.fillRect(4,10,3,3);
+    x.fillStyle='#5fa83c'; x.fillRect(9,10,3,3);
+  });
+  /* 80 the front of a cash register: a little screen and a keypad */
+  tile(80,function(x,r){
+    fill(x,'#d8dbe0');
+    x.fillStyle='#1b2430'; x.fillRect(2,2,12,5);
+    x.fillStyle='#6fe08a'; x.fillRect(3,3,3,3); x.fillRect(7,3,2,3); x.fillRect(10,3,3,3);
+    x.fillStyle='#b6bac2'; x.fillRect(2,9,12,5);
+    x.fillStyle='#8d919a';
+    for(var a=0;a<3;a++) for(var b=0;b<4;b++) x.fillRect(3+b*3,10+a,2,1);
+  });
+  /* 81 its body, plain shop-counter plastic */
+  tile(81,function(x,r){
+    fill(x,'#cfd3d9');
+    for(var i=0;i<18;i++){
+      var v=r();
+      x.fillStyle = v<.5?'#c4c8ce':'#dadee4';
+      x.fillRect(Math.floor(r()*16),Math.floor(r()*16),2,1);
+    }
+    x.fillStyle='#a9adb5'; x.fillRect(0,15,16,1);
+  });
+  /* 82 a loaf of bread, sliced end on */
+  tile(82,function(x,r){
+    fill(x,'#c2833f');
+    x.fillStyle='#a86a2c'; x.fillRect(0,3,16,1); x.fillRect(0,11,16,1);
+    x.fillStyle='#e8c489'; x.fillRect(2,5,12,5);
+    for(var i=0;i<8;i++){ x.fillStyle='#d8ae72'; x.fillRect(2+Math.floor(r()*12),5+Math.floor(r()*5),2,1); }
+  });
+  /* 83 apples in a punnet */
+  tile(83,function(x,r){
+    fill(x,'#7d5630');
+    x.fillStyle='#d33f36'; x.fillRect(2,4,5,5); x.fillRect(9,4,5,5); x.fillRect(5,9,6,5);
+    x.fillStyle='#ee6a5c'; x.fillRect(3,5,2,2); x.fillRect(10,5,2,2); x.fillRect(6,10,2,2);
+    x.fillStyle='#4f8f3a'; x.fillRect(4,3,1,2); x.fillRect(11,3,1,2);
+  });
+  /* 84 a bottle of milk */
+  tile(84,function(x,r){
+    fill(x,'#8fbfe0');
+    x.fillStyle='#fbfbf7'; x.fillRect(5,4,6,11);
+    x.fillStyle='#e6e9ee'; x.fillRect(5,4,2,11);
+    x.fillStyle='#3f8fd6'; x.fillRect(5,6,6,2);
+    x.fillStyle='#d8d8d0'; x.fillRect(6,1,4,3);
   });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
@@ -2928,6 +3061,8 @@ var PAD=0.03;
 var BED_WOOD=45, BED_SHEET=44, BED_BLANKET=43, BED_PILLOW=46;
 var PALE_WOOD=47, LAMP_SHADE=48, RUG_TILE=49;
 var TV_BODY=53, TV_SCREEN=54, PORCELAIN=55, BATH_WATER=56, DOOR_WOOD=62;
+var REGISTER_BODY=81, REGISTER_SCREEN=80, REGISTER_KEYS=80;
+var BREAD_TILE=82, APPLE_TILE=83, MILK_TILE=84;
 var CHINA=64, SILVER=65, DINNER_FOOD=66, ICING=67, SPONGE=68, CUP_TILE=69;
 /* The four quarter turns, in the order a facing id counts them. Index 0 is +X,
    which is the direction every shape below is written lying along. */
@@ -3051,6 +3186,44 @@ var PROP_SHAPE={
     [3,3,0.5,  16,7,3.5, PALE_WOOD],
     [3,9,0.5,  16,13,3.5, PALE_WOOD],
     [13,3,0.5, 16,13,3.5, PALE_WOOD]
+  ],
+  /* A shelf unit, open towards +X so its back goes against the wall. Two boards
+     on two uprights, and the boards stop short of the front edge so that goods
+     standing on the block above read as being on the shelf rather than floating
+     over the aisle. */
+  shelf:[
+    [0,0,1,   3,16,4,   BED_WOOD],
+    [0,0,12,  3,16,15,  BED_WOOD],
+    [0,0,0,   14,2,16,  PALE_WOOD],
+    [0,7,0,   14,9,16,  PALE_WOOD],
+    [0,14,0,  14,16,16, PALE_WOOD],
+    [0,2,0,   3,7,16,   BED_WOOD]
+  ],
+  /* A cash register on a counter, facing +X so it looks at whoever is paying. The
+     screen carries the glow flag, so it is lit by itself the way the telly's is -
+     which is what makes it read as switched on. */
+  register:[
+    [1,0,1,   15,7,15,  PALE_WOOD],
+    [3,7,3,   13,11,13, TV_BODY],
+    [3.4,11,4, 12,14,12, TV_BODY],
+    [12,11.4,4.4, 12.4,13.6,11.6, REGISTER_SCREEN, 1],
+    [4,11,4,  12,11.4,12, REGISTER_KEYS],
+    [13,2,4,  15,6,12,  REGISTER_BODY]
+  ],
+  /* Groceries. Each one a small thing standing on top of whatever is under it,
+     the same idea as the cake: a sixteenth of a block off the floor so it sits on
+     the shelf board rather than sinking into it. */
+  bread:[
+    [4,1,4,   12,7,12,  BREAD_TILE],
+    [5,7,5,   11,8,11,  BREAD_TILE]
+  ],
+  apples:[
+    [3,1,3,   13,4,13,  APPLE_TILE],
+    [4,4,4,   12,8,12,  APPLE_TILE]
+  ],
+  milk:[
+    [5,1,5,   11,10,11, MILK_TILE],
+    [6.5,10,6.5, 9.5,13,9.5, MILK_TILE]
   ],
   /* A water trough: four sides, a floor and the water, low enough to be furniture
      for a pen rather than another thing in the way. */
@@ -4537,8 +4710,13 @@ function updateStars(dt,t){
       s.done=true; s.mesh.visible=false; starsFound++;
       burst(s.mesh.position,0xffd94a,26);
       sfx('star'); updateStarHud(); scheduleSave();
+      /* Money for a star, which is where the coins in his pocket come from when
+         he has not got a shop yet. His dad's suggestion, and the right one: it
+         gives a reason to go and look that is not just the counter going up. */
+      addCoins(COINS_PER_STAR);
       if(starsFound>=stars.length) setTimeout(showWin,450);
-      else toast('⭐ ' + starsFound + ' of ' + stars.length);
+      else toast('⭐ ' + starsFound + ' of ' + stars.length +
+                 '   \ud83e\ude99 +' + COINS_PER_STAR);
     }
   }
 }
@@ -4729,6 +4907,8 @@ var player={x:WX/2,y:20,z:WZ/2,vx:0,vy:0,vz:0,onGround:false,fly:false,walk:0,fl
             kart:false, seat:null,
             /* {kind, ref} for the animal in his arms, or null - see carrying */
             carry:null,
+            /* Block ids in his shopping basket, in the order he put them in. */
+            basket:[],
             /* drift: seconds held in the current slide, 0 when not drifting. tier: which
                spark colour it has reached, -1 for none yet. boost and star: seconds left
                of each. star makes grass as quick as tarmac - see the speed it picks. */
@@ -5164,6 +5344,8 @@ function paintKartButton(){
      because half of what it lists is digging. Both come straight back when he gets out. */
   var pal=document.getElementById('palette');
   if(pal) pal.classList.toggle('drivinghide',driving);
+  var bsk=document.getElementById('basket');
+  if(bsk) bsk.classList.toggle('drivinghide',driving);
   /* The white cross in the middle goes too. It is an aiming mark for digging and building,
      and from the driving seat there is nothing to aim at - the wireframe box it aims with
      was already taken away. It was the one thing I left behind when everything else went,
@@ -5488,6 +5670,165 @@ function updateCarried(){
   a.mesh.position.set(a.x,a.y,a.z);
   a.mesh.rotation.y=yaw+Math.PI;      /* looking back at him */
 }
+/* ---------------- the shop ----------------
+   Henry has been building grocery stores, and asked for a cash register, money,
+   and shelves with food on them to sell. So: goods are any block with a price,
+   the basket is a list of them, and the register rings the basket up.
+
+   Two decisions in here that are about him being five rather than about shops.
+
+   Taking something off a shelf does not empty the shelf. A shop he has to
+   restock is a shop that runs out, and a five-year-old filling a basket taps the
+   same thing twenty times - which should be twenty apples in the basket, not one
+   apple and then nineteen disappointments. The stock is infinite and the block
+   never changes, which also means nothing about shopping has to travel to
+   anybody else: a shelf is a block, and blocks already travel.
+
+   And the register PAYS him. He is the shopkeeper - that is who a child is when
+   they play shop - so the coins go up when he rings the basket through, and up
+   again for every star he finds. Nothing in this game takes coins off him, which
+   means there is no way to end up at nothing with a full basket and no way
+   forward. If he would rather be the customer and pay, that is one sign flip
+   here and one message. */
+var BASKET_MAX=12;
+var COINS_PER_STAR=5;
+/* Two blocks and a bit: far enough to reach a shelf he is standing in front of,
+   near enough that he is never shopping from the next aisle. */
+var SHOP_REACH=2.4;
+
+function isGoods(id){ return PRICE[id]!==undefined; }
+function priceOf(id){ return PRICE[id]||0; }
+function basketTotal(){
+  var t=0;
+  for(var i=0;i<player.basket.length;i++) t+=priceOf(player.basket[i]);
+  return t;
+}
+/* The nearest thing with a price, within reach, or null. Cells rather than a
+   radius, because goods are blocks: the same shape of search seatNear does. */
+function goodsNear(){
+  var fx=Math.floor(player.x), fy=Math.floor(player.y+0.1), fz=Math.floor(player.z);
+  var best=null, bestD=1e9;
+  for(var dy=2;dy>=-1;dy--){
+    for(var dx=-2;dx<=2;dx++){
+      for(var dz=-2;dz<=2;dz++){
+        var x=fx+dx, y=fy+dy, z=fz+dz;
+        if(!inside(x,y,z)) continue;
+        if(!isGoods(getBlock(x,y,z))) continue;
+        var d=Math.hypot(x+0.5-player.x, z+0.5-player.z);
+        if(d>SHOP_REACH || d>=bestD) continue;
+        bestD=d; best={x:x,y:y,z:z,id:getBlock(x,y,z)};
+      }
+    }
+  }
+  return best;
+}
+/* And the nearest till. Same search, different question. */
+function registerNear(){
+  var fx=Math.floor(player.x), fy=Math.floor(player.y+0.1), fz=Math.floor(player.z);
+  var best=null, bestD=1e9;
+  for(var dy=1;dy>=-1;dy--){
+    for(var dx=-2;dx<=2;dx++){
+      for(var dz=-2;dz<=2;dz++){
+        var x=fx+dx, y=fy+dy, z=fz+dz;
+        if(!inside(x,y,z)) continue;
+        var def=DEFS[getBlock(x,y,z)];
+        if(!def || def.family!=='register') continue;
+        var d=Math.hypot(x+0.5-player.x, z+0.5-player.z);
+        if(d>SHOP_REACH || d>=bestD) continue;
+        bestD=d; best={x:x,y:y,z:z};
+      }
+    }
+  }
+  return best;
+}
+/* What the one button does where he is standing. Checking out wins over picking
+   something up, so walking to the till with a full basket and pressing does what
+   he came to do rather than adding the bag of apples on the counter to it. */
+function shopAction(){
+  if(ringing) return null;
+  if(player.basket.length && registerNear()) return 'ring';
+  if(player.basket.length>=BASKET_MAX) return 'full';
+  return goodsNear()?'take':null;
+}
+function takeGoods(){
+  var g=goodsNear();
+  if(!g) return false;
+  if(player.basket.length>=BASKET_MAX){
+    toast('The basket is full - take it to the till!');
+    return true;
+  }
+  player.basket.push(g.id);
+  /* The shelf keeps its stock. Nothing is set, so nothing is saved and nothing
+     travels: this is the whole reason shopping needs no server at all. */
+  paintBasket();
+  paintShopButton();
+  sfx('place');
+  return true;
+}
+/* Ringing up, one item at a time, because the beeping is the point. Runs on
+   timers rather than in one go so he hears each item and watches the total
+   climb; `ringing` holds the button while it does, so a second press cannot
+   start a second till running over the top of the first. */
+var ringing=null;
+function ringUp(){
+  if(ringing || !player.basket.length) return false;
+  var items=player.basket.slice();
+  player.basket=[];
+  var i=0, running=0;
+  ringing={items:items, at:0, total:0};
+  paintShopButton();
+  function beep(){
+    if(i>=items.length){
+      /* Paid. Into his own pocket, and saved straight away - money he watched go
+         in and then lost would be the meanest bug in the game. */
+      addCoins(running);
+      toast('🪙 ' + running + (running===1?' coin!':' coins!'),2600);
+      ringing=null;
+      paintBasket();
+      paintShopButton();
+      return;
+    }
+    running+=priceOf(items[i]);
+    ringing.at=i+1; ringing.total=running;
+    i++;
+    sfx('star');
+    paintBasket();
+    setTimeout(beep,260);
+  }
+  beep();
+  return true;
+}
+function doShopAction(){
+  var a=shopAction();
+  if(a==='ring') ringUp();
+  else if(a==='take') takeGoods();
+  else if(a==='full') toast('The basket is full - take it to the till!');
+}
+function paintBasket(){
+  var box=document.getElementById('basket');
+  if(!box) return;
+  var list=ringing?ringing.items.slice(ringing.at):player.basket;
+  var total=ringing?ringing.total:basketTotal();
+  box.classList.toggle('hide',!(list.length||ringing));
+  var strip=document.getElementById('basketItems');
+  strip.textContent='';
+  for(var i=0;i<list.length;i++){
+    var d=document.createElement('div');
+    d.className='bitem';
+    d.style.backgroundImage='url('+swatchURL(DEFS[list[i]].tiles[2])+')';
+    strip.appendChild(d);
+  }
+  document.getElementById('basketTotal').textContent='🪙 '+total;
+}
+function paintShopButton(){
+  var b=document.getElementById('shopBtn');
+  if(!b) return;
+  var a=player.kart?null:shopAction();
+  b.classList.toggle('hide',!a);
+  b.textContent=(a==='ring')?'🧾':'🛒';
+  b.title=(a==='ring')?'Ring it up':'Put it in the basket';
+}
+
 function paintCarryButton(){
   var b=document.getElementById('holdBtn');
   if(!b) return;
@@ -6372,6 +6713,7 @@ function showIdeas(){
   paintPortalRecipe(document.getElementById('ideasPic'));
   paintDrawer(document.getElementById('ideasFurn'),FURNITURE);
   paintDrawer(document.getElementById('ideasZoo'),ZOO);
+  paintDrawer(document.getElementById('ideasShop'),SHOP);
   el('ideas').classList.remove('hide');
 }
 
@@ -6710,6 +7052,7 @@ window.addEventListener('keydown',function(e){
   if(e.code==='KeyQ' && playing) digDown();
   if(e.code==='KeyE' && playing) digUp();
   if(e.code==='KeyG' && playing) toggleCarry();   /* G for grab - pick an animal up */
+  if(e.code==='KeyB' && playing) doShopAction();  /* B for basket - shop, and ring up */
   if(e.code==='KeyV') setView(!firstPerson);
   if(e.code==='KeyM') setMuted(!muted);
   var digits={Digit1:0,Digit2:1,Digit3:2,Digit4:3,Digit5:4,Digit6:5,Digit7:6,Digit8:7,Digit9:8,Digit0:9};
@@ -6877,6 +7220,7 @@ el('btnView').addEventListener('click',function(){ setView(!firstPerson); });
 el('kartBtn').addEventListener('click',function(){ toggleKart(); });
 el('sitBtn').addEventListener('click',function(){ toggleSit(); });
 el('holdBtn').addEventListener('click',function(){ toggleCarry(); });
+el('shopBtn').addEventListener('click',function(){ doShopAction(); });
 el('btnSound').addEventListener('click',function(){ setMuted(!muted); });
 
 /* ---------------- overlays ---------------- */
@@ -8180,6 +8524,9 @@ function snapshot(){
        in the field. Absent from every record written before today, which reads as
        "spawn them from the seed", which is exactly what used to happen. */
     zoo:zooToSave(),
+    /* What is in his basket. Absent from every record written before today, which
+       reads as an empty one. */
+    basket:player.basket.slice(),
     created:current&&current.created?current.created:null,
     lastPlayed:null            /* stamped by saveCurrent, which has a clock */
   };
@@ -8252,6 +8599,11 @@ function enterDistrict(rec){
      gives each animal its kind and its own stream of random numbers. This only
      moves them to where they were left. */
   zooFromSave(rec.zoo);
+  /* Only ids this build knows and only ones with a price, so a record written by
+     a newer game cannot put something unshoppable in his basket. */
+  player.basket=(Array.isArray(rec.basket)?rec.basket:[])
+    .filter(function(id){ return isGoods(id); }).slice(0,BASKET_MAX);
+  paintBasket();
   recountFire();
   if(rec.p && rec.p.length>=3){
     player.x=rec.p[0]; player.y=rec.p[1]; player.z=rec.p[2]; yaw=rec.p[3]||0;
@@ -8435,6 +8787,40 @@ var MP_HOST='sync.henrysgame.com';
 var MP_MAX=8;
 var MP_SEND=0.1;                 /* 10 moves a second, as the brief specifies */
 var ME_KEY='henrycraft-me';
+/* His money, kept beside his character rather than inside a district.
+
+   That is on purpose. Coins are HIS, the way the character he plays as is his:
+   he finds a star in one district and the money is still in his pocket in the
+   next, which is what a five-year-old means by "my money". A wallet per district
+   would have him standing in his own shop with nothing to ring up because the
+   stars he found were somewhere else.
+
+   Read at start-up and written when it changes. Nothing in the game subtracts
+   from it - see the shop - so a failed write can only ever lose coins he has not
+   spent, and the next star writes it again. */
+var WALLET_KEY='henrycraft-wallet';
+var wallet=0;
+function paintCoins(){
+  var n=document.getElementById('coinNum');
+  if(n) n.textContent=String(wallet);
+}
+function addCoins(n){
+  n=Math.max(0,Math.round(n||0));
+  if(!n) return;
+  /* Capped where a five-year-old's counting stops caring and a number stops
+     fitting in the chip. There is nothing to spend them on, so this is a cap on
+     the digits rather than on the fun. */
+  wallet=Math.min(999999,wallet+n);
+  paintCoins();
+  writeJSON(WALLET_KEY,{coins:wallet}).catch(function(){});
+}
+function loadWallet(){
+  return readJSON(WALLET_KEY).then(function(rec){
+    var v=rec&&typeof rec.coins==='number'?rec.coins:0;
+    wallet=(isFinite(v)&&v>0)?Math.min(999999,Math.floor(v)):0;
+    paintCoins();
+  }).catch(function(){ paintCoins(); });
+}
 
 /* The client builds names from these and the server validates against the same
    two lists, so a name is never free text at either end. */
@@ -10130,6 +10516,8 @@ function frame(){
       paintSitButton();
       /* And the pick-up chip, for the same reason and at the same cost. */
       paintCarryButton();
+      /* And the shop chip, which follows him down the aisle the same way. */
+      paintShopButton();
       if(digHeld){ digTime+=dt; if(digTime>0.23){ digTime=0; dig(); } }
       if(buildHeld){ buildTime+=dt; if(buildTime>0.23){ buildTime=0; build(); } }
       var h=aim();
@@ -10214,6 +10602,7 @@ function boot(){
     buildDistrictList();
     ready=true;
     applyStoredLook();
+    loadWallet();
     mpDeepLink();
   });
   frame();
@@ -10251,7 +10640,10 @@ window.__henrycraft={
        FENCE:FENCE,
        GATE:GATE,GATE1:GATE1,GATE2:GATE2,GATE3:GATE3,
        GATEOPEN:GATEOPEN,GATEOPEN1:GATEOPEN1,GATEOPEN2:GATEOPEN2,GATEOPEN3:GATEOPEN3,
-       HAY:HAY,TROUGH:TROUGH},
+       HAY:HAY,TROUGH:TROUGH,
+       SHELF:SHELF,SHELF1:SHELF1,SHELF2:SHELF2,SHELF3:SHELF3,
+       REGISTER:REGISTER,REGISTER1:REGISTER1,REGISTER2:REGISTER2,REGISTER3:REGISTER3,
+       BREAD:BREAD,APPLES:APPLES,MILK:MILK},
   FAMILY:FAMILY,
   propFacing:function(x,y,z,id){ return propFacing(x,y,z,id,DEFS[id]); },
   facingId:facingId,
@@ -10386,6 +10778,26 @@ window.__henrycraft={
             scale:+a.mesh.scale.x.toFixed(3)};
   },
   pickUp:pickUpCreature, putDown:putDownCreature, toggleCarry:toggleCarry,
+  /* The shop. `shop()` is what the one button would do where he is standing,
+     which is the whole of its behaviour in one word. */
+  shop:function(){
+    return {action:shopAction(), basket:player.basket.slice(),
+            total:basketTotal(), coins:wallet, ringing:!!ringing,
+            goods:goodsNear(), register:registerNear(),
+            shown:!document.getElementById('shopBtn').classList.contains('hide'),
+            icon:document.getElementById('shopBtn').textContent,
+            strip:document.querySelectorAll('#basketItems .bitem').length,
+            barShown:!document.getElementById('basket').classList.contains('hide')};
+  },
+  doShop:doShopAction, takeGoods:takeGoods, ringUp:ringUp,
+  coins:function(){ return wallet; },
+  /* Which cells he has changed. Used by the shop tests to say that filling a
+     basket changes no blocks at all, which is why none of it needs a server. */
+  edits:function(){ var o={}; for(var k in edits) o[k]=edits[k]; return o; },
+  addCoins:addCoins,
+  price:function(id){ return priceOf(id); },
+  prices:function(){ var o={}; for(var k in PRICE) o[k]=PRICE[k]; return o; },
+  emptyBasket:function(){ player.basket=[]; paintBasket(); paintShopButton(); },
   zooToSave:zooToSave, zooFromSave:zooFromSave,
   keeper:function(){ return {shared:mp.zooShared, id:mp.keeper, me:mp.me, mine:mpZooMine(),
                              out:mp.zooOut, in:mp.zooIn}; },

@@ -139,6 +139,9 @@ function slope(pts) {
     GATE: 82, GATE1: 83, GATE2: 84, GATE3: 85,
     GATEOPEN: 86, GATEOPEN1: 87, GATEOPEN2: 88, GATEOPEN3: 89,
     HAY: 90, TROUGH: 91,
+    SHELF: 92, SHELF1: 93, SHELF2: 94, SHELF3: 95,
+    REGISTER: 96, REGISTER1: 97, REGISTER2: 98, REGISTER3: 99,
+    BREAD: 100, APPLES: 101, MILK: 102,
   };
   const ids = await page.evaluate(() => window.__henrycraft.ids);
   const moved = Object.keys(ID_TABLE).filter(k => ids[k] !== ID_TABLE[k])
@@ -277,10 +280,10 @@ function slope(pts) {
       selAfter: H.selected(), openAfter: H.groups().open,
     };
   });
-  check('there are three drawers: blocks, furniture and the zoo',
-        drawers.keys.join(',') === 'blocks,furniture,zoo', drawers.keys.join(','));
+  check('there are four drawers: blocks, furniture, the zoo and the shop',
+        drawers.keys.join(',') === 'blocks,furniture,zoo,shop', drawers.keys.join(','));
   check('both the palette and the picker carry the tabs',
-        drawers.palTabs.length === 3 && drawers.pickTabs.length === 3,
+        drawers.palTabs.length === 4 && drawers.pickTabs.length === 4,
         `palette ${drawers.palTabs.length}, picker ${drawers.pickTabs.length}`);
   /* Nineteen, written out rather than read back from PALETTE. Comparing the grid
      against PALETTE.length only proves the palette renders what it is given - it
@@ -1822,6 +1825,205 @@ function slope(pts) {
   });
   check('a district saved before today loads with its animals where the seed put them',
         oldRec.n > 0 && oldRec.same && oldRec.stillSame, JSON.stringify(oldRec));
+
+  // ---- 6f: the shop -------------------------------------------------------
+  // Henry has been building grocery stores and asked for a cash register, money,
+  // shelves with food on them, and a basket to fill and take to the till.
+  console.log('6f. filling a basket and ringing it up');
+  const shopSetup = () => ({});
+  const shop = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids, out = {};
+    H.loadSeed(4242);
+    const px = 24, pz = 24, y = 16;
+    for (let a = -2; a < 12; a++) for (let b = -2; b < 12; b++) {
+      for (let yy = y - 3; yy < y; yy++) H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.TILES : ids.STONE);
+      for (let yy = y; yy < y + 7; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+    }
+    /* A run of shelving with one of each thing on it, and a till at the end. */
+    const goods = [ids.BREAD, ids.APPLES, ids.MILK, ids.CAKE, ids.CUP];
+    for (let b = 0; b < goods.length; b++) {
+      H.setBlock(px + 1, y, pz + b, ids.SHELF);
+      H.setBlock(px + 1, y + 1, pz + b, goods[b]);
+    }
+    H.setBlock(px + 5, y, pz + 2, ids.REGISTER2);
+    H.emptyBasket();
+    H.movePlayer(px + 20, y, pz + 20);
+
+    out.wanted = goods.slice();
+    out.prices = goods.map(g => H.price(g));
+    /* Away from the shop there is nothing to press. */
+    out.awayFromShop = H.shop().action;
+
+    /* At each shelf in turn: the button offers to take, and taking fills the
+       basket without touching the shelf. Edits counted either side, because
+       "the shelf never changes" is also what makes shopping need no server. */
+    const editsBefore = Object.keys(H.edits()).length;
+    const shelfBefore = goods.map((_, b) => H.getBlock(px + 1, y + 1, pz + b));
+    const actions = [];
+    for (let b = 0; b < goods.length; b++) {
+      H.movePlayer(px + 2.5, y, pz + b + 0.5);
+      const st = H.shop();
+      actions.push(st.action);
+      H.doShop();
+    }
+    out.actions = actions;
+    out.basket = H.shop().basket;
+    out.total = H.shop().total;
+    out.shelfAfter = goods.map((_, b) => H.getBlock(px + 1, y + 1, pz + b));
+    out.editsUnchanged = Object.keys(H.edits()).length === editsBefore;
+    out.shelfUnchanged = shelfBefore.join(',') === out.shelfAfter.join(',');
+
+    /* The bar shows one picture per thing in the basket. */
+    out.strip = H.shop().strip;
+    out.barShown = H.shop().barShown;
+
+    /* At the till it becomes a checkout rather than another shelf, even though
+       there is a bag of apples on the counter beside it. */
+    H.setBlock(px + 5, y + 1, pz + 2, ids.APPLES);
+    H.movePlayer(px + 4.2, y, pz + 2.5);
+    const atTill = H.shop();
+    out.atTill = {action: atTill.action, icon: atTill.icon, shown: atTill.shown};
+
+    /* Ring it up, and wait for it to finish rather than for a stopwatch: the
+       beeps are on timers, and this page draws well under a frame a second, so
+       a fixed sleep reads a till that is still going and calls it broken. */
+    const coinsBefore = H.coins();
+    const expected = H.shop().total;
+    H.doShop();
+    for (let i = 0; i < 200 && H.shop().ringing; i++) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    out.paid = H.coins() - coinsBefore;
+    out.expected = expected;
+    out.emptyAfter = H.shop().basket.length === 0;
+    out.barGone = H.shop().barShown === false;
+
+    /* The basket has a top. Twenty presses on one shelf is what a five-year-old
+       does, and it must fill up and say so rather than growing for ever. */
+    H.emptyBasket();
+    H.movePlayer(px + 2.5, y, pz + 0.5);
+    for (let i = 0; i < 25; i++) H.doShop();
+    out.capped = H.shop().basket.length;
+    out.cappedSaid = document.getElementById('toast').textContent;
+    H.emptyBasket();
+    return out;
+  });
+  check('away from a shop the button offers nothing',
+        shop.awayFromShop === null, JSON.stringify(shop.awayFromShop));
+  check('at a shelf it offers to put the thing in the basket',
+        shop.actions.every(a => a === 'take'), JSON.stringify(shop.actions));
+  check('the basket fills with what was on the shelves, in order',
+        shop.basket.join(',') === shop.wanted.join(','),
+        `got [${shop.basket}], wanted [${shop.wanted}]`);
+  /* The prices are the point of the total, so they are checked as numbers rather
+     than trusted: bread 2, apples 3, milk 2, cake 4, cup 1 comes to twelve. */
+  check('and the total is the prices added up',
+        shop.total === shop.prices.reduce((a, b) => a + b, 0),
+        `total ${shop.total}, prices [${shop.prices}]`);
+  /* Taking something does not empty the shelf. A shop that runs out is a shop a
+     five-year-old cannot play in, and an unchanged block is also why none of
+     this has to travel to anybody else. */
+  check('the shelves still have their stock, and no block changed',
+        shop.shelfUnchanged && shop.editsUnchanged,
+        JSON.stringify({shelf: shop.shelfAfter, editsUnchanged: shop.editsUnchanged}));
+  check('the basket bar shows one picture per thing in it',
+        shop.barShown === true && shop.strip === shop.wanted.length,
+        `${shop.strip} pictures for ${shop.wanted.length} things`);
+  check('at the till the button becomes a checkout, not another shelf',
+        shop.atTill.action === 'ring' && shop.atTill.shown === true,
+        JSON.stringify(shop.atTill));
+  check('ringing up pays exactly what the basket came to',
+        shop.paid === shop.expected && shop.expected > 0,
+        `paid ${shop.paid}, basket came to ${shop.expected}`);
+  check('and leaves the basket empty and the bar gone',
+        shop.emptyAfter && shop.barGone,
+        JSON.stringify({empty: shop.emptyAfter, barGone: shop.barGone}));
+  check('the basket fills up and says so rather than growing for ever',
+        shop.capped === 12 && /full/i.test(shop.cappedSaid),
+        `${shop.capped} things, said "${shop.cappedSaid}"`);
+  note(`a basket of ${shop.wanted.length} came to ${shop.expected} coins ` +
+       `(${shop.prices.join('+')}) and paid ${shop.paid}`);
+
+  // ---- 6g: the money ------------------------------------------------------
+  console.log('6g. coins, and where they come from');
+  const money = await page.evaluate(async () => {
+    const H = window.__henrycraft, out = {};
+    H.loadSeed(4242);
+    const before = H.coins();
+    /* A star is worth coins. His dad's suggestion, and the reason there are any
+       in his pocket before he has built a shop. */
+    const s = H.stars().find(v => !v.done);
+    H.movePlayer(s.x, s.y, s.z);
+    for (let i = 0; i < 60 && H.starsFound() === 0; i++) {
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    out.found = H.starsFound();
+    out.perStar = H.coins() - before;
+    /* Nothing in the game takes coins away, which is what stops him ending up
+       at nothing with a full basket and no way forward. */
+    const held = H.coins();
+    H.addCoins(-50);
+    out.cannotGoDown = H.coins() === held;
+    H.addCoins(7);
+    out.wentUp = H.coins() === held + 7;
+    return out;
+  });
+  check('a star pays coins', money.found === 1 && money.perStar === 5,
+        JSON.stringify(money));
+  check('and nothing can take coins off him',
+        money.cannotGoDown && money.wentUp, JSON.stringify(money));
+
+  /* Coins are his, not one district's: he finds a star here and the money is
+     still in his pocket over there. Checked across a real district switch and a
+     save, which is the whole reason they live beside his character rather than
+     inside a world record. */
+  const purse = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    H.addCoins(31);
+    const before = H.coins();
+    await H.saveNow();
+    const other = await H.createDistrict('Shop Test', 'meadow');
+    const here = H.districts().list.map(d => d.slug).find(s => s !== other);
+    await H.switchDistrict(other);
+    const away = H.coins();
+    await H.switchDistrict(here);
+    return {before, away, back: H.coins(),
+            stored: JSON.parse(localStorage.getItem('henrycraft-wallet') || 'null')};
+  });
+  check('his coins follow him into another district and back',
+        purse.away === purse.before && purse.back === purse.before && purse.before > 0,
+        JSON.stringify(purse));
+  check('and they are written down under their own key',
+        purse.stored && purse.stored.coins === purse.before, JSON.stringify(purse.stored));
+  /* Carried to the reload check at the very end of this file. Switching district
+     only proves a variable survived a function call - the money still being there
+     tomorrow needs the page to have actually been shut and opened, and doing that
+     here would reset every section after it. */
+  const purseBefore = purse.before;
+
+  /* ---- 6h: his money is still there tomorrow ------------------------------
+     A reload really is the check here. An earlier version asked only whether the
+     coins survived a district switch, which they do whether or not they were
+     ever written down - it passed happily with the wallet never being read at
+     start-up at all, which is the one bug it was supposed to be watching for.
+
+     Every section after this one builds its own world from a seed, so pulling
+     the page out from under them costs nothing; putting it at the end of the
+     file did not work, because by then the page has been closed. */
+  console.log('\n6h. his money is still there when he comes back tomorrow');
+  await page.reload({waitUntil: 'load'});
+  await page.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
+                             {timeout: 150000});
+  await page.waitForTimeout(1200);
+  const tomorrow = await page.evaluate(() => ({
+    coins: window.__henrycraft.coins(),
+    chip: document.getElementById('coinNum').textContent,
+  }));
+  check('the coins he earned are in his pocket after closing the game and opening it',
+        tomorrow.coins === purseBefore && tomorrow.chip === String(purseBefore),
+        `had ${purseBefore}, came back to ${tomorrow.coins} (chip says "${tomorrow.chip}")`);
+  note(`${purseBefore} coins survived a full page reload`);
+
 
   // ---- 7: fire never spreads ----------------------------------------------
   console.log('7. fire never spreads');

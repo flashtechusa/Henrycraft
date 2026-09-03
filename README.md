@@ -1051,6 +1051,55 @@ reason as well — it measured only how *close* the animal was, and he was stand
 right next to it, so it passed on an animal that had not moved at all. It checks
 the animal is off the ground now.
 
+## The shop
+
+Henry has been building grocery stores, and asked for a cash register, money,
+shelves with food on them to sell, a basket to fill, and a way to check out. A
+fourth drawer, **For a shop**, holds a shelf unit, a register, and bread, apples
+and milk. The cake and the cups stay in **For a house**, where he already knows
+to find them &mdash; they belong on a table as much as on a shelf.
+
+Stand at a shelf with something on it and a 🛒 button appears; press it and that
+thing goes in the basket. The basket shows up as a chip in the corner with a
+little picture of everything in it and what it comes to. Stand at the register
+and the button becomes 🧾: press it and the till rings the basket through one
+item at a time, beeping for each, and pays him the total.
+
+**A price is what makes something shoppable.** The basket looks for any block that
+has one, so the food that already existed &mdash; a cake, a cup, a place setting
+&mdash; can go on a shelf and be rung up, without any of it needing to know that
+shops exist. Bread 2, apples 3, milk 2, cup 1, cake 4, dinner 5. Small numbers on
+purpose: a basket that comes to eleven is a number he can read out loud.
+
+Two decisions in there are about him being five rather than about shops.
+
+**Taking something off a shelf does not empty the shelf.** A shop he has to
+restock is a shop that runs out, and a five-year-old filling a basket taps the
+same thing twenty times &mdash; which should be twenty apples, not one apple and
+then nineteen disappointments. The stock is endless and the block never changes,
+which has a second consequence worth having: **nothing about shopping needs the
+server.** A shelf is a block, and blocks already travel; a basket is his own. A
+test asserts that a whole shopping trip changes no blocks at all.
+
+**And the register pays him.** He is the shopkeeper &mdash; that is who a child is
+when they play shop &mdash; so the coins go up when he rings the basket through,
+and up again for every star he finds. Nothing in this game takes coins off him,
+which means there is no way to end up at nothing with a full basket and no way
+forward, which would be a fail state in a game that is not allowed any. If he
+would rather be the customer and pay, that is one sign flip and one message.
+
+**Money is his, not a district's.** Coins live beside the character he plays as
+rather than inside a world, so a star he finds in one district is still in his
+pocket in the next &mdash; which is what a five-year-old means by *my money*. A
+wallet per district would have had him standing in his own shop with nothing to
+ring up because the stars were somewhere else. Five coins a star; ten stars a
+district; and he can always make another district.
+
+The check on that one had to be a real page reload. An earlier version asked only
+whether the coins survived a district switch, which they do whether or not they
+were ever written down: it passed happily with the wallet never being read at
+start-up at all, which was the one bug it existed to catch.
+
 Those three sea creatures came with a change to how *nothing follows him* is
 proved. The
 wandering creatures used to potter about on `Math.random()`. That was safe — a
@@ -1068,8 +1117,8 @@ radian.
 
 **Computer** — `W A S D` walk, mouse looks, click digs, right-click builds,
 `Space` jumps, `Q` digs down, `E` digs up, `G` picks an animal up and puts it
-down, `F` toggles flying (`Space` up, `Shift` down), `1`–`9` pick a block, `V`
-swaps view, `M` mutes, `Esc` pauses.
+down, `B` fills the basket and rings it up, `F` toggles flying (`Space` up,
+`Shift` down), `1`–`9` pick a block, `V` swaps view, `M` mutes, `Esc` pauses.
 
 **Tablet or phone** — left stick walks and turns, buttons on the right dig,
 build, jump and fly. Turn the device sideways.
@@ -1170,8 +1219,10 @@ the water or wanders inland, that no creature at all moves differently when Henr
 moves, that a fenced pen holds an animal for ten minutes while a pen with one
 block missing does not, that a gate holds open or shut, that an animal can be
 picked up and carried and put down again, that a pen he filled still has the
-animals in it after leaving the district and coming back, that fire never spreads,
-and the control layout at phone and desktop sizes.
+animals in it after leaving the district and coming back, that a basket fills from
+the shelves without emptying them and the till pays exactly what it came to, that
+his coins survive a full page reload, that fire never spreads, and the control
+layout at phone and desktop sizes.
 
 `node tools/test-portals.js` covers portals: frame detection at every size from
 1×2 to 21×21 in both vertical planes, a specific hint for each wrong shape, and
