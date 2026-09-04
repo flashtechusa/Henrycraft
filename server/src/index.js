@@ -19,6 +19,7 @@
 const MAX_PLAYERS = 8;
 const MAX_MSG_BYTES = 4096;      // a move is ~60 bytes; an edit ~50
 const EDIT_CAP = 200000;         // a district is 64x40x64, so this is generous
+const STOCK_CAP = 4000;          // shelves in one district; nobody will build this many
 const PORTAL_CAP = 64;           // per district; more than anyone will build
 const PORTAL_MAX_SIDE = 21;      // matches PORTAL_MAX in the game
 const PERSIST_DEBOUNCE_MS = 1000;
@@ -186,7 +187,7 @@ export default {
          see under `wrangler dev`, where there is no commit to name. */
       const commit = typeof env.COMMIT === 'string' && env.COMMIT ? env.COMMIT : 'dev';
       return new Response('ok look=1 characters=' + CHARACTER_NAMES.length +
-                          ' portals=1 standings=1 karts=1 reask=1 zoo=1' +
+                          ' portals=1 standings=1 karts=1 reask=1 zoo=1 stock=1' +
                           ' commit=' + commit.slice(0, 40),
                           {headers: {'content-type': 'text/plain'}});
     }
@@ -221,6 +222,11 @@ export class District {
        anything - one of the connected players does the walking and the rest of us,
        this object included, are told where they got to. See the keeper below. */
     this.zoo = null;
+    /* What is standing on each shelf: "x,y,z" -> a goods id. A second map beside
+       the edits, because it is a second thing about the same cell, and it has to
+       travel for the same reason the blocks do - one of them stocking a shop that
+       the other cannot see is the bug this whole file exists to prevent. */
+    this.stock = null;
     /* Who was last told they were the keeper, and who has claimed it by picking an
        animal up. Both are plain fields: this object can be evicted between
        messages, and losing either one only costs a repeated announcement or a
@@ -265,16 +271,18 @@ export class District {
     if (this.edits) return;
     await this.ctx.blockConcurrencyWhile(async () => {
       if (this.edits) return;
-      const [meta, edits, portals, zoo] = await Promise.all([
+      const [meta, edits, portals, zoo, stock] = await Promise.all([
         this.ctx.storage.get('meta'),
         this.ctx.storage.get('edits'),
         this.ctx.storage.get('portals'),
         this.ctx.storage.get('zoo'),
+        this.ctx.storage.get('stock'),
       ]);
       this.meta = meta || null;
       this.edits = new Map(Object.entries(edits || {}));
       this.portals = new Map(Object.entries(portals || {}));
       this.zoo = zoo || null;
+      this.stock = new Map(Object.entries(stock || {}));
     });
   }
 
@@ -299,6 +307,7 @@ export class District {
        first person back in the morning would be the keeper of a herd that had
        gone back to wherever the seed first put them. */
     if (this.zoo) await this.ctx.storage.put('zoo', this.zoo);
+    await this.ctx.storage.put('stock', Object.fromEntries(this.stock));
   }
 
   async fetch(request) {
@@ -425,6 +434,10 @@ export class District {
            its own copy about, which is what every client did until today. */
         keeper: this.keeperId(),
         zoo: this.zoo,
+        /* What is on the shelves. Always an object, even empty: the client reads
+           its presence to tell a server that can carry shop stock from one that
+           cannot, the same way it does for portals. */
+        stock: Object.fromEntries(this.stock),
       }));
       this.broadcast({type: 'joined', player: {id, name, colour, look}}, ws);
       /* The joiner may be the first in, and so the keeper. Announced to everyone
@@ -477,6 +490,24 @@ export class District {
     if (msg.type === 'keep') {
       this.keeperClaim = att.id;
       this.announceKeeper();
+      return;
+    }
+
+    /* Something put on or taken off a shelf. Same shape as an edit, same cap,
+       same last-write-wins: it is one more fact about one cell. `item` 0 means
+       the shelf is bare. */
+    if (msg.type === 'stock') {
+      const x = msg.x, y = msg.y, z = msg.z, item = msg.item;
+      if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z)) return;
+      if (!Number.isInteger(item) || item < 0 || item > 255) return;
+      const k = x + ',' + y + ',' + z;
+      if (!item) this.stock.delete(k);
+      else {
+        if (!this.stock.has(k) && this.stock.size >= STOCK_CAP) return;
+        this.stock.set(k, item);
+      }
+      this.schedulePersist();
+      this.broadcast({type: 'stocked', x, y, z, item, by: att.id}, ws);
       return;
     }
 

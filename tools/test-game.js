@@ -941,8 +941,11 @@ function slope(pts) {
   check('an open doorway is walked through, not built into',
         door.notReplaced.before && door.notReplaced.after && door.notReplaced.cellFree,
         JSON.stringify(door.notReplaced));
-  check(`a door is 4 boxes open or shut (${door.trisShut}/${door.trisOpen} triangles)`,
-        door.trisShut === 48 && door.trisOpen === 48,
+  /* Six boxes now rather than four: the handle used to be one bar driven straight
+     through the panel, which is two boxes sharing a volume, and it is a knob on
+     each face instead. Three boxes a half, both halves, open or shut. */
+  check(`a door is 6 boxes open or shut (${door.trisShut}/${door.trisOpen} triangles)`,
+        door.trisShut === 72 && door.trisOpen === 72,
         `${door.trisShut} shut, ${door.trisOpen} open`);
   check('digging either half takes the other with it',
         door.dugTop[0] === 0 && door.dugTop[1] === 0 &&
@@ -1826,6 +1829,56 @@ function slope(pts) {
   check('a district saved before today loads with its animals where the seed put them',
         oldRec.n > 0 && oldRec.same && oldRec.stillSame, JSON.stringify(oldRec));
 
+  // ---- 6e2: no prop has two boxes in the same place ------------------------
+  /* Henry could see the shelf flickering. The cause was two boxes sharing a
+     volume - the uprights ran the full height of the block and every board passed
+     through them - and worse, an upright's top face and the top board's top face
+     were both on y=16 over the same patch. Two faces on one plane pointing the
+     same way is what z-fighting is.
+
+     Back to back is fine and must not be flagged, or every prop that stands one
+     box on another fails: the lower box's top points up, the upper box's bottom
+     points down, and the one you cannot see is culled. Same-side is the fault.
+
+     Written as a sweep over every prop rather than a check on the shelf, because
+     the shelf was not the only one. It found nine: the bed's headboard driven
+     through its frame, water sunk into the sink and the toilet sharing their rims,
+     a door handle passing through the door, another sitting wholly inside the open
+     one where nobody could see it, both gates' rails running through their stiles,
+     and the shelf and the register. */
+  console.log('6e2. no prop has two boxes in the same place');
+  const geom = await page.evaluate(() => {
+    const shapes = window.__henrycraft.propShapes();
+    const AX = ['x', 'y', 'z'];
+    const faults = [];
+    let props = 0, boxes = 0, pairs = 0;
+    for (const name of Object.keys(shapes)) {
+      const bs = shapes[name].map(b => ({lo: [b[0], b[1], b[2]], hi: [b[3], b[4], b[5]]}));
+      props++; boxes += bs.length;
+      for (let i = 0; i < bs.length; i++) for (let j = i + 1; j < bs.length; j++) {
+        pairs++;
+        const A = bs[i], B = bs[j];
+        const ov = [0, 1, 2].map(k => Math.min(A.hi[k], B.hi[k]) - Math.max(A.lo[k], B.lo[k]));
+        if (ov[0] > 1e-9 && ov[1] > 1e-9 && ov[2] > 1e-9) {
+          faults.push(`${name}: boxes ${i} and ${j} interpenetrate by ` +
+                      ov.map(v => v.toFixed(2)).join('x'));
+          continue;
+        }
+        for (let k = 0; k < 3; k++) {
+          if (!(ov[(k + 1) % 3] > 1e-9 && ov[(k + 2) % 3] > 1e-9)) continue;
+          if (Math.abs(A.lo[k] - B.lo[k]) < 1e-9)
+            faults.push(`${name}: boxes ${i} and ${j} share a ${AX[k]}-low face at ${A.lo[k]}`);
+          if (Math.abs(A.hi[k] - B.hi[k]) < 1e-9)
+            faults.push(`${name}: boxes ${i} and ${j} share a ${AX[k]}-high face at ${A.hi[k]}`);
+        }
+      }
+    }
+    return {faults, props, boxes, pairs};
+  });
+  check(`no two boxes in any of ${geom.props} props overlap or share a face plane`,
+        geom.faults.length === 0, geom.faults.slice(0, 5).join(' | '));
+  note(`${geom.pairs} pairs of boxes across ${geom.props} props, ${geom.boxes} boxes in all`);
+
   // ---- 6f: the shop -------------------------------------------------------
   // Henry has been building grocery stores and asked for a cash register, money,
   // shelves with food on them, and a basket to fill and take to the till.
@@ -1943,6 +1996,121 @@ function slope(pts) {
         `${shop.capped} things, said "${shop.cappedSaid}"`);
   note(`a basket of ${shop.wanted.length} came to ${shop.expected} coins ` +
        `(${shop.prices.join('+')}) and paid ${shop.paid}`);
+
+  // ---- 6f2: a shelf holds its own goods -----------------------------------
+  /* It looked like three shelves and behaved like one. Goods were ordinary blocks
+     put in the cell ABOVE a shelf, so only the top of a stack could ever hold
+     anything and the tiers below it were decoration - which is exactly what he
+     meant when he said it was broken. A shelf holds its own now: one tier and one
+     thing per block, stacked as high as he likes. */
+  console.log('6f2. a shelf holds its own goods');
+  const shelf = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids, out = {};
+    H.loadSeed(4242);
+    const px = 40, pz = 40, y = 16;
+    for (let a = -2; a < 8; a++) for (let b = -2; b < 8; b++) {
+      for (let yy = y - 3; yy < y; yy++) H.setBlock(px + a, yy, pz + b, ids.STONE);
+      for (let yy = y; yy < y + 8; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+    }
+    H.emptyBasket();
+    /* Three shelves stacked, no gaps between them. */
+    const goods = [ids.BREAD, ids.APPLES, ids.MILK];
+    for (let t = 0; t < 3; t++) H.setBlock(px, y + t, pz, ids.SHELF);
+
+    /* Stocked by aiming at each one with the food selected, which is what he
+       does - not by writing the map from outside. */
+    out.placed = [];
+    for (let t = 0; t < 3; t++) {
+      H.selectBlock(goods[t]);
+      H.movePlayer(px + 1.6, y + t, pz + 0.5);
+      H.setYaw(Math.PI / 2);                       // looking down -X, at the shelf
+      const aimed = H.aiming();
+      H.build();
+      out.placed.push({t, aim: aimed.target, stock: H.stockAt(px, y + t, pz),
+                       above: H.getBlock(px, y + t + 1, pz)});
+    }
+    out.wanted = goods.slice();
+    /* Every tier holds something, and nothing was put in the cell above - which is
+       where it all used to go. */
+    out.everyTier = out.placed.every((p, i) => p.stock === goods[i]);
+    out.stillShelves = [0, 1, 2].every(t => H.getBlock(px, y + t, pz) === ids.SHELF);
+
+    /* Each one is shoppable from where he stands beside it. */
+    out.shopped = [];
+    for (let t = 0; t < 3; t++) {
+      H.emptyBasket();
+      H.movePlayer(px + 1.4, y + t, pz + 0.5);
+      const st = H.shop();
+      H.doShop();
+      out.shopped.push({action: st.action, got: H.shop().basket[0] || 0,
+                        stillStocked: H.stockAt(px, y + t, pz)});
+    }
+    /* Putting something else on swaps it rather than refusing. */
+    H.selectBlock(ids.CAKE);
+    H.movePlayer(px + 1.6, y, pz + 0.5);
+    H.build();
+    out.swapped = H.stockAt(px, y, pz);
+
+    /* Digging the shelf takes what was on it. An invisible tin of beans left at a
+       coordinate would come back the moment another shelf was built there. */
+    H.breakAt(px, y, pz);
+    out.dug = {block: H.getBlock(px, y, pz), stock: H.stockAt(px, y, pz)};
+
+    /* And it survives leaving the district and coming back. */
+    H.setBlock(px, y, pz, ids.SHELF);
+    H.setStock(px, y, pz, ids.MILK);
+    await H.saveNow();
+    const other = await H.createDistrict('Shelf Test', 'meadow');
+    const here = H.districts().list.map(d => d.slug).find(s => s !== other);
+    await H.switchDistrict(other);
+    await H.switchDistrict(here);
+    out.afterSwitch = [0, 1, 2].map(t => H.stockAt(px, y + t, pz));
+    H.emptyBasket();
+    return out;
+  });
+  check('aiming at a shelf with food selected puts it on the shelf',
+        shelf.everyTier && shelf.stillShelves,
+        JSON.stringify(shelf.placed));
+  /* The bug in one line: nothing goes in the cell above any more, so a stack of
+     shelves has no dead tiers in it. */
+  /* Nothing edible went into the cell above. In a stack that cell is the next
+     shelf up, which is the whole point - it used to be the only place goods could
+     go, so only the top of a stack could hold anything. */
+  check('and no food goes in the block above, so every tier of a stack holds something',
+        shelf.placed.every(p => p.above === 0 || p.above === 92),
+        JSON.stringify(shelf.placed.map(p => p.above)));
+  check('every tier can be shopped from', 
+        shelf.shopped.every((p, i) => p.action === 'take' && p.got === shelf.wanted[i]),
+        JSON.stringify(shelf.shopped));
+  /* Still endless: taking from a shelf must not empty it. */
+  check('and taking from a shelf still does not empty it',
+        shelf.shopped.every((p, i) => p.stillStocked === shelf.wanted[i]),
+        JSON.stringify(shelf.shopped.map(p => p.stillStocked)));
+  check('putting something else on a shelf swaps it',
+        shelf.swapped === 79, `stock is ${shelf.swapped}`);
+  check('digging a shelf takes what was on it',
+        shelf.dug.block === 0 && shelf.dug.stock === 0, JSON.stringify(shelf.dug));
+  check('what is on the shelves is still there after leaving and coming back',
+        shelf.afterSwitch[0] === 102 && shelf.afterSwitch[1] === shelf.wanted[1] &&
+        shelf.afterSwitch[2] === shelf.wanted[2],
+        JSON.stringify(shelf.afterSwitch));
+
+  /* The save is v3 now, and a v2 record is one with bare shelves - which is right,
+     because before today a shelf could not hold anything. */
+  const migrate = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    const now = H.snapshot();
+    /* A record as it would have been written yesterday. */
+    const old = JSON.parse(JSON.stringify(now));
+    old.v = 2; delete old.stock;
+    return {v: now.v, hasStock: typeof now.stock === 'object',
+            oldLoads: H.stockFromSave(old.stock) === undefined,
+            afterOld: Object.keys(H.stock()).length};
+  });
+  check('the save says v3 and carries what is on the shelves',
+        migrate.v === 3 && migrate.hasStock, JSON.stringify(migrate));
+  check('and a record from before today loads with its shelves bare',
+        migrate.afterOld === 0, JSON.stringify(migrate));
 
   // ---- 6g: the money ------------------------------------------------------
   console.log('6g. coins, and where they come from');

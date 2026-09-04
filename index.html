@@ -765,13 +765,16 @@ body.touch #hint{display:none}
       carry it to the pen and put it down inside.</small>
     <div class="pickhead">A shop, with a till that pays</div>
     <canvas id="ideasShop"></canvas>
-    <small>Tap the block button, then <b>For a shop</b>. Build <b>shelves</b> and put
-      food on top of them &mdash; bread, apples, milk, and the cake and cups from
-      <b>For a house</b> all work. Stand at a shelf and the <b>🛒</b> button
-      appears: press it to put that thing in your basket. Then stand at the
-      <b>register</b> and press <b>🧾</b> to ring it all up &mdash; it beeps
-      once for every thing and pays you the total. Every ⭐ you find is worth
-      <b>5 coins</b> too, and nothing in the game can take them off you.</small>
+    <small>Tap the block button, then <b>For a shop</b>. Build a <b>shelf</b>, then
+      pick some food &mdash; bread, apples, milk, or the cake and cups from
+      <b>For a house</b> &mdash; and press <b>BUILD</b> on the shelf to put it on.
+      One thing per shelf, and you can change it any time. Stack shelves on top of
+      each other for a tall one; every shelf in the stack holds its own thing.
+      Stand at a shelf and the <b>🛒</b> button appears: press it to put that
+      thing in your basket, as many times as you like &mdash; a shelf never runs
+      out. Then stand at the <b>register</b> and press <b>🧾</b> to ring it
+      all up: it beeps once for every thing and pays you the total. Every ⭐ you
+      find is worth <b>5 coins</b> too, and nothing can take them off you.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -1990,6 +1993,23 @@ function buildAtlas(){
     }
     x.fillStyle='#a9adb5'; x.fillRect(0,15,16,1);
   });
+  /* 85 the keypad: real keys, so the top of the till is not a plain slab */
+  tile(85,function(x,r){
+    fill(x,'#c8ccd3');
+    for(var a=0;a<4;a++) for(var b=0;b<4;b++){
+      x.fillStyle='#eef1f5'; x.fillRect(1+b*4,1+a*4,3,3);
+      x.fillStyle='#9aa0a9'; x.fillRect(1+b*4,3+a*4,3,1);
+    }
+  });
+  /* 86 the screen, lit: a total in green digits on a dark panel */
+  tile(86,function(x,r){
+    fill(x,'#101a24');
+    x.fillStyle='#1a2836'; x.fillRect(1,1,14,14);
+    x.fillStyle='#6fe08a';
+    x.fillRect(3,4,2,7); x.fillRect(3,4,5,2); x.fillRect(6,4,2,7);
+    x.fillRect(9,4,2,7); x.fillRect(9,9,4,2); x.fillRect(11,4,2,7);
+    x.fillStyle='#2f6f45'; x.fillRect(1,13,14,1);
+  });
   /* 82 a loaf of bread, sliced end on */
   tile(82,function(x,r){
     fill(x,'#c2833f');
@@ -2150,6 +2170,22 @@ function swatchURL(tileIdx){
 /* ---------------- block storage ---------------- */
 var blocks=new Uint8Array(WX*WY*WZ);
 var edits={};              // "x,y,z" -> id   (only the player's changes are saved)
+/* What is standing on each shelf: "x,y,z" -> the id of the goods on it, or
+   nothing at all if it is bare.
+
+   A second map beside the edits rather than a second block above the shelf. Goods
+   used to be ordinary blocks placed in the cell overhead, which meant a shelf
+   could only ever hold something if the cell above it was free - so a stack of
+   shelves had one usable tier at the top and the rest were decoration. It looked
+   like three shelves and behaved like one, which is exactly what he was
+   complaining about.
+
+   Kept the same shape as `edits` on purpose: saved with the district, sent to the
+   room the same way, capped the same way. Anything that lives outside that map
+   has to be taught to travel and to be saved separately, and I have already been
+   caught by that twice this week. */
+var stock={};              // "x,y,z" -> goods id
+var STOCK_CAP=4000;        // far more shelves than anybody will build
 var seed=Math.floor(Math.random()*1e9);
 var starSeed=seed;
 
@@ -3061,7 +3097,10 @@ var PAD=0.03;
 var BED_WOOD=45, BED_SHEET=44, BED_BLANKET=43, BED_PILLOW=46;
 var PALE_WOOD=47, LAMP_SHADE=48, RUG_TILE=49;
 var TV_BODY=53, TV_SCREEN=54, PORCELAIN=55, BATH_WATER=56, DOOR_WOOD=62;
-var REGISTER_BODY=81, REGISTER_SCREEN=80, REGISTER_KEYS=80;
+var REGISTER_BODY=81, REGISTER_SCREEN=86, REGISTER_KEYS=85;
+/* The top of a shelf's board, in sixteenths. The shape and the mesher both read
+   it, so a taller board cannot leave the stock hovering. */
+var SHELF_BOARD=2;
 var BREAD_TILE=82, APPLE_TILE=83, MILK_TILE=84;
 var CHINA=64, SILVER=65, DINNER_FOOD=66, ICING=67, SPONGE=68, CUP_TILE=69;
 /* The four quarter turns, in the order a facing id counts them. Index 0 is +X,
@@ -3084,7 +3123,10 @@ var PROP_SHAPE={
     [0,7,1,   14,11,15, BED_SHEET],
     [0,11,1,  7,12.5,15, BED_BLANKET],
     [7,11,2,  13,14,14, BED_PILLOW],
-    [14,4,0,  16,16,16, BED_WOOD]
+    /* From the top of the frame, not from inside it. It used to start at y4 and
+       pass straight through - hidden, being the same wood, but two boxes sharing
+       a volume is the thing that flickers when it is not. */
+    [14,7,0,  16,16,16, BED_WOOD]
   ],
   /* a table: a top on four legs, and nothing points anywhere */
   table:[
@@ -3137,8 +3179,11 @@ var PROP_SHAPE={
   sink:[
     [4,0,5,   9,9,11,   PORCELAIN],
     [2,9,3,   12,13,13, PORCELAIN],
-    [3.5,12.6,4.5, 10.5,13,11.5, BATH_WATER],
-    [2,13,7,  4,16,9,   TV_BODY]
+    /* On the basin, not in it. Sunk into the top it shared a plane with it, and
+       two top faces at the same height fight - which is the bath's trick done
+       wrong, since the bath's water sits between its walls and on its floor. */
+    [3.5,13,4.5, 10.5,13.4,11.5, BATH_WATER],
+    [2,13,7,  3.5,16,9, TV_BODY]
   ],
   /* A door, shut, filling the doorway and facing +X. The hinge is the -Z edge.
      Open is the same panel swung a quarter turn about that hinge, so it lies along
@@ -3147,11 +3192,18 @@ var PROP_SHAPE={
      both rooms rather than from one. */
   door:[
     [13,0,0,   16,16,16, DOOR_WOOD],
-    [12.4,7,12, 16.6,9,14, DOOR_WOOD]
+    /* A knob on each face rather than one bar driven through the panel. The bar
+       read the same and was three boxes' worth of overlap; these butt against the
+       panel's own faces at 13 and 16. */
+    [12.4,7,12, 13,9,14,  DOOR_WOOD],
+    [16,7,12,   16.6,9,14, DOOR_WOOD]
   ],
   doorOpen:[
     [0,0,0,    16,16,3,  DOOR_WOOD],
-    [1,7,0.4,  3,9,2.6,  DOOR_WOOD]
+    /* And the same handle on the swung panel. It used to sit wholly inside it,
+       which is not a z-fight but is worse: a handle nobody can see. */
+    [1,7,-0.6, 3,9,0,    DOOR_WOOD],
+    [1,7,3,    3,9,3.6,  DOOR_WOOD]
   ],
   /* The top half draws whatever the bottom half is doing - see propMesh. */
   doorTop:[],
@@ -3175,40 +3227,60 @@ var PROP_SHAPE={
      the thing that stands out in a long run of it. */
   gate:[
     [6,0,0,    10,16,3,  BED_WOOD],
-    [6.5,3,3,  9.5,7,16, PALE_WOOD],
-    [6.5,9,3,  9.5,13,16, PALE_WOOD],
+    /* The rails run from the hinge post to the far stile and stop there. They
+       used to run the whole way and the stile stood on top of them, which is two
+       boxes in one place. */
+    [6.5,3,3,  9.5,7,13,  PALE_WOOD],
+    [6.5,9,3,  9.5,13,13, PALE_WOOD],
     [6.5,3,13, 9.5,13,16, PALE_WOOD]
   ],
   /* Open is the same gate swung a quarter turn about that hinge, so it lies along
      -Z beside the post instead of across the way through. */
   gateOpen:[
     [6,0,0,    10,16,3,  BED_WOOD],
-    [3,3,0.5,  16,7,3.5, PALE_WOOD],
-    [3,9,0.5,  16,13,3.5, PALE_WOOD],
-    [13,3,0.5, 16,13,3.5, PALE_WOOD]
+    /* Swung round beside the post: the rails start at the post's own face rather
+       than running back through it, and stop at the stile. */
+    [10,3,0.5,  15,7,2.5,  PALE_WOOD],
+    [10,9,0.5,  15,13,2.5, PALE_WOOD],
+    [15,3,0.5,  16,13,2.5, PALE_WOOD]
   ],
-  /* A shelf unit, open towards +X so its back goes against the wall. Two boards
-     on two uprights, and the boards stop short of the front edge so that goods
-     standing on the block above read as being on the shelf rather than floating
-     over the aisle. */
+  /* One shelf, open towards +X so its back goes against the wall: a board across
+     the bottom, a back panel and two sides. Whatever it is stocked with stands on
+     that board - see SHELF_BOARD and propMesh.
+
+     Three boards in one block was the first go and it was wrong twice over. The
+     uprights ran the full height and every board passed through them, which put
+     an upright's top face and the top board's top face both on y=16 over the same
+     three-by-three patch - the flicker he could see. And it looked like three
+     shelves while behaving like one, because goods went in the block above, so
+     only the top one could ever hold anything. One tier a block, stacked as high
+     as he likes, and every tier holds something. */
   shelf:[
-    [0,0,1,   3,16,4,   BED_WOOD],
-    [0,0,12,  3,16,15,  BED_WOOD],
-    [0,0,0,   14,2,16,  PALE_WOOD],
-    [0,7,0,   14,9,16,  PALE_WOOD],
-    [0,14,0,  14,16,16, PALE_WOOD],
-    [0,2,0,   3,7,16,   BED_WOOD]
+    [0,0,0,   16,2,16,  PALE_WOOD],
+    [0,2,0,   2,16,16,  BED_WOOD],
+    [2,2,0,   16,16,2,  BED_WOOD],
+    [2,2,14,  16,16,16, BED_WOOD]
   ],
-  /* A cash register on a counter, facing +X so it looks at whoever is paying. The
-     screen carries the glow flag, so it is lit by itself the way the telly's is -
-     which is what makes it read as switched on. */
+  /* A cash register, facing +X so it looks at whoever is paying, and nothing but
+     a register: a dark body with the till drawer and its handle across the front,
+     a pale keypad stepped down towards him so it reads as sloped, and the screen
+     up on a short neck at the back, leaning forward, lit by itself the way the
+     telly's is.
+
+     It used to carry its own counter - a box filling the bottom seven sixteenths
+     of the block - which is why it looked stubby on the ground and why putting one
+     on a table gave you a counter on a table. A register is a register; what it
+     stands on is whatever he stood it on. */
   register:[
-    [1,0,1,   15,7,15,  PALE_WOOD],
-    [3,7,3,   13,11,13, TV_BODY],
-    [3.4,11,4, 12,14,12, TV_BODY],
-    [12,11.4,4.4, 12.4,13.6,11.6, REGISTER_SCREEN, 1],
-    [4,11,4,  12,11.4,12, REGISTER_KEYS],
-    [13,2,4,  15,6,12,  REGISTER_BODY]
+    [2,0,2,    14,9,14,   TV_BODY],
+    [14,1,3,   15,6,13,   REGISTER_BODY],
+    [15,3.2,6, 15.5,4,10, TV_BODY],
+    [5,9,3,    8,10.2,13, REGISTER_KEYS],
+    [8,9,3,    10.5,9.9,13, REGISTER_KEYS],
+    [10.5,9,3, 13,9.6,13, REGISTER_KEYS],
+    [2,9,5,    5,11,11,   TV_BODY],
+    [3,11,4.5, 5,12.5,11.5, REGISTER_SCREEN, 1],
+    [4,12.5,4.5, 6,14,11.5, REGISTER_SCREEN, 1]
   ],
   /* Groceries. Each one a small thing standing on top of whatever is under it,
      the same idea as the cake: a sixteenth of a block off the floor so it sits on
@@ -3264,8 +3336,9 @@ var PROP_SHAPE={
   toilet:[
     [4,0,4,   12,5,12,  PORCELAIN],
     [3,5,3,   13,9,13,  PORCELAIN],
-    [4.5,8.6,4.5, 11.5,9,11.5, BATH_WATER],
-    [3,9,3,   13,10,13, PORCELAIN],
+    /* On the pan rather than in it - see the sink. */
+    [4.5,9,4.5, 11.5,9.4,11.5, BATH_WATER],
+    [3,9.4,3, 13,10.4,13, PORCELAIN],
     [0,5,3,   3,14,13,  PORCELAIN]
   ]
 };
@@ -3336,6 +3409,35 @@ function makeChunks(){
     chunks.push({cx:ci,cz:cj,opaque:null,trans:null,glow:null,dirty:true});
 }
 makeChunks();
+
+/* What is on the shelf at this cell, or 0 for nothing. */
+function stockAt(x,y,z){ return stock[x+','+y+','+z]||0; }
+/* Put something on a shelf, or clear it with 0. Mirrors setBlock exactly - it is
+   the same kind of change to the same world - so it redraws, saves and travels
+   through the same three lines. */
+function setStock(x,y,z,id){
+  if(!inside(x,y,z)) return false;
+  var k=x+','+y+','+z;
+  if((stock[k]||0)===(id||0)) return false;
+  if(!id) delete stock[k];
+  else {
+    if(stock[k]===undefined && Object.keys(stock).length>=STOCK_CAP) return false;
+    stock[k]=id;
+  }
+  markDirty(x,y,z);
+  scheduleSave();
+  if(mp.wanted && !mp.applying) mp.stockQueue.push({x:x,y:y,z:z,item:id||0});
+  return true;
+}
+/* Anything on a shelf that is no longer a shelf is nothing. Called after the
+   world is rebuilt, so a record whose shelves were dug out does not keep an
+   invisible tin of beans at that coordinate for ever. */
+function tidyStock(){
+  for(var k in stock){
+    var p=k.split(','), d=DEFS[getBlock(+p[0],+p[1],+p[2])];
+    if(!d || d.family!=='shelf') delete stock[k];
+  }
+}
 
 /* How big a district is. Racing districts are wider than the rest, and this is the only
    place that changes it: every world build goes through applyTheme, which calls this
@@ -3466,6 +3568,26 @@ function propMesh(opq,glw,x,y,z,id,def,tint){
      chosen here from what is around it, so nothing about which way a fence joins
      is written into the save - which means a wall built beside one afterwards
      joins to it, and digging that wall out lets it go again. */
+  /* A shelf draws whatever is standing on it, sitting on its board. Same trick as
+     the top half of a door: the extra geometry is chosen here from what is around
+     rather than being a block of its own, so a shelf and its stock are one cell
+     and one thing to dig. */
+  if(def.prop==='shelf'){
+    var itemId=stockAt(x,y,z), item=itemId?DEFS[itemId]:null;
+    if(item && item.prop && PROP_SHAPE[item.prop]){
+      var shp=PROP_SHAPE[item.prop];
+      for(var q=0;q<shp.length;q++){
+        var ib=shp[q].slice();
+        /* Its own props are drawn a sixteenth off the floor of their cell; the
+           board's top is SHELF_BOARD, so this is the lift that stands it on the
+           board rather than in mid-air. Left unturned on purpose - a loaf looks
+           the same from every side, and turning it with the shelf would swing it
+           out through the side panel. */
+        ib[1]+=SHELF_BOARD-1; ib[4]+=SHELF_BOARD-1;
+        propBox(opq.P,opq.N,opq.U,opq.C,opq.I,x,y,z,ib,tint,false);
+      }
+    }
+  }
   if(def.prop==='fence'){
     var m=0;
     if(fenceJoins(x+1,y,z)) m|=1;
@@ -5713,10 +5835,20 @@ function goodsNear(){
       for(var dz=-2;dz<=2;dz++){
         var x=fx+dx, y=fy+dy, z=fz+dz;
         if(!inside(x,y,z)) continue;
-        if(!isGoods(getBlock(x,y,z))) continue;
-        var d=Math.hypot(x+0.5-player.x, z+0.5-player.z);
-        if(d>SHOP_REACH || d>=bestD) continue;
-        bestD=d; best={x:x,y:y,z:z,id:getBlock(x,y,z)};
+        /* Either loose food - a cake on a table, a place setting - or whatever is
+           standing on a shelf. Both are goods; only one of them is a block. */
+        var here=getBlock(x,y,z), item=isGoods(here)?here:stockAt(x,y,z);
+        if(!isGoods(item)) continue;
+        /* How far to walk decides whether it is in reach; how far in all three
+           decides which one he gets. Ranking on the flat alone meant a stack of
+           shelves was all the same distance away and the search order picked the
+           winner - so standing at the bottom shelf handed him what was on the top
+           one, which is a plain lie about what he pressed. */
+        var flat=Math.hypot(x+0.5-player.x, z+0.5-player.z);
+        if(flat>SHOP_REACH) continue;
+        var d=Math.hypot(x+0.5-player.x, (y+0.5)-(player.y+0.8), z+0.5-player.z);
+        if(d>=bestD) continue;
+        bestD=d; best={x:x,y:y,z:z,id:item};
       }
     }
   }
@@ -5733,8 +5865,10 @@ function registerNear(){
         if(!inside(x,y,z)) continue;
         var def=DEFS[getBlock(x,y,z)];
         if(!def || def.family!=='register') continue;
-        var d=Math.hypot(x+0.5-player.x, z+0.5-player.z);
-        if(d>SHOP_REACH || d>=bestD) continue;
+        var flat=Math.hypot(x+0.5-player.x, z+0.5-player.z);
+        if(flat>SHOP_REACH) continue;
+        var d=Math.hypot(x+0.5-player.x, (y+0.5)-(player.y+0.8), z+0.5-player.z);
+        if(d>=bestD) continue;
         bestD=d; best={x:x,y:y,z:z};
       }
     }
@@ -6280,6 +6414,17 @@ function toggleDoor(x,y,z){
   sfx('place');
   return true;
 }
+/* Put what he is holding onto the shelf he is looking at. One thing per shelf:
+   putting something else on swaps it, which is what he expects and means there is
+   never a shelf he cannot change his mind about. */
+function stockShelf(h){
+  var def=DEFS[getBlock(h.x,h.y,h.z)];
+  if(!def || def.family!=='shelf') return false;
+  if(!isGoods(selected)) return false;
+  setStock(h.x,h.y,h.z,selected);
+  sfx('place');
+  return true;
+}
 function turnFurniture(x,y,z){
   var id=getBlock(x,y,z), def=DEFS[id];
   if(!def) return false;
@@ -6301,6 +6446,8 @@ function breakAt(x,y,z){
   /* and both halves of a door, for the same reason */
   var dby=(b===DOORTOP||(DEFS[b]&&DEFS[b].door))?doorBase(x,y,z):null;
   setBlock(x,y,z,AIR);
+  /* A shelf's stock is part of the shelf, so it goes when the shelf goes. */
+  setStock(x,y,z,0);
   if(half) setBlock(x+half[0],y,z+half[1],AIR);
   if(dby!==null){ setBlock(x,dby,z,AIR); setBlock(x,dby+1,z,AIR); }
   burst(new THREE.Vector3(x+0.5,y+0.5,z+0.5),DEFS[b].avg,9);
@@ -6340,7 +6487,12 @@ function build(){
   }
   /* Turning a piece of furniture comes before placing anything, so a tap on a chair
      turns the chair rather than putting a block on its seat. */
+  /* Something on a shelf goes IN the shelf. Before turning furniture, or aiming
+     at a shelf with the bread selected would spin the shelf round instead of
+     stocking it - and before the ordinary placement, which would have put the
+     loaf in the cell above, which is the whole bug. */
   var t=aim();
+  if(t && stockShelf(t)) return;
   if(t && (toggleDoor(t.x,t.y,t.z) || turnFurniture(t.x,t.y,t.z))) return;
   var c=buildTarget();
   if(!c) return;
@@ -8445,6 +8597,27 @@ function uniqueName(name){
 
 function scheduleSave(){ saveDirty=true; }
 
+/* What is on every shelf, and back again. Plain "x,y,z" -> id, the same shape as
+   the edits, so there is nothing new to reason about when reading a record. */
+function stockToSave(){
+  var o={};
+  for(var k in stock) o[k]=stock[k];
+  return o;
+}
+function stockFromSave(v){
+  stock={};
+  if(!v || typeof v!=='object') return;
+  var n=0;
+  for(var k in v){
+    if(n>=STOCK_CAP) break;
+    /* Only well-formed keys and only ids this build knows are goods, so a record
+       from a newer game cannot put something unshoppable on a shelf. */
+    if(!/^\d+,\d+,\d+$/.test(k)) continue;
+    if(!isGoods(v[k])) continue;
+    stock[k]=v[k]; n++;
+  }
+}
+
 /* ---------------- where the animals are ----------------
    Saved and restored with the district, and shared with the other players. Both
    of those exist for the same reason: a pen Henry filled has to still have the
@@ -8513,7 +8686,11 @@ function snapshot(){
     /* Codes this district used to be known by, so a portal bound to an old one still
        finds it after the code was shortened. */
     codes:current&&current.codes&&current.codes.length?current.codes.slice():null,
-    v:2,                       /* 2 adds portals; v1 records simply have none */
+    /* 2 adds portals; v1 records simply have none. 3 adds what is on the shelves,
+       and the migration from 2 is that there is none - which is exactly right,
+       because before today a shelf could not hold anything. */
+    v:3,
+    stock:stockToSave(),
     portals:portalsToSave(),
     /* Frames that used to be portals, so a broken one can be lit again and still lead
        where it led. Absent from older records, which reads as none. */
@@ -8586,6 +8763,9 @@ function enterDistrict(rec){
   seed=rec.seed>>>0;
   starSeed=(typeof rec.starSeed==='number')?rec.starSeed>>>0:seed;
   edits=rec.edits||{};
+  /* v2 and older have no stock field, which reads as bare shelves - and before
+     today a shelf could not hold anything, so that is the whole migration. */
+  stockFromSave(rec.stock);
   applyTheme(themeByKey(rec.theme));
   generateWorld();
   applyEdits();
@@ -8598,6 +8778,9 @@ function enterDistrict(rec){
   /* After the spawn, never instead of it: the spawn is what builds the meshes and
      gives each animal its kind and its own stream of random numbers. This only
      moves them to where they were left. */
+  /* After the blocks are in, so a shelf that has been dug out since does not keep
+     an invisible tin of beans at its coordinate for ever. */
+  tidyStock();
   zooFromSave(rec.zoo);
   /* Only ids this build knows and only ones with a price, so a record written by
      a newer game cannot put something unshoppable in his basket. */
@@ -8969,7 +9152,12 @@ var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
         /* How many times this device has said where the animals are, and been
            told. Both should be climbing on somebody in a shared room; a pair of
            zeroes says the two sides disagree about who is moving them. */
-        zooOut:0, zooIn:0};
+        zooOut:0, zooIn:0,
+        /* Shelf stock waiting to go out, exactly like `queue` does for blocks.
+           What is on a shelf is part of the world, so it has to travel like the
+           rest of the world or one of them ends up shopping in an empty shop.
+           `stockShared` is whether the room can carry it at all. */
+        stockQueue:[], stockShared:false};
 
 /* Four times a second. Animals amble; they are not karts, and a pig arriving in
    ten jumps a second would cost eight times the traffic to look no better. The
@@ -9086,6 +9274,15 @@ function mpShareableEdits(){
   return out;
 }
 
+/* Somebody else stocked a shelf. Applied with `applying` set, the same as a
+   remote block change, so it does not bounce straight back to them. */
+function mpRemoteStock(m){
+  if(!Number.isInteger(m.x)||!Number.isInteger(m.y)||!Number.isInteger(m.z)) return;
+  var id=m.item|0;
+  if(id && !isGoods(id)) return;
+  mp.applying=true;
+  try{ setStock(m.x,m.y,m.z,id); } finally { mp.applying=false; }
+}
 function mpQueueEdit(x,y,z,b){
   if(b===PORTAL) return;
   mp.queue.push({x:x,y:y,z:z,block:b});
@@ -9374,6 +9571,7 @@ function mpMessage(raw){
   if(m.type==='keeper'){ mp.keeper=(typeof m.id==='string')?m.id:null; return; }
   if(m.type==='zoo'){ mp.zooIn++; if(!mpZooMine()) zooApply(m); return; }
   if(m.type==='edited'){ mpRemoteEdit(m); return; }
+  if(m.type==='stocked'){ mpRemoteStock(m); return; }
   if(m.type==='portal'){ mpPortalIn(m.portal); return; }
   if(m.type==='portalOut'){ mpPortalOut(m.key); return; }
   /* Everything else is dropped. Nothing unrecognised is echoed, stored or shown,
@@ -9401,6 +9599,10 @@ function mpWelcome(w){
      the seed first put them, and if we are not, we are standing them where the
      keeper already has them. */
   if(w.zoo) zooApply(w.zoo);
+  /* Whether the room can carry what is on the shelves. An older Worker does not
+     send the field, and then everybody keeps their own - which is what happened
+     before today rather than something worse. */
+  mp.stockShared=(w.stock!==undefined);
   mpClearPlayers();
   (w.players||[]).forEach(mpAddPlayer);
   mp.ever=true;
@@ -9498,6 +9700,11 @@ function mpUploadEverything(){
     mpQueueEdit(+p[0],+p[1],+p[2],edits[k]);
     n++;
   }
+  /* The shelves too, or the room gets his shop with nothing on it. */
+  for(k in stock){
+    p=k.split(',');
+    mp.stockQueue.push({x:+p[0],y:+p[1],z:+p[2],item:stock[k]});
+  }
   return n;
 }
 
@@ -9512,6 +9719,15 @@ function mpResync(w){
       p=k.split(',');
       mpQueueEdit(+p[0],+p[1],+p[2],edits[k]);
     }
+  }
+  /* And the shelves, both ways, on the same terms as the blocks. */
+  var ss=w.stock||{};
+  mp.applying=true;
+  try{
+    for(k in ss){ p=k.split(','); setStock(+p[0],+p[1],+p[2],ss[k]); }
+  } finally { mp.applying=false; }
+  for(k in stock){
+    if(!(k in ss)){ p=k.split(','); mp.stockQueue.push({x:+p[0],y:+p[1],z:+p[2],item:stock[k]}); }
   }
 }
 
@@ -9540,6 +9756,10 @@ function mpAdoptServerCopy(){
        only if this is the same world by seed: adopting a genuinely different
        district makes local animal positions meaningless. */
     var sameWorld=((w.seed>>>0)===(seed>>>0)), localZoo=sameWorld?zooToSave():null;
+    /* The room's shelves come with the room's blocks. Without this, adopting the
+       room's copy emptied every shelf in the shop for whoever adopted it - the
+       same shape of bug as the animals, one field along. */
+    stockFromSave(w.stock);
     placeStars(null); placeItemBoxes(); spawnAnimals(); spawnFish(); spawnCrabs(); recountFire();
     /* And put them back. spawnAnimals stands every animal where the world seed
        first put it, which is right for a district being seen for the first time
@@ -10018,6 +10238,14 @@ function mpUpdate(dt){
       var e=mp.queue[0];
       if(!mpSend({type:'edit', x:e.x, y:e.y, z:e.z, block:e.block})) break;
       mp.queue.shift(); sent++;
+    }
+    /* And what has been put on or taken off a shelf. Its own bounded drain for
+       the same reason: stocking a whole aisle is a burst. */
+    sent=0;
+    while(mp.stockQueue.length && sent<64){
+      var t2=mp.stockQueue[0];
+      if(!mpSend({type:'stock', x:t2.x, y:t2.y, z:t2.z, item:t2.item})) break;
+      mp.stockQueue.shift(); sent++;
     }
   }
 
@@ -10644,6 +10872,9 @@ window.__henrycraft={
        SHELF:SHELF,SHELF1:SHELF1,SHELF2:SHELF2,SHELF3:SHELF3,
        REGISTER:REGISTER,REGISTER1:REGISTER1,REGISTER2:REGISTER2,REGISTER3:REGISTER3,
        BREAD:BREAD,APPLES:APPLES,MILK:MILK},
+  /* Every prop's boxes, so a test can check the geometry itself rather than
+     looking at a picture and hoping. */
+  propShapes:function(){ return JSON.parse(JSON.stringify(PROP_SHAPE)); },
   FAMILY:FAMILY,
   propFacing:function(x,y,z,id){ return propFacing(x,y,z,id,DEFS[id]); },
   facingId:facingId,
@@ -10790,6 +11021,11 @@ window.__henrycraft={
             barShown:!document.getElementById('basket').classList.contains('hide')};
   },
   doShop:doShopAction, takeGoods:takeGoods, ringUp:ringUp,
+  /* What is on the shelves, and putting something on one from outside the game. */
+  stock:function(){ var o={}; for(var k in stock) o[k]=stock[k]; return o; },
+  stockAt:stockAt, setStock:setStock,
+  snapshot:snapshot, stockFromSave:stockFromSave,
+  stockShared:function(){ return mp.stockShared; },
   coins:function(){ return wallet; },
   /* Which cells he has changed. Used by the shop tests to say that filling a
      basket changes no blocks at all, which is why none of it needs a server. */

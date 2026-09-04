@@ -1059,6 +1059,17 @@ fourth drawer, **For a shop**, holds a shelf unit, a register, and bread, apples
 and milk. The cake and the cups stay in **For a house**, where he already knows
 to find them &mdash; they belong on a table as much as on a shelf.
 
+**A shelf holds its own goods.** Pick some food and press **BUILD** on a shelf to
+put it on — one thing per shelf, changeable at any time. Shelves stack directly,
+and every shelf in a stack holds its own thing, which is how he gets a tall one.
+
+That was not the first attempt, and the first attempt was the thing he was
+complaining about. Goods were ordinary blocks placed in the cell *above* a shelf,
+and a shelf block drew three boards — so it looked like three shelves and behaved
+like one, because only the top of a stack had a free cell above it and the two
+lower boards could never hold anything. One tier a block fixes both halves of
+that at once.
+
 Stand at a shelf with something on it and a 🛒 button appears; press it and that
 thing goes in the basket. The basket shows up as a chip in the corner with a
 little picture of everything in it and what it comes to. Stand at the register
@@ -1076,10 +1087,17 @@ Two decisions in there are about him being five rather than about shops.
 **Taking something off a shelf does not empty the shelf.** A shop he has to
 restock is a shop that runs out, and a five-year-old filling a basket taps the
 same thing twenty times &mdash; which should be twenty apples, not one apple and
-then nineteen disappointments. The stock is endless and the block never changes,
-which has a second consequence worth having: **nothing about shopping needs the
-server.** A shelf is a block, and blocks already travel; a basket is his own. A
-test asserts that a whole shopping trip changes no blocks at all.
+then nineteen disappointments. The stock is endless, and a test asserts that a
+whole shopping trip changes nothing in the world at all.
+
+What is on the shelves is a map beside the block edits &mdash; same shape, saved
+with the district at `v3`, sent to the room the same way, capped the same way. It
+had to be: goods used to be ordinary blocks, which travelled and saved for free,
+and anything that lives outside that map has to be taught to do both. Getting
+that wrong is how a shop full of food comes up empty on the other screen, which is
+a bug this project has already had twice with the animals. A v2 record simply has
+no such field, which reads as bare shelves &mdash; and before today a shelf could
+not hold anything, so that is the whole migration.
 
 **And the register pays him.** He is the shopkeeper &mdash; that is who a child is
 when they play shop &mdash; so the coins go up when he rings the basket through,
@@ -1094,6 +1112,29 @@ pocket in the next &mdash; which is what a five-year-old means by *my money*. A
 wallet per district would have had him standing in his own shop with nothing to
 ring up because the stars were somewhere else. Five coins a star; ten stars a
 district; and he can always make another district.
+
+**The shelf was flickering, and the cause was two boxes in the same place.** The
+uprights ran the full height of the block and all three boards passed through
+them &mdash; and an upright's top face and the top board's top face were both on
+`y=16` over the same three-by-three patch. Two faces on one plane pointing the
+same way is what z-fighting is; back to back is fine, because the one you cannot
+see is culled.
+
+There is now a sweep over every prop in the game that fails on any two boxes that
+overlap in volume or share a same-side face plane. It found **nine**: the bed's
+headboard driven through its frame, water sunk into the rims of the sink and the
+toilet, a door handle passing through the door, another sitting wholly inside the
+open one where nobody could ever see it, both gates' rails running through their
+stiles, and the shelf and the register. All nine are re-cut so the boxes butt
+instead. 379 pairs across 42 props, checked every run.
+
+**The register was carrying its own counter** &mdash; a box filling the bottom
+seven sixteenths of its block &mdash; which is why it looked stubby on the ground
+and why putting one on a table gave you a counter on a table. A register is a
+register; what it stands on is whatever he stood it on. Redrawn as a dark body
+with a drawer and handle across the front, a pale keypad stepped down towards the
+customer, and the screen up on a short neck at the back, leaning forward and lit
+by itself the way the telly's is.
 
 The check on that one had to be a real page reload. An earlier version asked only
 whether the coins survived a district switch, which they do whether or not they
@@ -1221,8 +1262,10 @@ block missing does not, that a gate holds open or shut, that an animal can be
 picked up and carried and put down again, that a pen he filled still has the
 animals in it after leaving the district and coming back, that a basket fills from
 the shelves without emptying them and the till pays exactly what it came to, that
-his coins survive a full page reload, that fire never spreads, and the control
-layout at phone and desktop sizes.
+every tier of a stack of shelves holds its own thing and can be shopped from, that
+no two boxes in any of the 42 props overlap or share a face plane, that his coins
+survive a full page reload, that fire never spreads, and the control layout at
+phone and desktop sizes.
 
 `node tools/test-portals.js` covers portals: frame detection at every size from
 1×2 to 21×21 in both vertical planes, a specific hint for each wrong shape, and

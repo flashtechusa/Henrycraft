@@ -2334,9 +2334,15 @@ function requireNode22() {
        given time to settle. */
     const PAD = await carrier.evaluate(async () => {
       const H = window.__henrycraft, ids = H.ids;
-      const fx = 44, fz = 44, fy = H.surfaceY(fx, fz);
+      const fx = 44, fz = 44;
+      /* Well clear of the water line, not merely wherever the ground happens to
+         be. The room mints its own seed, so this spot is a different place every
+         run - and on a run where it came up a lake the pad was built under water,
+         putting an animal down there was correctly refused, and the check failed
+         for a reason that had nothing to do with carrying. */
+      const fy = Math.max(H.surfaceY(fx, fz), H.dims().waterLevel + 3);
       for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) {
-        for (let yy = fy - 2; yy < fy; yy++) H.setBlock(fx + a, yy, fz + b, yy === fy - 1 ? ids.GRASS : ids.DIRT);
+        for (let yy = fy - 4; yy < fy; yy++) H.setBlock(fx + a, yy, fz + b, yy === fy - 1 ? ids.GRASS : ids.DIRT);
         for (let yy = fy; yy < fy + 4; yy++) H.setBlock(fx + a, yy, fz + b, ids.AIR);
       }
       return {fx, fz, fy};
@@ -2522,6 +2528,78 @@ function requireNode22() {
     check('and his arrival has not emptied it for the one who built it',
           stillThere.penned >= 3, JSON.stringify(stillThere));
     await retire(RP, SP);
+
+    /* What is on a shelf is part of the world, so it has to travel like the rest
+       of it. Goods used to be ordinary blocks, which travelled for free; they are
+       a map beside the edits now, and anything living outside that map has to be
+       taught to travel - which is the same trap the animals fell into twice. */
+    console.log('\nStocking a shop they both shop in');
+    const stockCode = code();
+    const Sh1 = await newPlayer('Sh1');
+    const Sh2 = await newPlayer('Sh2');
+    await Sh1.click('#playBtn'); await Sh2.click('#playBtn');
+    await sleep(500);
+    await Sh1.evaluate(c => window.__henrycraft.mp.join(c), stockCode);
+    await waitFor(Sh1, () => window.__henrycraft.mp.status() === 'sharing');
+    await Sh2.evaluate(c => window.__henrycraft.mp.join(c), stockCode);
+    await waitTogether(Sh2);
+    await waitTogether(Sh1);
+    check('the room can carry what is on the shelves',
+          await Sh1.evaluate(() => window.__henrycraft.stockShared()) === true &&
+          await Sh2.evaluate(() => window.__henrycraft.stockShared()) === true);
+
+    const SHOPP = await Sh1.evaluate(async () => {
+      const H = window.__henrycraft, ids = H.ids;
+      const px = 30, pz = 30, y = H.surfaceY(34, 34);
+      for (let a = -2; a < 8; a++) for (let b = -2; b < 8; b++) {
+        for (let yy = y - 3; yy < y; yy++) H.setBlock(px + a, yy, pz + b, ids.STONE);
+        for (let yy = y; yy < y + 8; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+      }
+      const goods = [ids.BREAD, ids.APPLES, ids.MILK];
+      for (let t = 0; t < 3; t++) {
+        H.setBlock(px, y + t, pz, ids.SHELF);
+        H.setStock(px, y + t, pz, goods[t]);
+      }
+      return {px, pz, y, goods};
+    });
+    const sawStock = await waitFor(Sh2, P => {
+      const H = window.__henrycraft;
+      return P.goods.every((g, t) => H.stockAt(P.px, P.y + t, P.pz) === g);
+    }, SHOPP, 30000);
+    const onTwo = await Sh2.evaluate(P => ({
+      stock: [0, 1, 2].map(t => window.__henrycraft.stockAt(P.px, P.y + t, P.pz)),
+      shelves: [0, 1, 2].map(t => window.__henrycraft.getBlock(P.px, P.y + t, P.pz)),
+    }), SHOPP);
+    check('a shelf he stocks has the same thing on it on the other screen',
+          sawStock && onTwo.stock.join(',') === SHOPP.goods.join(','),
+          JSON.stringify(onTwo));
+    /* And the other way, so it is a shared world rather than a broadcast. */
+    await Sh2.evaluate(P => window.__henrycraft.setStock(P.px, P.y, P.pz, window.__henrycraft.ids.CAKE), SHOPP);
+    const sawBack = await waitFor(Sh1, P =>
+      window.__henrycraft.stockAt(P.px, P.y, P.pz) === window.__henrycraft.ids.CAKE, SHOPP, 30000);
+    check('and what the other one puts on a shelf comes back the same way', sawBack,
+          JSON.stringify(await Sh1.evaluate(P => window.__henrycraft.stockAt(P.px, P.y, P.pz), SHOPP)));
+    /* Clearing one travels too, or a shelf emptied here stays full there. */
+    await Sh1.evaluate(P => window.__henrycraft.setStock(P.px, P.y + 1, P.pz, 0), SHOPP);
+    const sawCleared = await waitFor(Sh2, P =>
+      window.__henrycraft.stockAt(P.px, P.y + 1, P.pz) === 0, SHOPP, 30000);
+    check('and a shelf cleared here is cleared there', sawCleared);
+
+    /* The case the animals got wrong twice: somebody arriving on the code with
+       nothing of their own, whose world is replaced by the room's wholesale. */
+    const Sh3 = await newPlayer('Sh3');
+    await Sh3.click('#playBtn');
+    await Sh3.evaluate(c => window.__henrycraft.mp.join(c), stockCode);
+    await waitFor(Sh3, () => window.__henrycraft.mp.status() === 'sharing', null, 45000);
+    await sleep(3000);
+    const stockJoiner = await Sh3.evaluate(P => ({
+      stock: [0, 1, 2].map(t => window.__henrycraft.stockAt(P.px, P.y + t, P.pz)),
+      shelves: [0, 1, 2].map(t => window.__henrycraft.getBlock(P.px, P.y + t, P.pz)),
+    }), SHOPP);
+    check('and somebody joining by the code arrives to a stocked shop, not an empty one',
+          stockJoiner.shelves.every(b => b === 92) && stockJoiner.stock[0] === 79 &&
+          stockJoiner.stock[2] === SHOPP.goods[2],
+          JSON.stringify(stockJoiner));
 
     console.log('\nUndeployed and unreachable: the button still cannot break anything');
     const dead = 8799;
