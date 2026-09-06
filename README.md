@@ -637,7 +637,10 @@ after a reload. Each of the four load-bearing rules above was checked by breakin
 on purpose: removing the session carry ends the session mid-walk, removing the
 lookup-by-code reproduces *Quiet Hill 2* and *Quiet Hill 3* exactly, removing the
 server's record reuse hands out two destinations, and removing the adoption leaves his
-own portal invisible to the other player.
+own portal invisible to the other player. Two more sections were added after the report
+above: one swallows a single outbound offer and checks the doorway still reaches the
+other screen, and one answers "whose copy wins" and then checks the name, the room's
+doorways and the second ask all survive that answer.
 
 One path has no end-to-end test: the "made on its own" picture, which needs a
 portals-capable server *and* a portal that could not be registered with it. The
