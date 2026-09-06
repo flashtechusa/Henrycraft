@@ -1496,6 +1496,12 @@ function requireNode22() {
       await waitFor(W2, () => window.__henrycraft.mp.status() === 'sharing', null, 30000);
       const after = await waitFor(W2, () =>
         window.__henrycraft.portals().some(q => q.lit && q.code), null, 30000);
+      /* The second ask is on a three-second timer, and the room's portals arrive with
+         the adopted copy long before that - so reading the counter straight after the
+         portal turns up read it before the timer had fired and called a working
+         mechanism broken. Waited for, not slept on. */
+      const askedLater = await waitFor(W2, () =>
+        window.__henrycraft.mp.portalAsks().asked === 1, null, 20000);
       /* Answering that question used to end at "take the shared blocks": the player
          never learned what the room calls the place, never asked it for its doorways,
          and never offered it one of their own. All of it is downstream of the same
@@ -1512,7 +1518,8 @@ function requireNode22() {
             settled.name === hostHome.name,
             JSON.stringify({guest: settled.name, host: hostHome.name}));
       check('and asking the room for its doorways, like every other way in',
-            settled.asks.asked === 1, JSON.stringify(settled.asks));
+            askedLater && settled.asks.asked === 1 && settled.asks.late === 0,
+            JSON.stringify(settled.asks));
       note(`after choosing the shared copy, both screens say "${settled.name}"`);
       await retire(W1, W2);
     }
