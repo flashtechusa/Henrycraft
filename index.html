@@ -8519,6 +8519,11 @@ function randomDistrictName(themeKey){
    what makes passing it safe: only a name built from the game's own word lists is
    ever accepted, so a name somebody typed over cannot travel and cannot be drawn.
    Exactly the rule player names already follow, for exactly the same reason. */
+/* Home is deliberately not accepted, even though the game gives that name out
+   itself: it is the name of the first district everybody has, so a guest adopting
+   it would land on "Home 2" beside their own Home. Two people in one world can
+   therefore see two different names for it if one of them is sharing their Home -
+   which is worth remembering, because it looks like a sync fault and is not one. */
 function isGeneratedName(name){
   var m=/^([A-Za-z]+) ([A-Za-z]+)$/.exec(typeof name==='string'?name:'');
   if(!m) return false;
@@ -9139,6 +9144,10 @@ var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
            chance did - which is a bug worth seeing rather than a success worth hiding, so
            the tests watch it. */
         askedPortals:0, latePortals:0, portalAsk:null,
+        /* Offering the doorways he made alone, and how many had to be offered more
+           than once. `reoffers` above zero is the same kind of visible scar as
+           latePortals: healthy sessions leave it at zero and the tests say so. */
+        offerTimer:null, offerTries:0, reoffers:0,
         /* Portals across a shared session. `portalsShared` is what the server told
            us it can do; `switching` and `arriving` mark the one arrival that keeps
            the session rather than ending it; `pendingReturn` is a way home waiting
@@ -9336,6 +9345,8 @@ function mpStop(quiet){
   mp.outside=0;
   mp.askedPortals=0; mp.latePortals=0;
   if(mp.portalAsk){ clearTimeout(mp.portalAsk); mp.portalAsk=null; }
+  mp.offerTries=0; mp.reoffers=0;
+  if(mp.offerTimer){ clearTimeout(mp.offerTimer); mp.offerTimer=null; }
   mp.reunion=false;
   mp.portalsShared=false;
   mp.arriving=false;
@@ -9610,15 +9621,29 @@ function mpWelcome(w){
   mpSettleWorld(w).then(function(settled){
     mpClearOpenTimer();                /* the welcome arrived; nothing to time out */
     if(!settled) return;               /* he is being asked whose copy wins */
-    mpAdoptRoomName(w.name);
-    mpPortalsIn(w.portals);
-    mpAskPortalsLater();
-    mpFlushPendingReturn();
-    /* Everything already standing here becomes something they can walk through
-       together. Idempotent: a portal that already has a code is left alone, so a
-       reconnect does not repeat the work. */
-    mpAdoptLocalPortals();
+    mpSettled(w);
   });
+}
+
+/* Everything that has to happen once this device knows which world it is in.
+
+   Its own function because there are two ways to get here and only one of them used
+   to do this. When he is asked whose copy wins, settling waits for the answer, and
+   the answer arrived on a button that called mpAdoptServerCopy and stopped there -
+   so that player never learned what the room calls the place, never asked the room
+   a second time for its doorways, never registered the way home they had built, and
+   never offered the room a single portal of their own. Every one of those is a
+   thing two people in one world notice. */
+function mpSettled(w){
+  mpAdoptRoomName(w.name);
+  mpPortalsIn(w.portals);
+  mpAskPortalsLater();
+  mpFlushPendingReturn();
+  /* Everything already standing here becomes something they can walk through
+     together. Idempotent: a portal that already has a code is left alone, so a
+     reconnect does not repeat the work. */
+  mp.offerTries=0;
+  mpAdoptLocalPortals().then(mpOfferPortalsLater);
 }
 
 /* Which blocks we are playing with, now that the room has spoken. Resolves true once
@@ -9963,6 +9988,48 @@ function mpAdoptLocalPortals(){
       });
     });
   },Promise.resolve()).then(function(){ return done; });
+}
+/* How many doorways are still standing here that the room has never heard of. A lit
+   portal with no code is exactly that: the code is what the room sends back, so its
+   absence means the offer never landed. */
+function mpPortalsUnoffered(){
+  var n=0;
+  for(var i=0;i<portals.length;i++){
+    if(portals[i].lit&&!portals[i].code&&portals[i].dest) n++;
+  }
+  return n;
+}
+/* Offer them again while any are still waiting.
+
+   Offering a doorway is one small message, and a message can go missing: the socket
+   was a moment from being open, the write that mints the destination's code failed
+   because the tablet's storage was full, the packet was simply dropped. Before
+   today the offer was made once, at the welcome, and never again - so one lost
+   message cost the portal for the whole session. It stayed lit on his screen with
+   no code, which is the worst possible state to leave a five-year-old in: he can
+   see his portal, nobody else can, and he cannot walk through it either, because a
+   doorway the room has never heard of is one the others cannot follow him through.
+
+   "I am in the same world as he is but it is not a portal for me" is that, exactly.
+
+   The receiving side already asks the room a second time (mpAskPortalsLater); this
+   is the same courtesy for the sending side. It stops as soon as the room answers,
+   because the answer is what puts the code on, and it gives up after a couple of
+   minutes rather than talking to the room forever about a portal that cannot be
+   offered at all. */
+var MP_OFFER_FIRST=4000, MP_OFFER_EVERY=8000, MP_OFFER_TRIES=15;
+function mpOfferPortalsLater(){
+  if(mp.offerTimer||!mp.wanted||!mp.portalsShared) return;
+  if(mp.offerTries>=MP_OFFER_TRIES||!mpPortalsUnoffered()) return;
+  mp.offerTimer=setTimeout(function(){
+    mp.offerTimer=null;
+    if(mp.status!=='sharing'||!mpPortalsUnoffered()) return;
+    mp.offerTries++;
+    mpAdoptLocalPortals().then(function(n){
+      mp.reoffers+=n;
+      mpOfferPortalsLater();
+    });
+  },mp.offerTries?MP_OFFER_EVERY:MP_OFFER_FIRST);
 }
 /* A local district, named in a way another device can find: its code, minted and
    written down the first time anybody needs to talk about it. */
@@ -10699,7 +10766,11 @@ el('jGo').addEventListener('click',function(){
 });
 el('scUse').addEventListener('click',function(){
   el('serverCopy').classList.add('hide');
-  mpAdoptServerCopy();
+  /* Held on to before adopting, which clears it: the welcome is what says what the
+     room is called and what doorways it has, and settling has been waiting on this
+     button for it. */
+  var w=mp.pending;
+  mpAdoptServerCopy().then(function(ok){ if(ok&&w) mpSettled(w); });
 });
 el('scNo').addEventListener('click',function(){
   el('serverCopy').classList.add('hide');
@@ -11795,6 +11866,10 @@ window.__henrycraft={
   /* How often this device had to ask the room again for its doorways, and how many turned
      up that way. Both should be zero in a healthy session. */
   portalAsks:function(){ return {asked:mp.askedPortals, late:mp.latePortals}; },
+  /* The sending side of the same question: how many times the doorways he made
+     alone had to be offered again, and how many the room has still never heard of. */
+  portalOffers:function(){ return {tries:mp.offerTries, reoffers:mp.reoffers,
+                                   unoffered:mpPortalsUnoffered()}; },
     /* Feed one edit in as though the room had sent it, so a test can present a block from
        a world bigger than this one without needing a second build to send it. */
     feedEdit:function(x,y,z,b){ mpApply(x,y,z,b); },

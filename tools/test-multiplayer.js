@@ -1324,6 +1324,14 @@ function requireNode22() {
     check('and it came in the welcome, with nothing new turning up on the second ask',
           askedAtAll.late === 0,
           JSON.stringify({asks: askedAtAll, joiner: portalWhy}));
+    /* The same honesty, one message earlier: the sending side now offers a doorway
+       again if the first offer went missing, and that must stay a repair rather than
+       become the way it normally works. Nothing was dropped here, so nothing should
+       have needed offering twice. */
+    const offeredCleanly = await S1.evaluate(() => window.__henrycraft.mp.portalOffers());
+    check('the host offered it once and did not have to say it again',
+          offeredCleanly.reoffers === 0 && offeredCleanly.unoffered === 0,
+          JSON.stringify(offeredCleanly));
 
     /* Both walk through. The world on the far side is his - the diamond has to be
        there when the other player arrives. */
@@ -1368,6 +1376,146 @@ function requireNode22() {
           JSON.stringify(inHis.map(x => x.tower)));
     note(`a world built alone (${inHis[0].slug}) became room ${inHis[0].code}, ` +
          `with his diamond tower intact on both screens`);
+
+    /* ---- "it is not a portal for me" ----------------------------------------
+       Reported from the sofa: he made a portal, it was lit on his screen, and on the
+       other screen in the same world there was nothing there. Two ways to arrive at
+       that, and both of them were real. */
+    console.log('\nA portal he made alone, when the first offer goes missing');
+    await retire(S1, S2);
+    {
+      const cO = code();
+      const O1 = await newPlayer('O1');
+      /* Lit alone, which is how nearly every portal in his worlds was made. */
+      const built = await O1.evaluate(async () => {
+        const H = window.__henrycraft, ids = H.ids;
+        H.loadThemeSeed('meadow', 7777);
+        const gy = H.surfaceY(30, 30);
+        for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++)
+          for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+        const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                                fill: ids.SNOW});
+        for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++)
+          if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+        return !!(await H.light(b.probe.x, b.probe.y, b.probe.z));
+      });
+      check('he lights a portal on his own, before anybody joins him', built);
+      /* Eat exactly one outbound offer. A packet dropped, a socket a moment from
+         being open, a storage write that failed because the tablet was full: any of
+         them costs the one message, and before today the one message was all there
+         was. Nothing else is touched - blocks, moves and the rest go up as usual. */
+      await O1.evaluate(() => {
+        const send = WebSocket.prototype.send;
+        window.__eaten = 0;
+        WebSocket.prototype.send = function (data) {
+          if (typeof data === 'string' && data.indexOf('"type":"portal"') >= 0 &&
+              !window.__eaten) { window.__eaten++; return; }
+          return send.call(this, data);
+        };
+      });
+      await O1.evaluate(c => window.__henrycraft.mp.start(c), cO);
+      await waitFor(O1, () => window.__henrycraft.mp.status() === 'sharing');
+      /* Waited for by state: the retry is on a timer, and the whole point is that it
+         happens at all, not that it happens by any particular millisecond. */
+      const offeredAgain = await waitFor(O1, () =>
+        window.__henrycraft.mp.portalOffers().unoffered === 0, null, 40000);
+      const hostSide = await O1.evaluate(() => ({
+        eaten: window.__eaten, offers: window.__henrycraft.mp.portalOffers(),
+        lit: window.__henrycraft.portals().filter(q => q.lit)
+               .map(q => ({code: q.code || null})),
+      }));
+      check('the offer the room never got is made again', offeredAgain &&
+            hostSide.eaten === 1 && hostSide.offers.reoffers > 0,
+            JSON.stringify(hostSide));
+      const O2 = await newPlayer('O2');
+      await O2.evaluate(c => window.__henrycraft.mp.join(c), cO);
+      await waitFor(O2, () => window.__henrycraft.mp.status() === 'sharing', null, 30000);
+      const guestSees = await waitFor(O2, () =>
+        window.__henrycraft.portals().some(q => q.lit && q.code), null, 30000);
+      const guestSide = await O2.evaluate(() => ({
+        lit: window.__henrycraft.portals().filter(q => q.lit).length,
+        status: window.__henrycraft.mp.status(),
+      }));
+      check('and it is a portal on the other screen too', guestSees,
+            JSON.stringify({guest: guestSide, host: hostSide}));
+      note(`one offer was swallowed; it was made again ${hostSide.offers.reoffers} ` +
+           `time(s) and the doorway reached the other player`);
+      await retire(O1, O2);
+    }
+
+    /* The other way to get there, and the one that also had them calling the place
+       two different things. */
+    console.log('\nWhose copy wins, and everything that answer used to skip');
+    {
+      const cW = code();
+      const W1 = await newPlayer('W1');
+      /* Lit alone and walked through, so the world being shared is one of the places
+         his portals lead to rather than the one everybody's game starts in. That
+         matters for the name half of this: the starting district is called Home on
+         every device, and Home deliberately does not travel (see the name checks
+         below), so sharing it would prove nothing about whether the name is adopted.
+         Arriving also builds the way home, which is the portal checked for here. */
+      const hostHome = await W1.evaluate(async () => {
+        const H = window.__henrycraft, ids = H.ids;
+        H.loadThemeSeed('meadow', 5150);
+        const gy = H.surfaceY(30, 30);
+        for (let y = gy; y < gy + 10; y++) for (let x = 24; x <= 36; x++)
+          for (let d = -4; d <= 4; d++) H.setBlock(x, y, 30 + d, ids.AIR);
+        const b = H.buildFrame({plane: 'x', w: 2, h: 3, ax: 29, ay: gy, fixed: 30,
+                                fill: ids.SNOW});
+        for (let x = 24; x <= 36; x++) for (let d = -4; d <= 4; d++)
+          if (H.getBlock(x, gy - 1, 30 + d) === ids.AIR) H.setBlock(x, gy - 1, 30 + d, ids.STONE);
+        const lit = await H.light(b.probe.x, b.probe.y, b.probe.z);
+        await H.travel(lit.id);
+        const d = H.districts();
+        return {name: d.list.find(x => x.slug === d.current).name, slug: d.current};
+      });
+      check('he lights a portal alone and walks through it',
+            hostHome.name && hostHome.name !== 'Home', JSON.stringify(hostHome));
+      await W1.evaluate(c => window.__henrycraft.mp.start(c), cW);
+      await waitFor(W1, () => window.__henrycraft.mp.status() === 'sharing');
+      await waitFor(W1, () => window.__henrycraft.mp.portalOffers().unoffered === 0,
+                    null, 40000);
+      /* A grown-up who has been building something of their own, offering it under a
+         code the room already has. That is what raises the question - somebody
+         joining by a code has an empty district and is never asked. */
+      const W2 = await newPlayer('W2');
+      await W2.evaluate(() => {
+        const H = window.__henrycraft, ids = H.ids;
+        H.loadThemeSeed('desert', 31337);
+        const gy = H.surfaceY(12, 12);
+        for (let i = 0; i < 6; i++) H.setBlock(12, gy + i, 12, ids.RAINBOW);
+      });
+      await W2.evaluate(c => window.__henrycraft.mp.start(c), cW);
+      const askedWhose = await waitFor(W2, () =>
+        window.__henrycraft.mp.status() === 'choose', null, 30000);
+      check('offering a world of your own under a taken code asks whose copy wins',
+            askedWhose,
+            'W2 status: ' + await W2.evaluate(() => window.__henrycraft.mp.status()));
+      await W2.click('#scUse');
+      await waitFor(W2, () => window.__henrycraft.mp.status() === 'sharing', null, 30000);
+      const after = await waitFor(W2, () =>
+        window.__henrycraft.portals().some(q => q.lit && q.code), null, 30000);
+      /* Answering that question used to end at "take the shared blocks": the player
+         never learned what the room calls the place, never asked it for its doorways,
+         and never offered it one of their own. All of it is downstream of the same
+         missing call, so all of it is checked here. */
+      const settled = await W2.evaluate(() => {
+        const H = window.__henrycraft, d = H.districts();
+        return {name: d.list.find(x => x.slug === d.current).name,
+                lit: H.portals().filter(q => q.lit && q.code).length,
+                asks: H.mp.portalAsks(), status: H.mp.status()};
+      });
+      check('taking the shared copy still leaves you seeing the room\'s portals',
+            after && settled.lit > 0, JSON.stringify(settled));
+      check('and calling the place what everybody else calls it',
+            settled.name === hostHome.name,
+            JSON.stringify({guest: settled.name, host: hostHome.name}));
+      check('and asking the room for its doorways, like every other way in',
+            settled.asks.asked === 1, JSON.stringify(settled.asks));
+      note(`after choosing the shared copy, both screens say "${settled.name}"`);
+      await retire(W1, W2);
+    }
 
     /* ---- three things from an evening of real play -------------------------- */
     console.log('\nRejoining, waking up, and codes short enough to read out');
@@ -1539,12 +1687,22 @@ function requireNode22() {
               typed: H.isGeneratedName('call me at 555 1234'),
               markup: H.isGeneratedName('<img src=x onerror=alert(1)>'),
               sneaky: H.isGeneratedName('Sunny Creek '),
-              words: H.isGeneratedName('Zzzz Qqqq')};
+              words: H.isGeneratedName('Zzzz Qqqq'),
+              /* Home is deliberately not on the list, and this pins that decision
+                 rather than leaving it to be rediscovered. It is the name of the
+                 first district everybody has, so a guest adopting it would land on
+                 "Home 2" beside their own Home - which reads as more confusing than
+                 two different names, not less. It does mean two people in one world
+                 can see two different names for it, which is worth knowing when a
+                 screenshot shows exactly that. */
+              home: H.isGeneratedName('Home')};
     });
     check('a name that is not two words from the game\'s own lists is refused',
           typed.ok === true && typed.typed === false && typed.markup === false &&
           typed.sneaky === false && typed.words === false,
           JSON.stringify(typed));
+    check('and a district called Home keeps its own name, on purpose',
+          typed.home === false, JSON.stringify(typed));
     note(`one world, one name: both call it "${sharerSays.name}"`);
     for (const label of ['N1', 'N2']) {
       const pg = pages.find(p => p.label === label);

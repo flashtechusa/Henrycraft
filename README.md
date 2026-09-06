@@ -314,13 +314,41 @@ mechanism that hides the fault it is healing is how a bug lives for a year. Ther
 that strips the portal list out of the welcome on the way in, exactly as if it had never
 arrived, and checks the game notices and asks.
 
-That went in while chasing an intermittent failure I have seen three times: the joining
-player receives no portals at all. I have not root-caused it, and I am not claiming the
-second chance is the fix &mdash; it is the thing that means Henry can still walk through the
-door while I find out. Two theories were tested and killed on the way: that the Worker's
-one-second write debounce was losing portal records (a portal survives the Worker being
-`SIGKILL`ed 150ms after it is minted), and that the joiner never connected at all (that was
-my own reproducer inventing invalid join codes, which the Worker refuses with a 400).
+That went in while chasing an intermittent failure I had seen three times: the joining
+player receives no portals at all. Two theories were tested and killed on the way: that the
+Worker's one-second write debounce was losing portal records (a portal survives the Worker
+being `SIGKILL`ed 150ms after it is minted), and that the joiner never connected at all
+(that was my own reproducer inventing invalid join codes, which the Worker refuses with a
+400).
+
+**A cause was found at the other end, and it reproduces.** Asking twice is the receiving
+side, and the receiving side can only hand over what the room has. A doorway lit alone is
+offered to the room in one small message, and that offer was made **once**, at the welcome,
+and never again. Lose it &mdash; a dropped packet, a socket a moment from being open, a
+storage write that failed because the tablet was full &mdash; and the portal stayed lit on
+his screen with no code for the rest of the session. Nobody else could see it, and he could
+not walk through it either, because a doorway the room has never heard of is one the others
+cannot follow him through.
+
+I cannot prove that is what happened on his tablet &mdash; nobody was holding a packet
+capture &mdash; but it produces the reported symptom exactly, from one lost message, and
+the test drives it end to end.
+
+That is "I am in the same world as he is but it is not a portal for me", and one lost packet
+should not cost a five-year-old his portal. The offer is now made again while any doorway is
+still waiting: four seconds, then every eight, giving up after fifteen tries rather than
+talking to the room forever. It stops the moment the room answers, because the answer is
+what puts the code on. `mp.portalOffers().reoffers` counts the repairs and the tests insist
+it stays **zero** in a healthy session &mdash; the same honesty the second ask is held to.
+The reproduction swallows exactly one outbound offer and nothing else.
+
+**Answering "whose copy wins" used to skip the rest of joining.** The other half of the same
+report. Settling into a room waits when the game has to ask which world to keep, and the
+button that answered it adopted the room's blocks and stopped there. That player never
+learned what the room calls the place, never asked the room for its doorways, never
+registered the way home they had built, and never offered the room a portal of their own.
+All of it hung off one call that only the other path made; it is one function now, and both
+paths call it.
 
 The one way that could go wrong is one device running an older game: same seed, same
 theme, a smaller world, and blocks arriving with coordinates it has no room for. Dropping
@@ -432,6 +460,12 @@ reason: there must be no way for a grown-up to type something a child then reads
 A district called *Home* is the exception and keeps its own name: nearly everybody has
 one already, so adopting it would land as *Home 2* and read as more confusing than a
 different name.
+
+The cost of that is worth writing down, because it cost me an hour. If one of you is
+sharing their *Home*, the two screens legitimately show two different names for the same
+world &mdash; and in a screenshot that looks exactly like the two of you being in different
+places. It is not a sync fault. Check the 👥 count and the join code, not the name. Both the
+decision and its cost are pinned by a test, so neither gets rediscovered.
 
 A **👥 count** sits next to the star at the top while sharing; tap it for who is here.
 
