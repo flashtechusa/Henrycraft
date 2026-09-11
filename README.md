@@ -403,6 +403,30 @@ the moment the row above it grew. It is two stacked rows now, measured at five s
 and where the row above already reaches the buttons on a narrow phone, which it did before
 there was a lap clock, that is reported rather than blamed on the clock.
 
+**And the corners themselves overlapped, which none of that measuring caught.** Henry's dad
+photographed it: a phone in landscape, and the district chip sitting underneath the camera
+button. The two groups were pinned to opposite edges with no idea the other existed, so the
+left-hand chips just grew along until they ran into the buttons. The layout test had checked
+the pads against both corners and the corners against nothing.
+
+It checks them against each other now, with **every chip the row can ever hold showing at
+once** &mdash; eight people, an animal in reach, something to buy, a kart, and a two-word
+district name. That last part is the test, really: with only the default chips up the two
+groups never quite met, which is exactly why this passed for months. Showing them and *then*
+measuring does not work either, because the frame loop puts the reach-dependent buttons
+straight back &mdash; a first version of this measured four buttons and called it the worst
+case, so the showing and the measuring now happen in the same breath.
+
+The fix is structural rather than another offset to get wrong: the corners are one flex row,
+the buttons never shrink, and the chip row wraps to a second line if even that is not enough.
+Wrapping as a *fallback* is fine where wrapping as the *layout* was not &mdash; a second line
+of chips is readable, chips underneath buttons are not. Measured overlapping at all four
+sizes before and clear at all four after, including 740&times;400.
+
+**The name came off the HUD.** *HENRY'S BLOCK* sat at the front of that row and was costing
+about a third of it on a phone in landscape to tell him something he already knew. It is
+still on the tab, the title screen, and the sign outside.
+
 Adding the furniture section to *Things you can build* turned up two more of the same kind,
 both older than the change. The page has **no panel behind it** &mdash; there is no shared
 `.card` rule, only `#menu .card` &mdash; so the palette and the keyboard crib had always been
@@ -1111,7 +1135,7 @@ Stand at a shelf with something on it and a 🛒 button appears; press it and th
 thing goes in the basket. The basket shows up as a chip in the corner with a
 little picture of everything in it and what it comes to. Stand at the register
 and the button becomes 🧾: press it and the till rings the basket through one
-item at a time, beeping for each, and pays him the total.
+item at a time, beeping for each, and takes the total off his coins.
 
 **A price is what makes something shoppable.** The basket looks for any block that
 has one, so the food that already existed &mdash; a cake, a cup, a place setting
@@ -1136,19 +1160,37 @@ a bug this project has already had twice with the animals. A v2 record simply ha
 no such field, which reads as bare shelves &mdash; and before today a shelf could
 not hold anything, so that is the whole migration.
 
-**And the register pays him.** He is the shopkeeper &mdash; that is who a child is
-when they play shop &mdash; so the coins go up when he rings the basket through,
-and up again for every star he finds. Nothing in this game takes coins off him,
-which means there is no way to end up at nothing with a full basket and no way
-forward, which would be a fail state in a game that is not allowed any. If he
-would rather be the customer and pay, that is one sign flip and one message.
+**And the register charges him.** It used to pay him, on the theory that a child
+playing shop is the shopkeeper. His dad said no: *when I buy from a store the coins
+need to be depleted from my amount not added to it*, which is obviously right &mdash;
+stars are where money comes from and the shop is where it goes, and that is the
+whole point of having a number in your pocket.
+
+That makes the till the one place in this game where he can be told he cannot have
+something, so it is handled with some care. Coins never go below nothing. Rather
+than refusing the whole basket at the counter, the till rings up as far as his money
+goes and puts the rest back on the shelf &mdash; which costs nothing, because the
+shelves are endless, and leaves him with four things instead of six rather than with
+a basket he cannot pay for and no way forward. Paying happens per beep rather than
+in one lump at the end, so the counter goes down in step with the beeping and running
+out falls out of the arithmetic instead of needing a rule of its own. The basket
+total turns coral the moment it passes what he has, so the till confirms something he
+can already see. And with nothing in his pocket at all it charges nothing and says
+where coins come from &mdash; *find a ⭐ for 5 more* &mdash; rather than reporting a
+purchase of zero.
+
+Three tests hold that shape: that the coins go **down** by exactly the total, that
+four coins against a five-coin basket spends two and puts four things back, and that
+a penniless trip charges nothing and points him at a star.
 
 **Money is his, not a district's.** Coins live beside the character he plays as
 rather than inside a world, so a star he finds in one district is still in his
 pocket in the next &mdash; which is what a five-year-old means by *my money*. A
 wallet per district would have had him standing in his own shop with nothing to
 ring up because the stars were somewhere else. Five coins a star; ten stars a
-district; and he can always make another district.
+district; and he can always make another district. That last part matters more now
+that money can be spent: fifty coins a world, and worlds are free, so there is no
+such thing as running out for good.
 
 **The shelf was flickering, and the cause was two boxes in the same place.** The
 uprights ran the full height of the block and all three boards passed through

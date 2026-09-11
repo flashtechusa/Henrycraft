@@ -78,16 +78,32 @@ body>canvas{display:block;position:fixed;inset:0}
    line of its own, so five of them came down the left-hand side as a column and sat across
    the buttons on the right. Stacking two named rows puts the racing chips under the others
    at any width, with no offset to guess at - measuring one against a magic 62px was the
-   second attempt, and it was 8px wrong the moment the row above it grew. */
-#topLeft{position:absolute;top:calc(env(safe-area-inset-top) + 12px);left:calc(env(safe-area-inset-left) + 12px);
-  display:flex;flex-direction:column;align-items:flex-start;gap:8px}
-.hudrow{display:flex;gap:10px;align-items:center}
+   second attempt, and it was 8px wrong the moment the row above it grew.
+
+   The corners are ONE flex row rather than two things pinned to opposite edges. Pinned,
+   they had no idea the other existed: on a phone in landscape the left-hand chips simply
+   grew along until they ran under the camera and sound buttons, which is what Henry's dad
+   photographed. Now the left group is a flex item that can only have the room the buttons
+   are not using, and the chip row inside it wraps to a second line when even that is not
+   enough. Wrapping is the fallback here, not the layout - which is why the paragraph above
+   still stands. A second line of chips is readable; chips underneath buttons are not. */
+#topBar{position:absolute;top:calc(env(safe-area-inset-top) + 12px);
+  left:calc(env(safe-area-inset-left) + 12px);right:calc(env(safe-area-inset-right) + 12px);
+  display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+#topLeft{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0}
+.hudrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 /* Only two small chips, and only while driving - but kept narrow on a phone all the same,
    where what is left beside the buttons is not much. */
 @media (max-width:480px){ #raceRow .chip{padding:6px 8px;letter-spacing:.02em} }
-#topRight{position:absolute;top:calc(env(safe-area-inset-top) + 12px);right:calc(env(safe-area-inset-right) + 12px);display:flex;gap:8px}
+/* The lap chips stay on one line even when there is not quite room, which is the whole
+   point of giving them a row of their own: a lap number and a clock coming down the side
+   of the screen as a column is the bug this row was built to fix, and a clock that is two
+   pixels wider than its share of a 390px phone is not a reason to bring it back. */
+#raceRow{flex-wrap:nowrap}
+/* Never squeezed: these are the buttons, and a button that has been shrunk out of its
+   touch target is worse than a chip on a second line. */
+#topRight{display:flex;gap:8px;flex:0 0 auto}
 #topRight .icon{padding:8px 10px;font-size:18px;min-width:44px;justify-content:center}
-#logo{font-size:15px;color:var(--sun);text-shadow:0 2px 0 var(--ink)}
 #starChip{font-size:17px}
 #starChip b{color:var(--sun);font-size:19px}
 
@@ -114,6 +130,9 @@ body>canvas{display:block;position:fixed;inset:0}
   background-size:100% 100%;image-rendering:pixelated;
 }
 #basketTotal{color:var(--sun);white-space:nowrap}
+/* More in the basket than there is in his pocket. Warm rather than alarming: it
+   is a nudge to put something back, not a telling-off. */
+#basketTotal.short{color:#ff9d7a}
 /* Driving is not shopping either. */
 #basket.drivinghide{display:none}
 .slot{
@@ -305,9 +324,8 @@ body.touch #hint{display:none}
    hits this. Shrink the controls to fit; the buttons stay comfortably bigger
    than the 44px minimum touch target. */
 @media (max-height:520px){
-  #topLeft,#topRight{top:calc(env(safe-area-inset-top) + 8px)}
+  #topBar{top:calc(env(safe-area-inset-top) + 8px)}
   #topRight .icon{padding:6px 8px;font-size:16px;min-width:38px}
-  #logo{font-size:12px}
   #starChip{font-size:14px}
   #starChip b{font-size:16px}
 
@@ -585,9 +603,14 @@ body.touch #hint{display:none}
 <body>
 
 <div id="ui">
+ <!-- Both corners in one row, so the chips on the left can never grow along under the
+      buttons on the right. The name of the game used to sit at the front of this row and
+      has been taken out: it is on the tab, on the title screen and on the sign outside,
+      and on a phone in landscape it was costing a third of the row to tell him something
+      he already knew. -->
+ <div id="topBar">
   <div id="topLeft">
    <div class="hudrow">
-    <div class="chip" id="logo">HENRY'S BLOCK</div>
     <div class="chip" id="starChip">⭐ <b><span id="starNum">0</span>/<span id="starTot">10</span></b></div>
     <!-- His money. Always there, because it is his whether or not there is a shop
          to spend it in, and nothing in the game can take it off him. -->
@@ -637,6 +660,7 @@ body.touch #hint{display:none}
     <button class="chip icon blockbtn" id="btnSound" title="Sound">🔊</button>
     <button class="chip icon blockbtn" id="btnMenu" title="Menu">⚙️</button>
   </div>
+ </div>
 
   <div id="crosshair"></div>
   <div id="palette"></div>
@@ -773,8 +797,10 @@ body.touch #hint{display:none}
       Stand at a shelf and the <b>🛒</b> button appears: press it to put that
       thing in your basket, as many times as you like &mdash; a shelf never runs
       out. Then stand at the <b>register</b> and press <b>🧾</b> to ring it
-      all up: it beeps once for every thing and pays you the total. Every ⭐ you
-      find is worth <b>5 coins</b> too, and nothing can take them off you.</small>
+      all up: it beeps once for every thing and your coins go down as it does.
+      Every ⭐ you find is worth <b>5 coins</b>, so that is where the money comes
+      from. If the basket costs more than you have, the number turns orange &mdash;
+      the till buys what it can and the rest goes back on the shelf.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -5806,12 +5832,19 @@ function updateCarried(){
    never changes, which also means nothing about shopping has to travel to
    anybody else: a shelf is a block, and blocks already travel.
 
-   And the register PAYS him. He is the shopkeeper - that is who a child is when
-   they play shop - so the coins go up when he rings the basket through, and up
-   again for every star he finds. Nothing in this game takes coins off him, which
-   means there is no way to end up at nothing with a full basket and no way
-   forward. If he would rather be the customer and pay, that is one sign flip
-   here and one message. */
+   And the register CHARGES him. He is the customer: stars are where money comes
+   from and the shop is where it goes, which is the whole point of having a number
+   in your pocket. It used to pay him, on the theory that a child playing shop is
+   the shopkeeper, and his dad said no - buying should take the coins off.
+
+   Which means this is now the one place in the game where he can be told he
+   cannot have something, so it is handled with some care. Coins never go below
+   nothing. The till rings up as far as his money goes and puts the rest back on
+   the shelf, rather than refusing the whole basket at the counter - so there is
+   no stuck state, nothing is lost (the shelves are infinite), and the worst case
+   is that he walks out with four things instead of six and goes to find another
+   star. The basket total turns coral the moment it passes what he has, so the
+   till is a confirmation rather than a surprise. */
 var BASKET_MAX=12;
 var COINS_PER_STAR=5;
 /* Two blocks and a bit: far enough to reach a shelf he is standing in front of,
@@ -5900,9 +5933,14 @@ function takeGoods(){
   return true;
 }
 /* Ringing up, one item at a time, because the beeping is the point. Runs on
-   timers rather than in one go so he hears each item and watches the total
-   climb; `ringing` holds the button while it does, so a second press cannot
-   start a second till running over the top of the first. */
+   timers rather than in one go so he hears each item and watches the coins go
+   down one thing at a time; `ringing` holds the button while it does, so a second
+   press cannot start a second till running over the top of the first.
+
+   Paying happens per beep rather than in one lump at the end, for two reasons: the
+   counter going down in step with the beeping is the thing he is actually watching,
+   and it makes running out mid-basket fall out of the arithmetic instead of needing
+   a rule of its own. */
 var ringing=null;
 function ringUp(){
   if(ringing || !player.basket.length) return false;
@@ -5911,18 +5949,32 @@ function ringUp(){
   var i=0, running=0;
   ringing={items:items, at:0, total:0};
   paintShopButton();
-  function beep(){
-    if(i>=items.length){
-      /* Paid. Into his own pocket, and saved straight away - money he watched go
-         in and then lost would be the meanest bug in the game. */
-      addCoins(running);
-      toast('🪙 ' + running + (running===1?' coin!':' coins!'),2600);
-      ringing=null;
-      paintBasket();
-      paintShopButton();
-      return;
+  function finish(putBack){
+    ringing=null;
+    paintBasket();
+    paintShopButton();
+    /* What happened, in his words. The short case leads with what he got rather
+       than with what he could not have - and when he got nothing at all, it says
+       where coins come from instead of reporting a purchase of zero, which is both
+       useless and a bit sad. */
+    if(putBack && !running){
+      toast('🪙 Not enough coins yet - find a ⭐ for ' + COINS_PER_STAR + ' more!',3200);
+    } else if(putBack){
+      toast('🪙 ' + running + (running===1?' coin':' coins') + ' spent - ' + putBack +
+            (putBack===1?' thing went':' things went') + ' back on the shelf',3200);
+    } else {
+      toast('🪙 ' + running + (running===1?' coin':' coins') + ' spent - ' +
+            wallet + ' left',2600);
     }
-    running+=priceOf(items[i]);
+  }
+  function beep(){
+    if(i>=items.length){ finish(0); return; }
+    var cost=priceOf(items[i]);
+    /* Asked before it is taken. spendCoins would floor at nothing on its own, but
+       then he would be charged part of the price of something and still not get it,
+       which is the one outcome that would actually feel unfair. */
+    if(cost>wallet){ finish(items.length-i); return; }
+    running+=spendCoins(cost);
     ringing.at=i+1; ringing.total=running;
     i++;
     sfx('star');
@@ -5952,7 +6004,12 @@ function paintBasket(){
     d.style.backgroundImage='url('+swatchURL(DEFS[list[i]].tiles[2])+')';
     strip.appendChild(d);
   }
-  document.getElementById('basketTotal').textContent='🪙 '+total;
+  var tot=document.getElementById('basketTotal');
+  tot.textContent='🪙 '+total;
+  /* Coral once the basket costs more than he has, so the till confirms something he
+     can already see rather than springing it on him at the counter. Never while the
+     till is running: the total shown then is what has been paid, not what is owed. */
+  tot.classList.toggle('short',!ringing && total>wallet);
 }
 function paintShopButton(){
   var b=document.getElementById('shopBtn');
@@ -8996,11 +9053,27 @@ function addCoins(n){
   n=Math.max(0,Math.round(n||0));
   if(!n) return;
   /* Capped where a five-year-old's counting stops caring and a number stops
-     fitting in the chip. There is nothing to spend them on, so this is a cap on
-     the digits rather than on the fun. */
+     fitting in the chip. */
   wallet=Math.min(999999,wallet+n);
   paintCoins();
+  /* A star found while he is carrying a basket can put it back within reach, so the
+     coral warning has to answer to the money as well as to the shopping. */
+  paintBasket();
   writeJSON(WALLET_KEY,{coins:wallet}).catch(function(){});
+}
+/* Paying for something. Returns what was actually taken, which is never more than
+   he has: the floor at nothing is what stops a shopping trip turning into a debt a
+   five-year-old cannot read, let alone clear. Callers ask first (see ringUp) and
+   use the return value to say what really happened. */
+function spendCoins(n){
+  n=Math.max(0,Math.round(n||0));
+  var took=Math.min(n,wallet);
+  if(!took) return 0;
+  wallet-=took;
+  paintCoins();
+  paintBasket();
+  writeJSON(WALLET_KEY,{coins:wallet}).catch(function(){});
+  return took;
 }
 function loadWallet(){
   return readJSON(WALLET_KEY).then(function(rec){
@@ -11089,6 +11162,8 @@ window.__henrycraft={
             shown:!document.getElementById('shopBtn').classList.contains('hide'),
             icon:document.getElementById('shopBtn').textContent,
             strip:document.querySelectorAll('#basketItems .bitem').length,
+            /* Whether the basket is showing as costing more than he has. */
+            short:document.getElementById('basketTotal').classList.contains('short'),
             barShown:!document.getElementById('basket').classList.contains('hide')};
   },
   doShop:doShopAction, takeGoods:takeGoods, ringUp:ringUp,
@@ -11101,7 +11176,7 @@ window.__henrycraft={
   /* Which cells he has changed. Used by the shop tests to say that filling a
      basket changes no blocks at all, which is why none of it needs a server. */
   edits:function(){ var o={}; for(var k in edits) o[k]=edits[k]; return o; },
-  addCoins:addCoins,
+  addCoins:addCoins, spendCoins:spendCoins,
   price:function(id){ return priceOf(id); },
   prices:function(){ var o={}; for(var k in PRICE) o[k]=PRICE[k]; return o; },
   emptyBasket:function(){ player.basket=[]; paintBasket(); paintShopButton(); },

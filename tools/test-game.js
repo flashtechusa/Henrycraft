@@ -1940,13 +1940,19 @@ function slope(pts) {
     /* Ring it up, and wait for it to finish rather than for a stopwatch: the
        beeps are on timers, and this page draws well under a frame a second, so
        a fixed sleep reads a till that is still going and calls it broken. */
+    /* Money he can certainly afford, so this measures the charge and not the
+       running-out rule, which is checked on its own below. */
+    H.addCoins(100);
     const coinsBefore = H.coins();
     const expected = H.shop().total;
+    out.affordShort = H.shop().short;
     H.doShop();
     for (let i = 0; i < 200 && H.shop().ringing; i++) {
       await new Promise(r => setTimeout(r, 50));
     }
-    out.paid = H.coins() - coinsBefore;
+    /* Charged, not paid: the number in his pocket goes DOWN by the total. This is
+       the direction his dad asked for, and it is the whole of the check. */
+    out.charged = coinsBefore - H.coins();
     out.expected = expected;
     out.emptyAfter = H.shop().basket.length === 0;
     out.barGone = H.shop().barShown === false;
@@ -1985,9 +1991,11 @@ function slope(pts) {
   check('at the till the button becomes a checkout, not another shelf',
         shop.atTill.action === 'ring' && shop.atTill.shown === true,
         JSON.stringify(shop.atTill));
-  check('ringing up pays exactly what the basket came to',
-        shop.paid === shop.expected && shop.expected > 0,
-        `paid ${shop.paid}, basket came to ${shop.expected}`);
+  check('ringing up takes exactly what the basket came to, off his coins',
+        shop.charged === shop.expected && shop.expected > 0,
+        `charged ${shop.charged}, basket came to ${shop.expected}`);
+  check('and a basket he can afford is not flagged as too dear',
+        shop.affordShort === false, JSON.stringify({short: shop.affordShort}));
   check('and leaves the basket empty and the bar gone',
         shop.emptyAfter && shop.barGone,
         JSON.stringify({empty: shop.emptyAfter, barGone: shop.barGone}));
@@ -1995,7 +2003,65 @@ function slope(pts) {
         shop.capped === 12 && /full/i.test(shop.cappedSaid),
         `${shop.capped} things, said "${shop.cappedSaid}"`);
   note(`a basket of ${shop.wanted.length} came to ${shop.expected} coins ` +
-       `(${shop.prices.join('+')}) and paid ${shop.paid}`);
+       `(${shop.prices.join('+')}) and charged ${shop.charged}`);
+
+  /* Running out at the till. Now that buying takes coins off, this is the one
+     place in the game where he can be told he cannot have something - so it has
+     to land softly. The till buys as far as his money goes and puts the rest back
+     (the shelves are infinite, so nothing is lost), he is never left holding a
+     basket he cannot pay for, and the purse never goes below nothing. */
+  const broke = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids, out = {};
+    const px = 24, pz = 24, y = 16;
+    const wait = async () => {
+      for (let i = 0; i < 200 && H.shop().ringing; i++) {
+        await new Promise(r => setTimeout(r, 50));
+      }
+    };
+    /* Bread 2 then apples 3, with four coins: the first goes through and the
+       second cannot, which is the boundary worth checking. */
+    H.emptyBasket();
+    H.spendCoins(999999);
+    H.addCoins(4);
+    H.movePlayer(px + 2.5, y, pz + 0.5); H.doShop();
+    H.movePlayer(px + 2.5, y, pz + 1.5); H.doShop();
+    out.basket = H.shop().basket.length;
+    out.total = H.shop().total;
+    /* Said before he gets there, not sprung on him at the counter. */
+    out.warned = H.shop().short;
+    H.movePlayer(px + 4.2, y, pz + 2.5);
+    out.atTill = H.shop().action;
+    H.doShop();
+    await wait();
+    out.left = H.coins();
+    out.said = document.getElementById('toast').textContent;
+    out.emptied = H.shop().basket.length === 0;
+    /* And with nothing at all, the till charges nothing and says where coins
+       come from rather than reporting a purchase of zero. */
+    H.emptyBasket();
+    H.spendCoins(999999);
+    H.movePlayer(px + 2.5, y, pz + 0.5); H.doShop();
+    H.movePlayer(px + 4.2, y, pz + 2.5);
+    H.doShop();
+    await wait();
+    out.pennilessLeft = H.coins();
+    out.pennilessSaid = document.getElementById('toast').textContent;
+    out.pennilessEmptied = H.shop().basket.length === 0;
+    H.emptyBasket();
+    return out;
+  });
+  check('a basket that costs more than he has is flagged before the till',
+        broke.warned === true && broke.total === 5 && broke.basket === 2,
+        JSON.stringify(broke));
+  check('the till buys what his coins reach and puts the rest back',
+        broke.left === 2 && broke.emptied && /back on the shelf/i.test(broke.said),
+        JSON.stringify(broke));
+  check('with no coins at all it charges nothing and points him at a star',
+        broke.pennilessLeft === 0 && broke.pennilessEmptied &&
+        /⭐|star/i.test(broke.pennilessSaid),
+        JSON.stringify(broke));
+  note(`four coins against a five-coin basket: spent 2, left ${broke.left}, ` +
+       `told "${broke.said}"`);
 
   // ---- 6f2: a shelf holds its own goods -----------------------------------
   /* It looked like three shelves and behaved like one. Goods were ordinary blocks
@@ -2127,19 +2193,32 @@ function slope(pts) {
     }
     out.found = H.starsFound();
     out.perStar = H.coins() - before;
-    /* Nothing in the game takes coins away, which is what stops him ending up
-       at nothing with a full basket and no way forward. */
+    /* Buying is the one thing that takes coins off, and addCoins is not it: a
+       negative there is a caller that has gone wrong, and it must not quietly
+       empty his pocket. */
     const held = H.coins();
     H.addCoins(-50);
-    out.cannotGoDown = H.coins() === held;
+    out.addCannotTake = H.coins() === held;
     H.addCoins(7);
     out.wentUp = H.coins() === held + 7;
+    /* Spending does take them, and stops at nothing. There is no debt in this
+       game: asking for more than he has leaves him at zero, never below. */
+    out.spentSome = H.spendCoins(3);
+    out.afterSome = H.coins();
+    out.spentAll = H.spendCoins(999999);
+    out.floor = H.coins();
+    out.spentNothingMore = H.spendCoins(10);
     return out;
   });
   check('a star pays coins', money.found === 1 && money.perStar === 5,
         JSON.stringify(money));
-  check('and nothing can take coins off him',
-        money.cannotGoDown && money.wentUp, JSON.stringify(money));
+  check('and only buying takes them off him, never a stray negative',
+        money.addCannotTake && money.wentUp, JSON.stringify(money));
+  check('spending takes exactly what was asked for, while he has it',
+        money.spentSome === 3 && money.afterSome === money.spentAll,
+        JSON.stringify(money));
+  check('and a purse can be emptied but never overdrawn',
+        money.floor === 0 && money.spentNothingMore === 0, JSON.stringify(money));
 
   /* Coins are his, not one district's: he finds a star here and the money is
      still in his pocket over there. Checked across a real district switch and a
@@ -2307,6 +2386,22 @@ function slope(pts) {
     await p2.waitForTimeout(250);
 
     const r = await p2.evaluate(() => {
+      /* Every chip the top row can ever hold, all at once, and measured in the same
+         breath as it is shown. The corners used to be pinned to opposite edges with no
+         idea the other existed, and with only the default chips up they never quite met -
+         so this test passed while a phone in landscape, with an animal in reach and
+         somebody else in the world, put the district chip underneath the camera button.
+         The worst case is the case worth measuring.
+
+         Nothing is awaited between showing and measuring on purpose: paintShopButton and
+         paintCarryButton run every frame and put these three straight back, so a version
+         of this that showed them and then waited measured four buttons and called it the
+         worst case. */
+      ['peopleChip', 'holdBtn', 'shopBtn', 'sitBtn', 'kartBtn']
+        .forEach(id => document.getElementById(id).classList.remove('hide'));
+      document.getElementById('peopleNum').textContent = '8';
+      /* A generated two-word name, which is what districts are actually called. */
+      document.getElementById('districtChip').textContent = 'Frosty Badger';
       const g = id => {
         const b = document.getElementById(id).getBoundingClientRect();
         return {left: b.left, right: b.right, top: b.top, bottom: b.bottom, w: b.width, h: b.height};
@@ -2328,6 +2423,10 @@ function slope(pts) {
     });
 
     const fails = [];
+    /* The one that was missing, and the one he photographed: the chips on the left
+       running under the buttons on the right. */
+    if (overlap(r.topLeft, r.topRight)) fails.push('top-left chips under the top-right buttons');
+    if (r.topRight.right > r.vw + 0.5) fails.push('top-right buttons off the side');
     if (overlap(r.pads, r.topRight)) fails.push('pads over top-right chips');
     if (overlap(r.pads, r.topLeft)) fails.push('pads over top-left chips');
     if (overlap(r.pads, r.stick)) fails.push('pads over stick');
