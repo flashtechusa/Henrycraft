@@ -817,7 +817,7 @@ body.touch #hint{display:none}
       <br><br>
       What you buy goes in your <b>🎒 bag</b>, and you can <b>eat it</b>. Press
       <b>😋</b> to take a bite &mdash; three bites finishes a packet. Try the
-      biscuits and the cheese puffs.</small>
+      cookies and the cheese puffs.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -1006,7 +1006,7 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
     REGISTER=96,REGISTER1=97,REGISTER2=98,REGISTER3=99,
     BREAD=100,APPLES=101,MILK=102,
     /* Henry asked for these two by name, and by brand - which is the one thing they
-       cannot be. They are a blue pack of round biscuits and an orange bag of cheesy
+       cannot be. They are a blue pack of round cookies and an orange bag of cheesy
        puffs: what he means, drawn from the game's own colours, with nobody's logo
        on them. Same shape of thing as the bread and the milk, so they stock a
        shelf, fill a basket and get eaten without needing to know anything new. */
@@ -1170,7 +1170,7 @@ DEFS[TROUGH]   ={name:'Trough', tiles:[78,78,78], prop:'trough'};
 DEFS[BREAD]    ={name:'Bread',  tiles:[82,82,82], prop:'bread',  passable:true};
 DEFS[APPLES]   ={name:'Apples', tiles:[83,83,83], prop:'apples', passable:true};
 DEFS[MILK]     ={name:'Milk',   tiles:[84,84,84], prop:'milk',   passable:true};
-DEFS[OREOS]    ={name:'Biscuits', tiles:[87,87,87], prop:'oreos',   passable:true};
+DEFS[OREOS]    ={name:'Cookies', tiles:[87,87,87], prop:'oreos',   passable:true};
 DEFS[CHEETOS]  ={name:'Cheese Puffs', tiles:[88,88,88], prop:'cheetos', passable:true};
 
 /* What things are worth at the till, in coins.
@@ -2084,11 +2084,11 @@ function buildAtlas(){
     x.fillStyle='#3f8fd6'; x.fillRect(5,6,6,2);
     x.fillStyle='#d8d8d0'; x.fillRect(6,1,4,3);
   });
-  /* 87 a blue pack of round biscuits, one showing at the open end */
+  /* 87 a blue pack of round cookies, one showing at the open end */
   tile(87,function(x,r){
     fill(x,'#1b2f6b');
     x.fillStyle='#142454'; x.fillRect(0,0,16,2); x.fillRect(0,14,16,2);
-    /* the biscuit: dark ring, cream middle */
+    /* the cookie: dark ring, cream middle */
     x.fillStyle='#0d1836'; x.fillRect(4,4,8,8);
     x.fillStyle='#f2e6c8'; x.fillRect(6,6,4,4);
     x.fillStyle='#0d1836'; x.fillRect(7,7,2,2);
@@ -3375,7 +3375,7 @@ var PROP_SHAPE={
     [5,1,5,   11,10,11, MILK_TILE],
     [6.5,10,6.5, 9.5,13,9.5, MILK_TILE]
   ],
-  /* A pack of biscuits lying on its side, the way it sits on a shelf, with a
+  /* A pack of cookies lying on its side, the way it sits on a shelf, with a
      narrower crimped seam along the top. Stacked, not driven through: the body
      stops at y=5 and the seam starts there, which is the rule the whole prop
      sweep exists to keep. */
@@ -6143,7 +6143,7 @@ function takeBite(){
   return true;
 }
 /* Crumbs, at mouth height in front of wherever he is looking. The colour comes off
-   the food's own tile, so biscuit crumbs are dark and cheese-puff crumbs are orange
+   the food's own tile, so cookie crumbs are dark and cheese-puff crumbs are orange
    without any of it being written down twice. */
 var SNACK_CRUMB={};
 SNACK_CRUMB[BREAD]=0xd8ae72; SNACK_CRUMB[APPLES]=0xd33f36; SNACK_CRUMB[MILK]=0xfbfbf7;

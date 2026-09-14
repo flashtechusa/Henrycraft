@@ -2182,7 +2182,7 @@ function slope(pts) {
   /* "Henry would like the characters to actually be able to eat. He would also
      like to add packs of Oreos and packs of Cheetos to the game."
 
-     The packets are a blue pack of biscuits and an orange bag of cheese puffs -
+     The packets are a blue pack of cookies and an orange bag of cheese puffs -
      what he means, drawn in the game's own colours with nobody's brand on them.
      They are goods like any other, which is the point: nothing about the shelf,
      the basket or the till had to learn anything new.
@@ -2274,7 +2274,7 @@ function slope(pts) {
     H.emptyBag();
     return out;
   });
-  check('the biscuits and the cheese puffs both have a price',
+  check('the cookies and the cheese puffs both have a price',
         eat.priced.every(p => p > 0), JSON.stringify(eat.priced));
   check('they come off a shelf into the basket like any other food',
         eat.basket.length === 2 && eat.total === eat.priced[0] + eat.priced[1],
@@ -2304,7 +2304,7 @@ function slope(pts) {
         /buy|till/i.test(eat.nothingSaid), eat.nothingSaid);
   check('he cannot eat from the driving seat, and can again when he gets out',
         eat.canWalking && !eat.canDriving && eat.canAfter, JSON.stringify(eat));
-  note(`biscuits ${eat.priced[0]} and cheese puffs ${eat.priced[1]}: a basket of ` +
+  note(`cookies ${eat.priced[0]} and cheese puffs ${eat.priced[1]}: a basket of ` +
        `${eat.total} charged ${eat.charged}, and a packet took ${eat.bites.length - 1} bites`);
 
   // ---- 6g: the money ------------------------------------------------------
@@ -2389,7 +2389,7 @@ function slope(pts) {
   console.log('\n6h. his money is still there when he comes back tomorrow');
   /* And his shopping with it. The bag rides in the same record as the coins, so it
      is the same question asked of the other half of it - and it is the half that
-     would go unnoticed, because a missing packet of biscuits looks like having
+     would go unnoticed, because a missing packet of cookies looks like having
      eaten it. */
   const bagBefore = await page.evaluate(() => {
     const H = window.__henrycraft;

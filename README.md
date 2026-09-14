@@ -1140,7 +1140,7 @@ item at a time, beeping for each, and takes the total off his coins.
 **A price is what makes something shoppable.** The basket looks for any block that
 has one, so the food that already existed &mdash; a cake, a cup, a place setting
 &mdash; can go on a shelf and be rung up, without any of it needing to know that
-shops exist. Bread 2, apples 3, milk 2, cup 1, cake 4, dinner 5, biscuits 3, cheese
+shops exist. Bread 2, apples 3, milk 2, cup 1, cake 4, dinner 5, cookies 3, cheese
 puffs 3. Small numbers on
 purpose: a basket that comes to eleven is a number he can read out loud.
 
@@ -1189,7 +1189,7 @@ a penniless trip charges nothing and points him at a star.
 *"Henry would like the characters to actually be able to eat. He would also like to add
 packs of Oreos and packs of Cheetos to the game."*
 
-The packets are a **blue pack of biscuits** and an **orange bag of cheese puffs** &mdash;
+The packets are a **blue pack of cookies** and an **orange bag of cheese puffs** &mdash;
 what he means, drawn from the game's own colours with nobody's brand on them. That is the
 one thing they could not be: he asked for them by name, and a name is the part I cannot
 give him. Otherwise they are goods like any other, which is the whole point &mdash; nothing
