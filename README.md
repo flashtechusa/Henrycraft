@@ -1197,10 +1197,24 @@ about the shelf, the basket or the till had to learn anything new to sell them.
 
 **What he pays for now goes in his bag.** Ringing up used to make the shopping vanish,
 which is a strange thing for a shop to do and, once the till started charging, left him
-paying for nothing at all. Bought food goes into a 🎒 bag on its own HUD row, and the bag
-is what he eats out of &mdash; anywhere, at any time, no shop required once he has been to
-one. It rides in the wallet record beside his coins rather than in a district save, for the
-same reason they do: a packet bought in one world is still in his pocket in the next.
+paying for nothing at all. Bought food goes into a 🎒 bag, and the bag is what he eats out
+of &mdash; anywhere, at any time, no shop required once he has been to one. It rides in the
+wallet record beside his coins rather than in a district save, for the same reason they do:
+a packet bought in one world is still in his pocket in the next.
+
+**The bag is a chip with a number, and its contents live behind a tap.** The first version
+put a picture of every item along its own HUD row, which his dad saw on a phone held
+sideways: it cost a whole line of the screen to show him what he already knew he had, and
+gave him no way to say which of it he wanted. Now it is one chip up in the top row, and
+tapping it opens the same card the block picker uses &mdash; *What would you like to eat?*
+&mdash; with everything in the bag, by name. Tapping one brings it to the front and takes a
+bite there and then, because tapping a picture of a cookie and having nothing happen is not
+what tapping a picture of a cookie should do. 😋 is then another bite of the same thing,
+which is how a packet gets finished without opening the bag three times.
+
+Choosing something else part way through a packet starts the new one whole. There is no
+half-eaten bookkeeping: nothing here can be won or lost, and *my cookie went back to being a
+whole cookie* is the better of the two available surprises.
 
 **Three bites to a packet**, with the thing getting visibly smaller in his hand each time.
 One press making food disappear would not have been *actually able to eat*. The packet is a

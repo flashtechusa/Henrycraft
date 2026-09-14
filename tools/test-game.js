@@ -2264,6 +2264,29 @@ function slope(pts) {
     H.eat();
     out.nothingSaid = document.getElementById('toast').textContent;
 
+    /* The bag is a chip with a count, and what is in it lives behind a tap. His dad
+       asked for that shape: the pictures used to sit along the HUD, costing a line
+       of a phone screen to show him what he had and giving him no way to say which
+       of it he wanted. */
+    H.emptyBag();
+    [ids.OREOS, ids.CHEETOS, ids.BREAD].forEach(g => H.addSnack(g));
+    out.chipCount = H.snacks().count;
+    out.closedAtFirst = H.snacks().open;
+    document.getElementById('bagChip').click();
+    out.openedByTap = H.snacks().open;
+    out.cards = H.snacks().strip;
+    out.labels = [...document.querySelectorAll('#bagGrid .slot span')].map(e => e.textContent);
+    /* Tap the cheese puffs - the second one - and he must eat THAT, not whatever
+       happened to be at the front. Choosing is the whole point of the panel. */
+    const puffs = [...document.querySelectorAll('#bagGrid .slot')]
+      .find(s => +s.dataset.id === ids.CHEETOS);
+    puffs.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));
+    await frame();
+    const picked = H.snacks();
+    out.picked = {front: picked.bag[0], bites: picked.bites, open: picked.open,
+                  wanted: ids.CHEETOS, bag: picked.bag.slice()};
+    H.emptyBag();
+
     /* Not while driving, and not with both arms round a guinea pig. */
     H.addSnack(ids.OREOS);
     out.canWalking = H.snacks().can;
@@ -2302,6 +2325,17 @@ function slope(pts) {
         JSON.stringify(eat));
   check('and pressing it with nothing in the bag says where food comes from',
         /buy|till/i.test(eat.nothingSaid), eat.nothingSaid);
+  check('the bag is a chip with a count, and stays shut until it is tapped',
+        eat.chipCount === '3' && eat.closedAtFirst === false && eat.openedByTap === true,
+        JSON.stringify({count: eat.chipCount, closed: eat.closedAtFirst,
+                        opened: eat.openedByTap}));
+  check('tapping it shows everything in there, by name',
+        eat.cards === 3 && eat.labels.join(',') === 'Cookies,Cheese Puffs,Bread',
+        JSON.stringify(eat.labels));
+  check('and tapping one eats that one, not whichever was at the front',
+        eat.picked.front === eat.picked.wanted && eat.picked.bites === 1 &&
+        eat.picked.open === false,
+        JSON.stringify(eat.picked));
   check('he cannot eat from the driving seat, and can again when he gets out',
         eat.canWalking && !eat.canDriving && eat.canAfter, JSON.stringify(eat));
   note(`cookies ${eat.priced[0]} and cheese puffs ${eat.priced[1]}: a basket of ` +
@@ -2541,7 +2575,7 @@ function slope(pts) {
          paintCarryButton run every frame and put these three straight back, so a version
          of this that showed them and then waited measured four buttons and called it the
          worst case. */
-      ['peopleChip', 'holdBtn', 'shopBtn', 'sitBtn', 'kartBtn', 'eatBtn']
+      ['peopleChip', 'holdBtn', 'shopBtn', 'sitBtn', 'kartBtn', 'eatBtn', 'bagChip']
         .forEach(id => document.getElementById(id).classList.remove('hide'));
       document.getElementById('peopleNum').textContent = '8';
       /* A generated two-word name, which is what districts are actually called. */

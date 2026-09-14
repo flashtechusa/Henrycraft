@@ -123,20 +123,20 @@ body>canvas{display:block;position:fixed;inset:0}
 }
 /* The basket: one chip in the HUD rows, holding a little picture of everything in
    it and what it comes to. The number is the point, and he can read a number. */
-#basketChip,#snackChip{display:flex;align-items:center;gap:7px}
-#basketItems,#snackItems{display:inline-flex;gap:3px;flex-wrap:wrap;max-width:min(60vw,420px)}
-#basketItems .bitem,#snackItems .bitem{
+#basketChip{display:flex;align-items:center;gap:7px}
+#basketItems{display:inline-flex;gap:3px;flex-wrap:wrap;max-width:min(60vw,420px)}
+#basketItems .bitem{
   width:26px;height:26px;border-radius:5px;border:2px solid var(--ink);
   background-size:100% 100%;image-rendering:pixelated;
 }
 #basketTotal{color:var(--sun);white-space:nowrap}
-/* Driving is not eating either. */
-#snackBag.drivinghide{display:none}
 /* More in the basket than there is in his pocket. Warm rather than alarming: it
    is a nudge to put something back, not a telling-off. */
 #basketTotal.short{color:#ff9d7a}
 /* Driving is not shopping either. */
 #basket.drivinghide{display:none}
+/* Driving is not eating either. */
+#bagChip.drivinghide{display:none}
 .slot{
   width:58px;height:58px;border-radius:10px;border:3px solid var(--ink);
   background-size:100% 100%;image-rendering:pixelated;
@@ -198,11 +198,15 @@ body.touch #blockBtn{
   font-size:10px;font-weight:800;letter-spacing:.04em;
   text-shadow:0 1px 0 #000,0 0 4px #000;pointer-events:none
 }
-#picker{
+#picker,#bagPanel{
   position:absolute;inset:0;z-index:20;pointer-events:auto;
   background:rgba(10,28,50,.62);display:flex;align-items:center;justify-content:center
 }
-#picker.hide{display:none}
+#picker.hide,#bagPanel.hide{display:none}
+/* Six across: the bag holds twelve, so a full one is two tidy rows on a phone
+   held sideways. */
+#bagGrid{display:grid;grid-template-columns:repeat(6,58px);gap:8px}
+#bagGrid .slot{width:58px;height:58px}
 .pickcard{
   background:var(--panel);border:4px solid var(--ink);border-radius:18px;
   box-shadow:0 6px 0 rgba(0,0,0,.45);padding:14px 16px
@@ -617,6 +621,11 @@ body.touch #hint{display:none}
     <!-- His money. Always there, because it is his whether or not there is a shop
          to spend it in, and nothing in the game can take it off him. -->
     <div class="chip" id="coinChip">🪙 <b><span id="coinNum">0</span></b></div>
+    <!-- What he has bought and can eat, as a count rather than a row of pictures.
+         The pictures used to live along here and cost a whole line of the screen to
+         show something he can see by tapping. Tap it to choose what to eat. -->
+    <button class="chip hide" id="bagChip" title="What is in your bag">🎒 <b><span
+         id="bagNum">0</span></b></button>
     <div class="chip" id="districtChip">Home</div>
     <!-- Only there while sharing. Tap it for who. -->
     <button class="chip hide" id="peopleChip" title="Who is here">👥 <b><span id="peopleNum">1</span></b></button>
@@ -629,15 +638,6 @@ body.touch #hint{display:none}
       <span>🧺</span>
       <span id="basketItems"></span>
       <b id="basketTotal">🪙 0</b>
-    </div>
-   </div>
-   <!-- What he has paid for and can eat. Its own row under the basket, because the
-        two are different things and showing them in one chip made "what I am buying"
-        and "what I already own" look like one list. -->
-   <div class="hudrow hide" id="snackBag">
-    <div class="chip" id="snackChip">
-      <span>🎒</span>
-      <span id="snackItems"></span>
     </div>
    </div>
    <!-- Both only on a circuit, and only while driving: the lap he is on, the clock for it,
@@ -683,6 +683,14 @@ body.touch #hint{display:none}
       <div class="pickhead">Pick a block</div>
       <div id="pickTabs" class="gtabs"></div>
       <div id="pickerGrid"></div>
+    </div>
+  </div>
+  <!-- The bag, opened. Same card as the block picker on purpose: he already knows
+       that tapping a picture in one of these chooses the thing. -->
+  <div id="bagPanel" class="hide">
+    <div class="pickcard">
+      <div class="pickhead">What would you like to eat?</div>
+      <div id="bagGrid"></div>
     </div>
   </div>
   <div id="hint">CLICK TO LOOK · W A S D MOVE · SPACE JUMP · CLICK DIG · RIGHT-CLICK BUILD · Q DIG DOWN · E DIG UP · G PICK UP AN ANIMAL · B BASKET · C EAT · F FLY (SPACE UP / SHIFT DOWN)</div>
@@ -815,9 +823,10 @@ body.touch #hint{display:none}
       from. If the basket costs more than you have, the number turns orange &mdash;
       the till buys what it can and the rest goes back on the shelf.
       <br><br>
-      What you buy goes in your <b>🎒 bag</b>, and you can <b>eat it</b>. Press
-      <b>😋</b> to take a bite &mdash; three bites finishes a packet. Try the
-      cookies and the cheese puffs.</small>
+      What you buy goes in your <b>🎒 bag</b> at the top, and you can <b>eat it</b>.
+      Tap the bag to see what is in there and pick the one you want; tap <b>😋</b>
+      for another bite of it. Three bites finishes a packet. Try the cookies and the
+      cheese puffs.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -5564,9 +5573,11 @@ function paintKartButton(){
   if(pal) pal.classList.toggle('drivinghide',driving);
   var bsk=document.getElementById('basket');
   if(bsk) bsk.classList.toggle('drivinghide',driving);
-  /* And the bag, for the same reason: he cannot eat from the driving seat either. */
-  var bag=document.getElementById('snackBag');
+  /* And the bag, for the same reason: he cannot eat from the driving seat either.
+     Shut it too, in case he climbed in with it open. */
+  var bag=document.getElementById('bagChip');
   if(bag) bag.classList.toggle('drivinghide',driving);
+  if(driving) closeBag();
   /* The white cross in the middle goes too. It is an aiming mark for digging and building,
      and from the driving seat there is nothing to aim at - the wireframe box it aims with
      was already taken away. It was the one thing I left behind when everything else went,
@@ -6207,20 +6218,72 @@ function doEat(){
   }
   takeBite();
 }
+/* The bag is a count up in the top row, not a row of pictures of its own.
+
+   The pictures used to sit along the HUD under the basket, which cost a whole line
+   of a phone screen held sideways to show him something he already knew he had -
+   and gave him no way to say which of it he wanted. His dad asked for the other
+   shape, and it is the right one: a chip with a number, and the contents behind a
+   tap. Same card as the block picker, because he already knows what tapping a
+   picture in one of those does. */
 function paintSnacks(){
-  var box=document.getElementById('snackBag');
-  if(!box) return;
-  box.classList.toggle('hide',!player.snacks.length);
-  var strip=document.getElementById('snackItems');
-  strip.textContent='';
-  for(var i=0;i<player.snacks.length;i++){
+  var chip=document.getElementById('bagChip');
+  if(!chip) return;
+  chip.classList.toggle('hide',!player.snacks.length);
+  document.getElementById('bagNum').textContent=String(player.snacks.length);
+  if(!player.snacks.length) closeBag();
+  else if(!document.getElementById('bagPanel').classList.contains('hide')) fillBag();
+}
+function fillBag(){
+  var grid=document.getElementById('bagGrid');
+  if(!grid) return;
+  grid.textContent='';
+  player.snacks.forEach(function(id,i){
     var d=document.createElement('div');
-    d.className='bitem';
-    d.style.backgroundImage='url('+swatchURL(DEFS[player.snacks[i]].tiles[2])+')';
-    /* The one he is eating shows how far through it he is. */
-    if(i===0 && player.bites) d.style.opacity=String(1-player.bites/BITES*0.6);
-    strip.appendChild(d);
+    /* The one he is part way through is marked, and shows it by fading with each
+       bite - the same signal the row of pictures used to carry. */
+    d.className='slot'+(i===0&&player.bites?' on':'');
+    d.style.backgroundImage='url('+swatchURL(DEFS[id].tiles[2])+')';
+    d.dataset.id=id;
+    d.dataset.at=i;
+    if(i===0 && player.bites) d.style.opacity=String(1-player.bites/BITES*0.5);
+    d.innerHTML='<span>'+DEFS[id].name+'</span>';
+    d.addEventListener('pointerdown',function(e){
+      e.preventDefault(); e.stopPropagation();
+      chooseSnack(i);
+    });
+    grid.appendChild(d);
+  });
+}
+function openBag(){
+  if(!player.snacks.length){
+    toast('🛒 Nothing to eat yet - buy something at the till!',2400);
+    return false;
   }
+  fillBag();
+  document.getElementById('bagPanel').classList.remove('hide');
+  return true;
+}
+function closeBag(){
+  var p=document.getElementById('bagPanel');
+  if(p) p.classList.add('hide');
+}
+/* Picking one out of the bag. It comes to the front and he takes a bite of it
+   there and then, because tapping a picture of a cookie and having nothing happen
+   is not what tapping a picture of a cookie should do.
+
+   Choosing something else part way through a packet starts the new one whole. No
+   half-eaten bookkeeping: there is nothing to win here, and "my cookie went back
+   to being a whole cookie" is a better surprise than the other kind. */
+function chooseSnack(i){
+  if(i<0||i>=player.snacks.length) return false;
+  if(i>0){
+    var pick=player.snacks.splice(i,1)[0];
+    player.snacks.unshift(pick);
+    player.bites=0;
+  }
+  closeBag();
+  return takeBite();
 }
 function paintEatButton(){
   var b=document.getElementById('eatBtn');
@@ -7647,6 +7710,13 @@ el('sitBtn').addEventListener('click',function(){ toggleSit(); });
 el('holdBtn').addEventListener('click',function(){ toggleCarry(); });
 el('shopBtn').addEventListener('click',function(){ doShopAction(); });
 el('eatBtn').addEventListener('click',function(){ doEat(); });
+/* The bag opens what is in it; 😋 takes another bite of whatever he already has in
+   his hand, which is how a packet gets finished without opening the bag three times. */
+el('bagChip').addEventListener('click',function(){ if(!player.kart) openBag(); });
+/* Tapping the dimmed background puts it away, the same as the block picker. */
+el('bagPanel').addEventListener('pointerdown',function(e){
+  if(e.target.id==='bagPanel') closeBag();
+});
 el('btnSound').addEventListener('click',function(){ setMuted(!muted); });
 
 /* ---------------- overlays ---------------- */
@@ -11444,12 +11514,16 @@ window.__henrycraft={
   snacks:function(){
     return {bag:player.snacks.slice(), bites:player.bites, can:canEat(),
             shown:!document.getElementById('eatBtn').classList.contains('hide'),
-            barShown:!document.getElementById('snackBag').classList.contains('hide'),
-            strip:document.querySelectorAll('#snackItems .bitem').length,
+            /* The chip up in the top row, and the panel it opens. */
+            barShown:!document.getElementById('bagChip').classList.contains('hide'),
+            count:document.getElementById('bagNum').textContent,
+            open:!document.getElementById('bagPanel').classList.contains('hide'),
+            strip:document.querySelectorAll('#bagGrid .slot').length,
             held:!!(heldSnack&&heldSnack.visible),
             heldScale:heldSnack?+heldSnack.scale.x.toFixed(3):0};
   },
   eat:doEat, bite:takeBite, addSnack:addSnack, bites:BITES,
+  openBag:openBag, closeBag:closeBag, chooseSnack:chooseSnack,
   emptyBag:function(){ player.snacks=[]; player.bites=0;
                        paintSnacks(); paintEatButton(); updateHeldSnack(); },
   zooToSave:zooToSave, zooFromSave:zooFromSave,
