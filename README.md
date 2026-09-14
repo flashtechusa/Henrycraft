@@ -1146,6 +1146,23 @@ purpose: a basket that comes to eleven is a number he can read out loud.
 
 Two decisions in there are about him being five rather than about shops.
 
+**A shelf tapped with a shelf in hand stacks instead of spinning.** *"When we try and add
+a shelf on top of a shelf most times it just moves the shelf instead of putting a new one
+on top."* It was turning it: `turnFurniture` runs before placement so that tapping a chair
+turns the chair &mdash; right for a chair, nobody stands a chair on a chair &mdash; but a
+shelf has four facings too, so a tap with a shelf in his hand spun the one already there.
+Four taps went 92, 93, 94, 95 and back to 92: all the way round the compass and still one
+shelf.
+
+Placing against the face he is pointing at could not have fixed it either. Standing in
+front of a shelf the ray enters its *front* face, so the new one would go between him and
+the old one, where there is no room because that is where he is standing. On top is the
+only place he could have meant, so that is where it goes &mdash; climbing to the top of the
+stack rather than only looking one cell up, so he can keep tapping the shelf in front of
+him and watch the tower grow. The new one faces the way the one below it faces, so a stack
+stays one piece of furniture rather than a spiral staircase. Turning still works with
+anything else in his hand, and a test holds that too.
+
 **Taking something off a shelf does not empty the shelf.** A shop he has to
 restock is a shop that runs out, and a five-year-old filling a basket taps the
 same thing twenty times &mdash; which should be twenty apples, not one apple and

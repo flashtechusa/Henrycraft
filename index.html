@@ -6755,6 +6755,42 @@ function stockShelf(h){
   sfx('place');
   return true;
 }
+/* A shelf tapped with a shelf in his hand means ANOTHER shelf, on top.
+
+   turnFurniture runs before placing so that tapping a chair turns the chair rather
+   than standing a block on its seat, which is right for a chair - nobody puts a
+   chair on a chair. A shelf is the one thing in this game that is meant to be
+   stacked, and the ideas page tells him to stack it, so that rule was quietly
+   eating the thing he was actually trying to do: "most times it just moves the
+   shelf instead of putting a new one on top".
+
+   Placing against the face he is pointing at could not have expressed it either.
+   Standing in front of a shelf, the ray enters its front face, so the new one would
+   go between him and the old one - where there is no room, because that is where he
+   is standing. On top is the only place he could have meant.
+
+   It climbs to the top of the stack rather than only looking one cell up, so he can
+   keep tapping the shelf in front of him and watch the tower grow, instead of having
+   to aim at the highest one each time. The new shelf faces the way the one below it
+   faces, so a stack stays one piece of furniture rather than a spiral staircase.
+
+   Turning a shelf still works, with anything else in his hand. */
+var SHELF_STACK_MAX=12;
+function stackShelf(t){
+  if(!t) return false;
+  var below=getBlock(t.x,t.y,t.z), aimed=DEFS[below], held=DEFS[selected];
+  if(!aimed || !held || aimed.family!=='shelf' || held.family!=='shelf') return false;
+  var y=t.y+1, n=0;
+  while(inside(t.x,y,t.z) && DEFS[getBlock(t.x,y,t.z)] &&
+        DEFS[getBlock(t.x,y,t.z)].family==='shelf' && n<SHELF_STACK_MAX){
+    below=getBlock(t.x,y,t.z); y++; n++;
+  }
+  if(!inside(t.x,y,t.z) || !replaceable(getBlock(t.x,y,t.z))) return false;
+  if(cellHasPlayer(t.x,y,t.z)) return false;
+  setBlock(t.x,y,t.z,below);
+  sfx('place');
+  return true;
+}
 function turnFurniture(x,y,z){
   var id=getBlock(x,y,z), def=DEFS[id];
   if(!def) return false;
@@ -6823,6 +6859,9 @@ function build(){
      loaf in the cell above, which is the whole bug. */
   var t=aim();
   if(t && stockShelf(t)) return;
+  /* And a shelf tapped with a shelf in his hand is a taller shelf, not a turned
+     one - before turnFurniture, which is what was eating it. */
+  if(t && stackShelf(t)) return;
   if(t && (toggleDoor(t.x,t.y,t.z) || turnFurniture(t.x,t.y,t.z))) return;
   var c=buildTarget();
   if(!c) return;

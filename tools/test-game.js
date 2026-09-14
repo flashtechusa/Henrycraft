@@ -2178,6 +2178,60 @@ function slope(pts) {
   check('and a record from before today loads with its shelves bare',
         migrate.afterOld === 0, JSON.stringify(migrate));
 
+  /* "When we try and add a shelf on top of a shelf most times it just moves the
+     shelf instead of putting a new one on top."
+
+     It was turning it. turnFurniture runs before placement so that tapping a chair
+     turns the chair, which is right for a chair - but a shelf has four facings too,
+     so a tap with a shelf in his hand spun the one already there. Four taps went
+     92, 93, 94, 95 and back to 92: all the way round and still one shelf.
+
+     Driven through build() with a real aim rather than by calling the new function,
+     because the bug was entirely about which handler got there first. */
+  const stack = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids, out = {};
+    H.loadSeed(4242);
+    const px = 24, pz = 24, y = 16;
+    for (let a = -3; a < 8; a++) for (let b = -3; b < 8; b++) {
+      for (let yy = y - 3; yy < y; yy++) {
+        H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.TILES : ids.STONE);
+      }
+      for (let yy = y; yy < y + 8; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+    }
+    H.setBlock(px, y, pz, ids.SHELF);
+    /* Standing in front of it looking down at it, which is how you build a shop.
+       The pitch matters: level with the shelf the ray goes over the top of it and
+       nothing is aimed at at all, which is how the first run of this measured
+       nothing and called it a pass. */
+    H.movePlayer(px + 1.6, y, pz + 0.5);
+    H.setYaw(Math.PI / 2);
+    H.setPitch(-0.60);
+    H.selectBlock(ids.SHELF);
+    const col = () => [0, 1, 2, 3, 4].map(i => H.getBlock(px, y + i, pz));
+    out.before = col();
+    out.steps = [];
+    for (let i = 0; i < 4; i++) { H.build(); out.steps.push(col()); }
+    out.after = col();
+    /* Every one of them a shelf, and all facing the same way as the first. */
+    out.allShelves = out.after.every(b => b === out.before[0]);
+    /* And turning still works, with anything else in his hand. */
+    H.selectBlock(ids.PLANKS);
+    const was = H.getBlock(px, y, pz);
+    H.build();
+    out.turn = {was, now: H.getBlock(px, y, pz)};
+    return out;
+  });
+  check('a shelf tapped with a shelf in hand stacks instead of spinning',
+        stack.after.filter(b => b === stack.before[0]).length === 5 && stack.allShelves,
+        JSON.stringify({before: stack.before, steps: stack.steps}));
+  check('each tap adds exactly one, so the tower grows a shelf at a time',
+        stack.steps.every((s, i) => s.filter(b => b === stack.before[0]).length === i + 2),
+        JSON.stringify(stack.steps));
+  check('and turning a shelf still works with something else in hand',
+        stack.turn.was !== stack.turn.now, JSON.stringify(stack.turn));
+  note(`four taps with a shelf in hand: ${stack.before.filter(Boolean).length} shelf ` +
+       `became ${stack.after.filter(Boolean).length}, all facing the same way`);
+
   // ---- 6f3: two new snacks, and actually eating them -----------------------
   /* "Henry would like the characters to actually be able to eat. He would also
      like to add packs of Oreos and packs of Cheetos to the game."
