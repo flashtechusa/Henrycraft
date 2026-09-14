@@ -1140,7 +1140,8 @@ item at a time, beeping for each, and takes the total off his coins.
 **A price is what makes something shoppable.** The basket looks for any block that
 has one, so the food that already existed &mdash; a cake, a cup, a place setting
 &mdash; can go on a shelf and be rung up, without any of it needing to know that
-shops exist. Bread 2, apples 3, milk 2, cup 1, cake 4, dinner 5. Small numbers on
+shops exist. Bread 2, apples 3, milk 2, cup 1, cake 4, dinner 5, biscuits 3, cheese
+puffs 3. Small numbers on
 purpose: a basket that comes to eleven is a number he can read out loud.
 
 Two decisions in there are about him being five rather than about shops.
@@ -1182,6 +1183,48 @@ purchase of zero.
 Three tests hold that shape: that the coins go **down** by exactly the total, that
 four coins against a five-coin basket spends two and puts four things back, and that
 a penniless trip charges nothing and points him at a star.
+
+## Eating, and two more things to eat
+
+*"Henry would like the characters to actually be able to eat. He would also like to add
+packs of Oreos and packs of Cheetos to the game."*
+
+The packets are a **blue pack of biscuits** and an **orange bag of cheese puffs** &mdash;
+what he means, drawn from the game's own colours with nobody's brand on them. That is the
+one thing they could not be: he asked for them by name, and a name is the part I cannot
+give him. Otherwise they are goods like any other, which is the whole point &mdash; nothing
+about the shelf, the basket or the till had to learn anything new to sell them.
+
+**What he pays for now goes in his bag.** Ringing up used to make the shopping vanish,
+which is a strange thing for a shop to do and, once the till started charging, left him
+paying for nothing at all. Bought food goes into a 🎒 bag on its own HUD row, and the bag
+is what he eats out of &mdash; anywhere, at any time, no shop required once he has been to
+one. It rides in the wallet record beside his coins rather than in a district save, for the
+same reason they do: a packet bought in one world is still in his pocket in the next.
+
+**Three bites to a packet**, with the thing getting visibly smaller in his hand each time.
+One press making food disappear would not have been *actually able to eat*. The packet is a
+sprite of the food's own tile held out in front of his face, so it is there in both views;
+crumbs come off it in that food's own colour, at mouth height, and the third bite finishes
+it with a bigger burst and a **Yum!**
+
+**It is not hunger, and that is deliberate.** There is no meter, nothing goes down on its
+own, and nothing whatever happens if he never eats again. This game has no way to lose and
+is not getting one. A test says so out loud rather than leaving it to be inferred: eating
+changes no blocks, costs no coins, and leaves him exactly as he was.
+
+**The other screens see it.** A bite travels as one boolean on a move message &mdash; the
+same way the kart flag does, and it degrades the same way against an older Worker, which
+simply drops it and lets him eat quietly. It says *somebody took a bite* and nothing else:
+not what, not how much is left. There is nothing in it one player could aim at another.
+A bite also forces a move to be sent, because moves only go out when something changed and
+standing still eating is exactly the case that would otherwise never travel.
+
+**A race that would have eaten his shopping.** The wallet is read asynchronously at
+start-up, and every path that changes coins writes it back. Now that the bag rides in the
+same record, a write that beat the read would have saved an empty bag over a full one. The
+writer refuses to run until the read has finished &mdash; the same class of quiet
+destruction the district save is careful about everywhere else.
 
 **Money is his, not a district's.** Coins live beside the character he plays as
 rather than inside a world, so a star he finds in one district is still in his
@@ -1237,7 +1280,7 @@ radian.
 
 **Computer** — `W A S D` walk, mouse looks, click digs, right-click builds,
 `Space` jumps, `Q` digs down, `E` digs up, `G` picks an animal up and puts it
-down, `B` fills the basket and rings it up, `F` toggles flying (`Space` up,
+down, `B` fills the basket and rings it up, `C` takes a bite, `F` toggles flying (`Space` up,
 `Shift` down), `1`–`9` pick a block, `V` swaps view, `M` mutes, `Esc` pauses.
 
 **Tablet or phone** — left stick walks and turns, buttons on the right dig,

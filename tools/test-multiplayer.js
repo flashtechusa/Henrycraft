@@ -1974,6 +1974,48 @@ function requireNode22() {
        drawn from local state and only the position and heading ever travelled. So a driver
        appeared on the other tablet as somebody sprinting down the straight at fifteen blocks
        a second with his legs pumping. The kart flag travels now. */
+    /* Henry asked for "the characters" to be able to eat, so the other screen has to
+       see it happen. It travels as one boolean on a move - the same way the kart flag
+       does - and lands as crumbs in the air at their mouth. Deliberately nothing more:
+       the flag never says what they are eating or how much is left, so there is
+       nothing here one player could aim at another. */
+    console.log('\nSeeing him eat');
+    {
+      await R2.evaluate(() => { window.__crumbsBefore = window.__henrycraft.particleCount(); });
+      await R1.evaluate(async () => {
+        const H = window.__henrycraft;
+        H.emptyBag();
+        H.addSnack(H.ids.OREOS);
+        H.eat();
+        await new Promise(r => setTimeout(r, 400));
+      });
+      /* Waited for, not slept on: the move carrying the flag goes out on the send
+         clock and the crumbs land a frame later. */
+      const sawCrumbs = await waitFor(R2, () =>
+        window.__henrycraft.particleCount() > window.__crumbsBefore, null, 30000);
+      const crumbs = await R2.evaluate(() => ({
+        before: window.__crumbsBefore, now: window.__henrycraft.particleCount(),
+      }));
+      check('a bite on one screen is crumbs in the air on the other',
+            sawCrumbs, JSON.stringify(crumbs));
+      /* And it is a one-off, not a state: standing still afterwards must not keep
+         producing crumbs for ever, which is what a flag that never cleared would do. */
+      await R2.evaluate(async () => {
+        await new Promise(r => setTimeout(r, 1600));
+        window.__crumbsQuiet = window.__henrycraft.particleCount();
+      });
+      const settled = await R2.evaluate(async () => {
+        const H = window.__henrycraft;
+        const a = H.particleCount();
+        await new Promise(r => setTimeout(r, 1200));
+        return {a, b: H.particleCount()};
+      });
+      check('and one bite is one mouthful, not a tap left running',
+            settled.b <= settled.a, JSON.stringify(settled));
+      await R1.evaluate(() => window.__henrycraft.emptyBag());
+      note(`one bite put ${crumbs.now - crumbs.before} crumbs on the other screen`);
+    }
+
     console.log('\nSeeing each other in karts');
     await R1.evaluate(() => {
       const H = window.__henrycraft;

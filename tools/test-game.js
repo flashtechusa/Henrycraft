@@ -2178,6 +2178,135 @@ function slope(pts) {
   check('and a record from before today loads with its shelves bare',
         migrate.afterOld === 0, JSON.stringify(migrate));
 
+  // ---- 6f3: two new snacks, and actually eating them -----------------------
+  /* "Henry would like the characters to actually be able to eat. He would also
+     like to add packs of Oreos and packs of Cheetos to the game."
+
+     The packets are a blue pack of biscuits and an orange bag of cheese puffs -
+     what he means, drawn in the game's own colours with nobody's brand on them.
+     They are goods like any other, which is the point: nothing about the shelf,
+     the basket or the till had to learn anything new.
+
+     Eating is deliberately not hunger. Nothing goes down on its own and nothing
+     whatever happens if he never eats - this game has no way to lose, and a meter
+     that empties would be one. The checks below say so out loud: eating changes no
+     blocks, costs no coins, and leaves him exactly as he was. */
+  console.log('6f3. new snacks, and eating them');
+  const eat = await page.evaluate(async () => {
+    const H = window.__henrycraft, ids = H.ids, out = {};
+    const px = 24, pz = 24, y = 16;
+    const wait = async () => {
+      for (let i = 0; i < 200 && H.shop().ringing; i++) {
+        await new Promise(r => setTimeout(r, 50));
+      }
+    };
+    const frame = () => new Promise(r => requestAnimationFrame(r));
+
+    out.priced = [ids.OREOS, ids.CHEETOS].map(g => H.price(g));
+    /* Its own shop, floor and all: 6f2 regenerates the world, so the one 6f built
+       is not there any more. A section that quietly depends on an earlier section's
+       scenery is a section that fails for a reason that has nothing to do with it. */
+    H.loadSeed(4242);
+    for (let a = -2; a < 12; a++) for (let b = -2; b < 12; b++) {
+      for (let yy = y - 3; yy < y; yy++) {
+        H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.TILES : ids.STONE);
+      }
+      for (let yy = y; yy < y + 7; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+    }
+    H.emptyBasket(); H.emptyBag();
+    H.spendCoins(999999); H.addCoins(50);
+    H.setBlock(px + 1, y, pz + 0, ids.SHELF); H.setStock(px + 1, y, pz + 0, ids.OREOS);
+    H.setBlock(px + 1, y, pz + 1, ids.SHELF); H.setStock(px + 1, y, pz + 1, ids.CHEETOS);
+    H.setBlock(px + 5, y, pz + 2, ids.REGISTER2);
+    H.movePlayer(px + 2.5, y, pz + 0.5); H.doShop();
+    H.movePlayer(px + 2.5, y, pz + 1.5); H.doShop();
+    out.basket = H.shop().basket.slice();
+    out.total = H.shop().total;
+
+    /* Paying puts what he bought in his bag. Before this it simply vanished,
+       which is a strange thing for a shop to do and left nothing to eat. */
+    const coinsBefore = H.coins();
+    H.movePlayer(px + 4.2, y, pz + 2.5);
+    H.doShop();
+    await wait();
+    out.charged = coinsBefore - H.coins();
+    out.bag = H.snacks().bag.slice();
+    out.bagShown = H.snacks().barShown;
+    out.eatShown = H.snacks().shown;
+
+    /* Three bites to a packet, and the thing in his hand gets smaller each time. */
+    out.bites = [];
+    const editsBefore = Object.keys(H.edits()).length;
+    const coinsAtBite = H.coins();
+    for (let i = 0; i <= H.bites; i++) {
+      const s = H.snacks();
+      out.bites.push({bag: s.bag.length, bites: s.bites,
+                      held: s.held, scale: s.heldScale});
+      H.eat();
+      await frame();
+    }
+    out.afterBag = H.snacks().bag.slice();
+    out.said = document.getElementById('toast').textContent;
+    /* Nothing else moved. No blocks, no money, no meter - because there is no meter. */
+    out.editsSame = Object.keys(H.edits()).length === editsBefore;
+    out.coinsSame = H.coins() === coinsAtBite;
+
+    /* Eat the last one too, and the button and the bag go away together. */
+    for (let i = 0; i < H.bites; i++) { H.eat(); await frame(); }
+    out.empty = H.snacks().bag.length;
+    out.emptyShown = H.snacks().shown;
+    out.emptyBar = H.snacks().barShown;
+    out.emptyHeld = H.snacks().held;
+    out.emptySaid = document.getElementById('toast').textContent;
+
+    /* With nothing in the bag, pressing it says where food comes from rather than
+       doing nothing at all. */
+    H.eat();
+    out.nothingSaid = document.getElementById('toast').textContent;
+
+    /* Not while driving, and not with both arms round a guinea pig. */
+    H.addSnack(ids.OREOS);
+    out.canWalking = H.snacks().can;
+    H.toggleKart();
+    out.canDriving = H.snacks().can;
+    H.toggleKart();
+    out.canAfter = H.snacks().can;
+    H.emptyBag();
+    return out;
+  });
+  check('the biscuits and the cheese puffs both have a price',
+        eat.priced.every(p => p > 0), JSON.stringify(eat.priced));
+  check('they come off a shelf into the basket like any other food',
+        eat.basket.length === 2 && eat.total === eat.priced[0] + eat.priced[1],
+        JSON.stringify({basket: eat.basket, total: eat.total, priced: eat.priced}));
+  check('paying for them puts them in his bag instead of nowhere',
+        eat.bag.length === 2 && eat.charged === eat.total && eat.bagShown && eat.eatShown,
+        JSON.stringify(eat));
+  /* The shape of the thing being eaten: still two in the bag for the first three
+     presses, smaller in his hand each time, and one fewer on the fourth. */
+  check('three bites to a packet, and it shrinks in his hand as he goes',
+        eat.bites.length === 4 &&
+        eat.bites.slice(0, 3).every(b => b.bag === 2 && b.held) &&
+        eat.bites[1].scale < eat.bites[0].scale &&
+        eat.bites[2].scale < eat.bites[1].scale &&
+        eat.bites[3].bag === 1,
+        JSON.stringify(eat.bites));
+  check('and then it is gone, and he is told so',
+        eat.afterBag.length === 1 && /yum/i.test(eat.said), JSON.stringify(eat));
+  /* The one that says eating is not a survival mechanic. */
+  check('eating costs nothing and changes nothing in the world',
+        eat.editsSame && eat.coinsSame,
+        JSON.stringify({edits: eat.editsSame, coins: eat.coinsSame}));
+  check('an empty bag takes its chip and its button away with it',
+        eat.empty === 0 && !eat.emptyShown && !eat.emptyBar && !eat.emptyHeld,
+        JSON.stringify(eat));
+  check('and pressing it with nothing in the bag says where food comes from',
+        /buy|till/i.test(eat.nothingSaid), eat.nothingSaid);
+  check('he cannot eat from the driving seat, and can again when he gets out',
+        eat.canWalking && !eat.canDriving && eat.canAfter, JSON.stringify(eat));
+  note(`biscuits ${eat.priced[0]} and cheese puffs ${eat.priced[1]}: a basket of ` +
+       `${eat.total} charged ${eat.charged}, and a packet took ${eat.bites.length - 1} bites`);
+
   // ---- 6g: the money ------------------------------------------------------
   console.log('6g. coins, and where they come from');
   const money = await page.evaluate(async () => {
@@ -2258,6 +2387,16 @@ function slope(pts) {
      the page out from under them costs nothing; putting it at the end of the
      file did not work, because by then the page has been closed. */
   console.log('\n6h. his money is still there when he comes back tomorrow');
+  /* And his shopping with it. The bag rides in the same record as the coins, so it
+     is the same question asked of the other half of it - and it is the half that
+     would go unnoticed, because a missing packet of biscuits looks like having
+     eaten it. */
+  const bagBefore = await page.evaluate(() => {
+    const H = window.__henrycraft;
+    H.emptyBag();
+    H.addSnack(H.ids.OREOS); H.addSnack(H.ids.CHEETOS);
+    return H.snacks().bag.slice();
+  });
   await page.reload({waitUntil: 'load'});
   await page.waitForFunction(() => window.__henrycraft && window.__henrycraft.ready(),
                              {timeout: 150000});
@@ -2265,11 +2404,16 @@ function slope(pts) {
   const tomorrow = await page.evaluate(() => ({
     coins: window.__henrycraft.coins(),
     chip: document.getElementById('coinNum').textContent,
+    bag: window.__henrycraft.snacks().bag,
   }));
   check('the coins he earned are in his pocket after closing the game and opening it',
         tomorrow.coins === purseBefore && tomorrow.chip === String(purseBefore),
         `had ${purseBefore}, came back to ${tomorrow.coins} (chip says "${tomorrow.chip}")`);
-  note(`${purseBefore} coins survived a full page reload`);
+  check('and the food he bought is still in his bag',
+        tomorrow.bag.join(',') === bagBefore.join(',') && bagBefore.length === 2,
+        `had [${bagBefore}], came back to [${tomorrow.bag}]`);
+  note(`${purseBefore} coins and ${bagBefore.length} things in the bag survived a ` +
+       `full page reload`);
 
 
   // ---- 7: fire never spreads ----------------------------------------------
@@ -2397,7 +2541,7 @@ function slope(pts) {
          paintCarryButton run every frame and put these three straight back, so a version
          of this that showed them and then waited measured four buttons and called it the
          worst case. */
-      ['peopleChip', 'holdBtn', 'shopBtn', 'sitBtn', 'kartBtn']
+      ['peopleChip', 'holdBtn', 'shopBtn', 'sitBtn', 'kartBtn', 'eatBtn']
         .forEach(id => document.getElementById(id).classList.remove('hide'));
       document.getElementById('peopleNum').textContent = '8';
       /* A generated two-word name, which is what districts are actually called. */

@@ -123,13 +123,15 @@ body>canvas{display:block;position:fixed;inset:0}
 }
 /* The basket: one chip in the HUD rows, holding a little picture of everything in
    it and what it comes to. The number is the point, and he can read a number. */
-#basketChip{display:flex;align-items:center;gap:7px}
-#basketItems{display:inline-flex;gap:3px;flex-wrap:wrap;max-width:min(60vw,420px)}
-#basketItems .bitem{
+#basketChip,#snackChip{display:flex;align-items:center;gap:7px}
+#basketItems,#snackItems{display:inline-flex;gap:3px;flex-wrap:wrap;max-width:min(60vw,420px)}
+#basketItems .bitem,#snackItems .bitem{
   width:26px;height:26px;border-radius:5px;border:2px solid var(--ink);
   background-size:100% 100%;image-rendering:pixelated;
 }
 #basketTotal{color:var(--sun);white-space:nowrap}
+/* Driving is not eating either. */
+#snackBag.drivinghide{display:none}
 /* More in the basket than there is in his pocket. Warm rather than alarming: it
    is a nudge to put something back, not a telling-off. */
 #basketTotal.short{color:#ff9d7a}
@@ -629,6 +631,15 @@ body.touch #hint{display:none}
       <b id="basketTotal">🪙 0</b>
     </div>
    </div>
+   <!-- What he has paid for and can eat. Its own row under the basket, because the
+        two are different things and showing them in one chip made "what I am buying"
+        and "what I already own" look like one list. -->
+   <div class="hudrow hide" id="snackBag">
+    <div class="chip" id="snackChip">
+      <span>🎒</span>
+      <span id="snackItems"></span>
+    </div>
+   </div>
    <!-- Both only on a circuit, and only while driving: the lap he is on, the clock for it,
         and the best he has ever done here. The lap he has just finished is said in the toast
         at the moment he finishes it, which is when he cares about it, so it is not carried
@@ -656,6 +667,8 @@ body.touch #hint{display:none}
     <button class="chip icon blockbtn hide" id="holdBtn" title="Pick him up">🫳</button>
     <!-- Only near something to buy, or at the till with a full basket. -->
     <button class="chip icon blockbtn hide" id="shopBtn" title="Put it in the basket">🛒</button>
+    <!-- Only when there is something in his bag to eat. -->
+    <button class="chip icon blockbtn hide" id="eatBtn" title="Eat something">😋</button>
     <button class="chip icon blockbtn" id="btnView" title="Change view">🎥</button>
     <button class="chip icon blockbtn" id="btnSound" title="Sound">🔊</button>
     <button class="chip icon blockbtn" id="btnMenu" title="Menu">⚙️</button>
@@ -672,7 +685,7 @@ body.touch #hint{display:none}
       <div id="pickerGrid"></div>
     </div>
   </div>
-  <div id="hint">CLICK TO LOOK · W A S D MOVE · SPACE JUMP · CLICK DIG · RIGHT-CLICK BUILD · Q DIG DOWN · E DIG UP · G PICK UP AN ANIMAL · B BASKET · F FLY (SPACE UP / SHIFT DOWN)</div>
+  <div id="hint">CLICK TO LOOK · W A S D MOVE · SPACE JUMP · CLICK DIG · RIGHT-CLICK BUILD · Q DIG DOWN · E DIG UP · G PICK UP AN ANIMAL · B BASKET · C EAT · F FLY (SPACE UP / SHIFT DOWN)</div>
 
   <div id="touchUI">
     <div id="stick"><div id="knob"></div></div>
@@ -800,7 +813,11 @@ body.touch #hint{display:none}
       all up: it beeps once for every thing and your coins go down as it does.
       Every ⭐ you find is worth <b>5 coins</b>, so that is where the money comes
       from. If the basket costs more than you have, the number turns orange &mdash;
-      the till buys what it can and the rest goes back on the shelf.</small>
+      the till buys what it can and the rest goes back on the shelf.
+      <br><br>
+      What you buy goes in your <b>🎒 bag</b>, and you can <b>eat it</b>. Press
+      <b>😋</b> to take a bite &mdash; three bites finishes a packet. Try the
+      biscuits and the cheese puffs.</small>
     <button class="blockbtn go" id="ideasDone">Got it</button>
   </div>
 </div>
@@ -987,7 +1004,13 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
        shelf is not something to walk into. */
     SHELF=92,SHELF1=93,SHELF2=94,SHELF3=95,
     REGISTER=96,REGISTER1=97,REGISTER2=98,REGISTER3=99,
-    BREAD=100,APPLES=101,MILK=102;
+    BREAD=100,APPLES=101,MILK=102,
+    /* Henry asked for these two by name, and by brand - which is the one thing they
+       cannot be. They are a blue pack of round biscuits and an orange bag of cheesy
+       puffs: what he means, drawn from the game's own colours, with nobody's logo
+       on them. Same shape of thing as the bread and the milk, so they stock a
+       shelf, fill a basket and get eaten without needing to know anything new. */
+    OREOS=103,CHEETOS=104;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -1147,6 +1170,8 @@ DEFS[TROUGH]   ={name:'Trough', tiles:[78,78,78], prop:'trough'};
 DEFS[BREAD]    ={name:'Bread',  tiles:[82,82,82], prop:'bread',  passable:true};
 DEFS[APPLES]   ={name:'Apples', tiles:[83,83,83], prop:'apples', passable:true};
 DEFS[MILK]     ={name:'Milk',   tiles:[84,84,84], prop:'milk',   passable:true};
+DEFS[OREOS]    ={name:'Biscuits', tiles:[87,87,87], prop:'oreos',   passable:true};
+DEFS[CHEETOS]  ={name:'Cheese Puffs', tiles:[88,88,88], prop:'cheetos', passable:true};
 
 /* What things are worth at the till, in coins.
 
@@ -1157,6 +1182,7 @@ DEFS[MILK]     ={name:'Milk',   tiles:[84,84,84], prop:'milk',   passable:true};
    comes to eleven is a number he can read out. */
 var PRICE={};
 PRICE[BREAD]=2; PRICE[APPLES]=3; PRICE[MILK]=2;
+PRICE[OREOS]=3; PRICE[CHEETOS]=3;
 PRICE[CAKE]=4;  PRICE[CUP]=1;
 PRICE[DINNER]=5; PRICE[DINNER1]=5; PRICE[DINNER2]=5; PRICE[DINNER3]=5;
 PRICE[PLATE]=1;  PRICE[PLATE1]=1;  PRICE[PLATE2]=1;  PRICE[PLATE3]=1;
@@ -1174,7 +1200,7 @@ var ZOO=[FENCE,GATE,HAY,TROUGH];
 /* The fourth drawer. The cake and the cup stay in the house drawer where he
    already knows to find them - they belong on a table as much as on a shelf, and
    moving them would take them away from where he has been getting them. */
-var SHOP=[SHELF,REGISTER,BREAD,APPLES,MILK];
+var SHOP=[SHELF,REGISTER,BREAD,APPLES,MILK,OREOS,CHEETOS];
 /* What the palette and the picker both show, one group at a time. Icons carry
    the meaning - he cannot read the labels yet. */
 var GROUPS=[{key:'blocks',    label:'Blocks',    icon:'🧱', ids:PALETTE},
@@ -2057,6 +2083,31 @@ function buildAtlas(){
     x.fillStyle='#e6e9ee'; x.fillRect(5,4,2,11);
     x.fillStyle='#3f8fd6'; x.fillRect(5,6,6,2);
     x.fillStyle='#d8d8d0'; x.fillRect(6,1,4,3);
+  });
+  /* 87 a blue pack of round biscuits, one showing at the open end */
+  tile(87,function(x,r){
+    fill(x,'#1b2f6b');
+    x.fillStyle='#142454'; x.fillRect(0,0,16,2); x.fillRect(0,14,16,2);
+    /* the biscuit: dark ring, cream middle */
+    x.fillStyle='#0d1836'; x.fillRect(4,4,8,8);
+    x.fillStyle='#f2e6c8'; x.fillRect(6,6,4,4);
+    x.fillStyle='#0d1836'; x.fillRect(7,7,2,2);
+    /* a band of lighter blue across the pack, and a crimp down one side */
+    x.fillStyle='#2c4fa8'; x.fillRect(0,12,16,2);
+    x.fillStyle='#557fd4'; x.fillRect(13,3,1,10);
+  });
+  /* 88 an orange bag of cheese puffs */
+  tile(88,function(x,r){
+    fill(x,'#e8791f');
+    x.fillStyle='#c65c10'; x.fillRect(0,0,16,2); x.fillRect(0,14,16,2);
+    /* puffs tumbling out, in two oranges so they read as separate pieces */
+    x.fillStyle='#ffb347'; x.fillRect(3,5,4,3); x.fillRect(9,4,4,3); x.fillRect(6,9,4,3);
+    x.fillStyle='#ffd27a'; x.fillRect(4,6,2,1); x.fillRect(10,5,2,1); x.fillRect(7,10,2,1);
+    for(var i=0;i<10;i++){
+      x.fillStyle='#f59b3d';
+      x.fillRect(Math.floor(r()*16),Math.floor(r()*16),1,1);
+    }
+    x.fillStyle='#fff3d0'; x.fillRect(2,12,12,1);
   });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
@@ -3128,6 +3179,7 @@ var REGISTER_BODY=81, REGISTER_SCREEN=86, REGISTER_KEYS=85;
    it, so a taller board cannot leave the stock hovering. */
 var SHELF_BOARD=2;
 var BREAD_TILE=82, APPLE_TILE=83, MILK_TILE=84;
+var OREO_TILE=87, CHEETO_TILE=88;
 var CHINA=64, SILVER=65, DINNER_FOOD=66, ICING=67, SPONGE=68, CUP_TILE=69;
 /* The four quarter turns, in the order a facing id counts them. Index 0 is +X,
    which is the direction every shape below is written lying along. */
@@ -3322,6 +3374,19 @@ var PROP_SHAPE={
   milk:[
     [5,1,5,   11,10,11, MILK_TILE],
     [6.5,10,6.5, 9.5,13,9.5, MILK_TILE]
+  ],
+  /* A pack of biscuits lying on its side, the way it sits on a shelf, with a
+     narrower crimped seam along the top. Stacked, not driven through: the body
+     stops at y=5 and the seam starts there, which is the rule the whole prop
+     sweep exists to keep. */
+  oreos:[
+    [2,1,4,   14,5,12,  OREO_TILE],
+    [3,5,5,   13,6,11,  OREO_TILE]
+  ],
+  /* And a bag of puffs standing up, wider at the bottom, pinched at the top. */
+  cheetos:[
+    [4,1,5,   12,9,11,  CHEETO_TILE],
+    [5,9,6,   11,12,10, CHEETO_TILE]
   ],
   /* A water trough: four sides, a floor and the water, low enough to be furniture
      for a pen rather than another thing in the way. */
@@ -5057,6 +5122,11 @@ var player={x:WX/2,y:20,z:WZ/2,vx:0,vy:0,vz:0,onGround:false,fly:false,walk:0,fl
             carry:null,
             /* Block ids in his shopping basket, in the order he put them in. */
             basket:[],
+            /* And what he has paid for and can eat, in the order he bought it. His,
+               not a district's - it rides in the wallet record beside his coins, so
+               a packet he bought here is still in his pocket over there. `bites` is
+               how far through the first one he is. */
+            snacks:[], bites:0,
             /* drift: seconds held in the current slide, 0 when not drifting. tier: which
                spark colour it has reached, -1 for none yet. boost and star: seconds left
                of each. star makes grass as quick as tarmac - see the speed it picks. */
@@ -5494,6 +5564,9 @@ function paintKartButton(){
   if(pal) pal.classList.toggle('drivinghide',driving);
   var bsk=document.getElementById('basket');
   if(bsk) bsk.classList.toggle('drivinghide',driving);
+  /* And the bag, for the same reason: he cannot eat from the driving seat either. */
+  var bag=document.getElementById('snackBag');
+  if(bag) bag.classList.toggle('drivinghide',driving);
   /* The white cross in the middle goes too. It is an aiming mark for digging and building,
      and from the driving seat there is nothing to aim at - the wireframe box it aims with
      was already taken away. It was the one thing I left behind when everything else went,
@@ -5975,6 +6048,10 @@ function ringUp(){
        which is the one outcome that would actually feel unfair. */
     if(cost>wallet){ finish(items.length-i); return; }
     running+=spendCoins(cost);
+    /* And he keeps it. Paying used to make the shopping vanish, which is a strange
+       thing for a shop to do and left him with nothing to eat - the whole of what
+       Henry asked for next. Bought food goes in his bag. */
+    addSnack(items[i]);
     ringing.at=i+1; ringing.total=running;
     i++;
     sfx('star');
@@ -6018,6 +6095,139 @@ function paintShopButton(){
   b.classList.toggle('hide',!a);
   b.textContent=(a==='ring')?'🧾':'🛒';
   b.title=(a==='ring')?'Ring it up':'Put it in the basket';
+}
+
+/* ---------------- eating ----------------
+
+   "Henry would like the characters to actually be able to eat." So: what he has
+   paid for goes in his bag, and the bag can be eaten out of, anywhere, at any time.
+
+   Three things this deliberately is not.
+
+   It is not hunger. There is no meter, nothing goes down on its own, and nothing
+   whatever happens if he never eats again - the same rule as everything else in
+   this game, which has no way to lose. Eating is a thing to do because it is fun
+   to do, and that is the whole of it.
+
+   It is not instant. One press is a bite, and a packet takes three of them, with
+   the thing getting visibly smaller in front of his face each time. A button that
+   made food disappear would not have been "actually able to eat".
+
+   And it is not free food. It comes out of the bag, and the bag fills at the till,
+   which is what ties it to the shop he built and the coins he spent. */
+var BITES=3, SNACK_MAX=12;
+function addSnack(id){
+  if(!isGoods(id) || player.snacks.length>=SNACK_MAX) return false;
+  player.snacks.push(id);
+  paintSnacks(); paintEatButton(); updateHeldSnack(); saveWallet();
+  return true;
+}
+function canEat(){ return !player.kart && !player.carry && player.snacks.length>0; }
+/* One bite. The packet shrinks, crumbs come off it in its own colour, and on the
+   third one it is gone and he is told so. */
+function takeBite(){
+  if(!canEat()) return false;
+  var id=player.snacks[0];
+  player.bites++;
+  sfx('bite');
+  crumbs(id, player.bites>=BITES);
+  mp.ate=true;                     /* so the other screens see him eating too */
+  if(player.bites>=BITES){
+    player.snacks.shift();
+    player.bites=0;
+    toast('😋 Yum! ' + (player.snacks.length
+          ? player.snacks.length + ' left in the bag'
+          : 'The bag is empty - buy some more!'),2200);
+  }
+  paintSnacks(); paintEatButton(); updateHeldSnack(); saveWallet();
+  return true;
+}
+/* Crumbs, at mouth height in front of wherever he is looking. The colour comes off
+   the food's own tile, so biscuit crumbs are dark and cheese-puff crumbs are orange
+   without any of it being written down twice. */
+var SNACK_CRUMB={};
+SNACK_CRUMB[BREAD]=0xd8ae72; SNACK_CRUMB[APPLES]=0xd33f36; SNACK_CRUMB[MILK]=0xfbfbf7;
+SNACK_CRUMB[OREOS]=0x1b2f6b; SNACK_CRUMB[CHEETOS]=0xe8791f;
+SNACK_CRUMB[CAKE]=0xf0d0e0;  SNACK_CRUMB[CUP]=0xdfe6ee;
+function crumbs(id,last){
+  var fx=-Math.sin(yaw), fz=-Math.cos(yaw);
+  /* Mouth height, not arm height: `player.y` is his feet and his eyes are at EYE, so
+     crumbs at half a block came off his belt. */
+  var p=new THREE.Vector3(player.x+fx*0.42, player.y+EYE-0.16, player.z+fz*0.42);
+  burst(p, SNACK_CRUMB[id]||0xe8c489, last?14:6);
+}
+/* The packet he is part way through, held up in front of his face and shrinking
+   bite by bite. A sprite rather than a little model: it is the food's own tile,
+   it faces the camera in both views, and it costs one texture per kind.
+
+   Called the instant the bag changes as well as every frame, like the chips and the
+   buttons are. The frame loop alone is not enough: these test pages run at well under
+   one frame a second, so a bite and the packet getting smaller would be a second and a
+   half apart - and on a real tablet, taking a bite is exactly the moment the feedback
+   has to be immediate. */
+var snackTextures={}, heldSnack=null;
+function snackTexture(tile){
+  if(snackTextures[tile]) return snackTextures[tile];
+  var cv=document.createElement('canvas'); cv.width=TP; cv.height=TP;
+  var c=cv.getContext('2d'); c.imageSmoothingEnabled=false;
+  c.drawImage(atlasCanvas,(tile%ACOLS)*TP,Math.floor(tile/ACOLS)*TP,TP,TP,0,0,TP,TP);
+  var t=new THREE.CanvasTexture(cv);
+  t.magFilter=THREE.NearestFilter; t.minFilter=THREE.NearestFilter;
+  snackTextures[tile]=t;
+  return t;
+}
+function updateHeldSnack(){
+  var id=canEat()?player.snacks[0]:0;
+  if(!id){
+    if(heldSnack){ heldSnack.visible=false; }
+    return;
+  }
+  if(!heldSnack){
+    heldSnack=new THREE.Sprite(new THREE.SpriteMaterial({transparent:true}));
+    scene.add(heldSnack);
+  }
+  heldSnack.material.map=snackTexture(DEFS[id].tiles[2]);
+  heldSnack.material.needsUpdate=true;
+  heldSnack.visible=true;
+  /* Out in front and a little to the side, so in first person it sits down in the
+     corner of the view like something held up rather than across the middle of it. */
+  var fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=-fz, rz=fx;
+  /* Far enough out and low enough to the right that in first person it sits in the
+     corner of the view rather than across the middle of it - at half a block and a
+     third of a block across it covered a quarter of the screen. */
+  heldSnack.position.set(player.x+fx*0.62+rx*0.32, player.y+EYE-0.30, player.z+fz*0.62+rz*0.32);
+  var s=0.24*(1-player.bites/BITES*0.55);
+  heldSnack.scale.set(s,s,s);
+}
+function doEat(){
+  if(!canEat()){
+    if(player.snacks.length) return;   /* driving, or hands full of guinea pig */
+    toast('🛒 Nothing to eat yet - buy something at the till!',2400);
+    return;
+  }
+  takeBite();
+}
+function paintSnacks(){
+  var box=document.getElementById('snackBag');
+  if(!box) return;
+  box.classList.toggle('hide',!player.snacks.length);
+  var strip=document.getElementById('snackItems');
+  strip.textContent='';
+  for(var i=0;i<player.snacks.length;i++){
+    var d=document.createElement('div');
+    d.className='bitem';
+    d.style.backgroundImage='url('+swatchURL(DEFS[player.snacks[i]].tiles[2])+')';
+    /* The one he is eating shows how far through it he is. */
+    if(i===0 && player.bites) d.style.opacity=String(1-player.bites/BITES*0.6);
+    strip.appendChild(d);
+  }
+}
+function paintEatButton(){
+  var b=document.getElementById('eatBtn');
+  if(!b) return;
+  b.classList.toggle('hide',!canEat());
+  b.title=player.snacks.length&&DEFS[player.snacks[0]]
+    ? 'Eat the '+DEFS[player.snacks[0]].name.toLowerCase() : 'Eat something';
 }
 
 function paintCarryButton(){
@@ -6951,6 +7161,9 @@ function sfx(kind){
   if(kind==='dig'){ tone(180,0.10,'square',0.07); tone(120,0.13,'triangle',0.06,0.02); }
   else if(kind==='place'){ tone(420,0.07,'square',0.07); tone(620,0.09,'square',0.05,0.05); }
   else if(kind==='jump'){ tone(520,0.07,'sine',0.05); }
+  /* A bite: short, low and blunt, with a softer second one just behind it so it
+     lands as a crunch rather than a beep. */
+  else if(kind==='bite'){ tone(150,0.06,'square',0.08); tone(95,0.09,'triangle',0.06,0.035); }
   else if(kind==='star'){ tone(660,0.11,'square',0.08); tone(880,0.11,'square',0.08,0.1); tone(1320,0.2,'square',0.08,0.2); }
   else if(kind==='portal'){ tone(320,0.14,'sine',0.07); tone(480,0.16,'sine',0.06,0.10); tone(640,0.22,'sine',0.05,0.22); }
   else if(kind==='travel'){ tone(700,0.12,'sine',0.06); tone(520,0.14,'sine',0.06,0.09); tone(380,0.26,'sine',0.05,0.20); }
@@ -7262,6 +7475,9 @@ window.addEventListener('keydown',function(e){
   if(e.code==='KeyE' && playing) digUp();
   if(e.code==='KeyG' && playing) toggleCarry();   /* G for grab - pick an animal up */
   if(e.code==='KeyB' && playing) doShopAction();  /* B for basket - shop, and ring up */
+  /* C for chomp. V was the obvious one and is taken - it swaps the view, and binding
+     eating to it would have flipped the camera every time he took a bite. */
+  if(e.code==='KeyC' && playing) doEat();
   if(e.code==='KeyV') setView(!firstPerson);
   if(e.code==='KeyM') setMuted(!muted);
   var digits={Digit1:0,Digit2:1,Digit3:2,Digit4:3,Digit5:4,Digit6:5,Digit7:6,Digit8:7,Digit9:8,Digit0:9};
@@ -7430,6 +7646,7 @@ el('kartBtn').addEventListener('click',function(){ toggleKart(); });
 el('sitBtn').addEventListener('click',function(){ toggleSit(); });
 el('holdBtn').addEventListener('click',function(){ toggleCarry(); });
 el('shopBtn').addEventListener('click',function(){ doShopAction(); });
+el('eatBtn').addEventListener('click',function(){ doEat(); });
 el('btnSound').addEventListener('click',function(){ setMuted(!muted); });
 
 /* ---------------- overlays ---------------- */
@@ -9040,11 +9257,28 @@ var ME_KEY='henrycraft-me';
    would have him standing in his own shop with nothing to ring up because the
    stars he found were somewhere else.
 
-   Read at start-up and written when it changes. Nothing in the game subtracts
-   from it - see the shop - so a failed write can only ever lose coins he has not
-   spent, and the next star writes it again. */
+   Read at start-up and written when it changes.
+
+   The bag of food he has bought rides here too, for the same reason and in the same
+   record: a packet bought in one world is still in his pocket in the next. It is
+   the third thing in this game that lives outside the district save, and like the
+   other two it had to be taught to be written and to be read back - a bag that
+   emptied itself overnight is exactly the shape of bug the animals had twice. */
 var WALLET_KEY='henrycraft-wallet';
 var wallet=0;
+/* One writer for the record, so coins and food can never be saved half each: every
+   path that changes either calls this.
+
+   And never before it has been read. A write that beat the read would save a wallet
+   of nothing over the real one - which now means his bag as well as his coins, and
+   losing a bag of shopping to a race between two asynchronous calls is exactly the
+   kind of quiet destruction this file is careful about everywhere else. */
+var walletReady=false;
+function saveWallet(){
+  if(!walletReady) return Promise.resolve(false);
+  return writeJSON(WALLET_KEY,{coins:wallet, snacks:player.snacks.slice()})
+    .catch(function(){});
+}
 function paintCoins(){
   var n=document.getElementById('coinNum');
   if(n) n.textContent=String(wallet);
@@ -9059,7 +9293,7 @@ function addCoins(n){
   /* A star found while he is carrying a basket can put it back within reach, so the
      coral warning has to answer to the money as well as to the shopping. */
   paintBasket();
-  writeJSON(WALLET_KEY,{coins:wallet}).catch(function(){});
+  saveWallet();
 }
 /* Paying for something. Returns what was actually taken, which is never more than
    he has: the floor at nothing is what stops a shopping trip turning into a debt a
@@ -9072,15 +9306,23 @@ function spendCoins(n){
   wallet-=took;
   paintCoins();
   paintBasket();
-  writeJSON(WALLET_KEY,{coins:wallet}).catch(function(){});
+  saveWallet();
   return took;
 }
 function loadWallet(){
   return readJSON(WALLET_KEY).then(function(rec){
     var v=rec&&typeof rec.coins==='number'?rec.coins:0;
     wallet=(isFinite(v)&&v>0)?Math.min(999999,Math.floor(v)):0;
-    paintCoins();
-  }).catch(function(){ paintCoins(); });
+    /* Only ids this build knows and only ones with a price, the same filter the
+       basket gets: a record written by a newer game cannot put something
+       uneatable in his bag. Absent from every record written before today, which
+       reads as an empty bag. */
+    player.snacks=(rec&&Array.isArray(rec.snacks)?rec.snacks:[])
+      .filter(function(id){ return isGoods(id); }).slice(0,SNACK_MAX);
+    player.bites=0;
+    walletReady=true;
+    paintCoins(); paintSnacks(); paintEatButton(); updateHeldSnack();
+  }).catch(function(){ walletReady=true; paintCoins(); });
 }
 
 /* The client builds names from these and the server validates against the same
@@ -9239,7 +9481,11 @@ var mp={wanted:false, ws:null, code:null, me:null, players:{}, status:'off',
            What is on a shelf is part of the world, so it has to travel like the
            rest of the world or one of them ends up shopping in an empty shop.
            `stockShared` is whether the room can carry it at all. */
-        stockQueue:[], stockShared:false};
+        stockQueue:[], stockShared:false,
+        /* Set by a bite and cleared by the next move message, so the others see him
+           eating. A flag on a move rather than a message of its own, exactly like
+           the kart flag - and like that one, an older Worker drops it harmlessly. */
+        ate:false};
 
 /* Four times a second. Animals amble; they are not karts, and a pig arriving in
    ten jumps a second would cost eight times the traffic to look no better. The
@@ -10285,6 +10531,11 @@ function mpMoved(m){
     p.prog=Math.max(0,Math.min(1,m.prog));
   }
   mpSetKart(p,m.kart===true);
+  /* And a mouthful, if they took one. Crumbs at their head and nothing else: the
+     flag says somebody is eating, never what or how much, so there is no way for
+     this to become a thing one player does to another. An older Worker does not
+     relay the field at all, and then they simply eat quietly. */
+  if(m.eat===true) burst(new THREE.Vector3(to.x,to.y+EYE-0.16,to.z),0xe8c489,5);
 }
 
 /* Put a kart under a remote player, or take it away again.
@@ -10354,7 +10605,9 @@ function mpUpdate(dt){
        ends up alone in a world without being told. */
     if(mp.ws && mp.ws.readyState>1){ mpDropSocket(); mpRetry(); return; }
     var now=player.x.toFixed(2)+','+player.y.toFixed(2)+','+player.z.toFixed(2)+','+yaw.toFixed(2);
-    if(now!==mp.last){
+    /* A bite forces a send even standing still, or eating would only ever be seen by
+       the others if he happened to be walking at the time. */
+    if(now!==mp.last || mp.ate){
       var m={type:'move', x:+player.x.toFixed(2), y:+player.y.toFixed(2),
              z:+player.z.toFixed(2), yaw:+yaw.toFixed(3)};
       /* On a circuit, say how far round it he is: which lap and how far through it. It is
@@ -10369,7 +10622,8 @@ function mpUpdate(dt){
          appeared on his son's tablet sprinting down the straight at fifteen blocks a second,
          which is what it looks like when the pose is the only thing that travels. */
       if(player.kart) m.kart=true;
-      if(mpSend(m)) mp.last=now;
+      if(mp.ate) m.eat=true;
+      if(mpSend(m)){ mp.last=now; mp.ate=false; }
     }
     /* Block edits go out in bounded batches: lighting a 21x21 portal touches 441
        cells at once, and a burst that size should not stall a frame. */
@@ -10890,6 +11144,11 @@ function frame(){
       paintCarryButton();
       /* And the shop chip, which follows him down the aisle the same way. */
       paintShopButton();
+      /* And the eat chip, which depends on his bag rather than on where he is
+         standing - but is painted here so it answers to getting into a kart or
+         picking up a guinea pig without either of those having to know about food. */
+      paintEatButton();
+      updateHeldSnack();
       if(digHeld){ digTime+=dt; if(digTime>0.23){ digTime=0; dig(); } }
       if(buildHeld){ buildTime+=dt; if(buildTime>0.23){ buildTime=0; build(); } }
       var h=aim();
@@ -11015,7 +11274,7 @@ window.__henrycraft={
        HAY:HAY,TROUGH:TROUGH,
        SHELF:SHELF,SHELF1:SHELF1,SHELF2:SHELF2,SHELF3:SHELF3,
        REGISTER:REGISTER,REGISTER1:REGISTER1,REGISTER2:REGISTER2,REGISTER3:REGISTER3,
-       BREAD:BREAD,APPLES:APPLES,MILK:MILK},
+       BREAD:BREAD,APPLES:APPLES,MILK:MILK,OREOS:OREOS,CHEETOS:CHEETOS},
   /* Every prop's boxes, so a test can check the geometry itself rather than
      looking at a picture and hoping. */
   propShapes:function(){ return JSON.parse(JSON.stringify(PROP_SHAPE)); },
@@ -11180,6 +11439,19 @@ window.__henrycraft={
   price:function(id){ return priceOf(id); },
   prices:function(){ var o={}; for(var k in PRICE) o[k]=PRICE[k]; return o; },
   emptyBasket:function(){ player.basket=[]; paintBasket(); paintShopButton(); },
+  /* Eating: what is in his bag, how far through the first one he is, and whether the
+     button is up. `eat()` is one press of it. */
+  snacks:function(){
+    return {bag:player.snacks.slice(), bites:player.bites, can:canEat(),
+            shown:!document.getElementById('eatBtn').classList.contains('hide'),
+            barShown:!document.getElementById('snackBag').classList.contains('hide'),
+            strip:document.querySelectorAll('#snackItems .bitem').length,
+            held:!!(heldSnack&&heldSnack.visible),
+            heldScale:heldSnack?+heldSnack.scale.x.toFixed(3):0};
+  },
+  eat:doEat, bite:takeBite, addSnack:addSnack, bites:BITES,
+  emptyBag:function(){ player.snacks=[]; player.bites=0;
+                       paintSnacks(); paintEatButton(); updateHeldSnack(); },
   zooToSave:zooToSave, zooFromSave:zooFromSave,
   keeper:function(){ return {shared:mp.zooShared, id:mp.keeper, me:mp.me, mine:mpZooMine(),
                              out:mp.zooOut, in:mp.zooIn}; },
