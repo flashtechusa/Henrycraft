@@ -5944,25 +5944,51 @@ function basketTotal(){
 }
 /* The nearest thing with a price, within reach, or null. Cells rather than a
    radius, because goods are blocks: the same shape of search seatNear does. */
+/* Whatever counts as shopping in one cell: either loose food - a cake on a table, a
+   place setting - or whatever is standing on a shelf. Both are goods; only one of
+   them is a block. */
+function goodsAt(x,y,z){
+  if(!inside(x,y,z)) return 0;
+  var here=getBlock(x,y,z);
+  if(isGoods(here)) return here;
+  var on=stockAt(x,y,z);
+  return isGoods(on)?on:0;
+}
+/* Close enough to reach across, measured as walking distance rather than as a line
+   through the air: a shelf above his head is as easy to reach as one by his knee. */
+function inShopReach(x,z){
+  return Math.hypot(x+0.5-player.x, z+0.5-player.z)<=SHOP_REACH;
+}
+/* Which goods the button would pick up.
+
+   What he is POINTING AT wins, and everything else is a fallback. Two goes at this
+   were wrong before, and both were wrong the same way: they ranked the cells around
+   him and never asked where he was looking. Scan order picked the winner first; then
+   distance from his chest picked it, which sounds better and is not - a stack of
+   shelves sits at the same spot on the floor, so the one nearest chest height always
+   won, and standing at a stack he got the bottom shelf whichever one he aimed at.
+
+   Pointing is how everything else in this game chooses a block - digging, building,
+   putting something on a shelf - so it is what he already expects, and it is the only
+   answer that can tell two shelves in one column apart. The aim itself is untouched:
+   this only asks it a question it was never asked. */
 function goodsNear(){
+  var t=aim();
+  if(t){
+    var aimed=goodsAt(t.x,t.y,t.z);
+    if(aimed && inShopReach(t.x,t.z)) return {x:t.x,y:t.y,z:t.z,id:aimed};
+  }
+  /* Not pointing at anything with food on it - so the nearest thing, as before.
+     This is what keeps the button working when he walks up to a shop and presses it
+     without lining anything up, which is most of the time. */
   var fx=Math.floor(player.x), fy=Math.floor(player.y+0.1), fz=Math.floor(player.z);
   var best=null, bestD=1e9;
   for(var dy=2;dy>=-1;dy--){
     for(var dx=-2;dx<=2;dx++){
       for(var dz=-2;dz<=2;dz++){
         var x=fx+dx, y=fy+dy, z=fz+dz;
-        if(!inside(x,y,z)) continue;
-        /* Either loose food - a cake on a table, a place setting - or whatever is
-           standing on a shelf. Both are goods; only one of them is a block. */
-        var here=getBlock(x,y,z), item=isGoods(here)?here:stockAt(x,y,z);
-        if(!isGoods(item)) continue;
-        /* How far to walk decides whether it is in reach; how far in all three
-           decides which one he gets. Ranking on the flat alone meant a stack of
-           shelves was all the same distance away and the search order picked the
-           winner - so standing at the bottom shelf handed him what was on the top
-           one, which is a plain lie about what he pressed. */
-        var flat=Math.hypot(x+0.5-player.x, z+0.5-player.z);
-        if(flat>SHOP_REACH) continue;
+        var item=goodsAt(x,y,z);
+        if(!item || !inShopReach(x,z)) continue;
         var d=Math.hypot(x+0.5-player.x, (y+0.5)-(player.y+0.8), z+0.5-player.z);
         if(d>=bestD) continue;
         bestD=d; best={x:x,y:y,z:z,id:item};
@@ -6188,7 +6214,12 @@ function snackTexture(tile){
   return t;
 }
 function updateHeldSnack(){
-  var id=canEat()?player.snacks[0]:0;
+  /* Only while he is part way through one. Having something in the bag is not the
+     same as having it in your hand, and the first version showed the front of the
+     bag permanently - so a packet hung in front of his face across the whole game
+     from the moment he bought anything. It appears when he starts eating something
+     and goes when that packet is finished. */
+  var id=(canEat()&&player.bites>0)?player.snacks[0]:0;
   if(!id){
     if(heldSnack){ heldSnack.visible=false; }
     return;

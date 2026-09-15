@@ -1146,6 +1146,39 @@ purpose: a basket that comes to eleven is a number he can read out loud.
 
 Two decisions in there are about him being five rather than about shops.
 
+**The cart takes the shelf he is pointing at.** *"When I try and add something on a shelf
+on top of a shelf to my cart it pulls the item on the bottom shelf."* Two goes at this were
+wrong before, and both were wrong the same way: they ranked the cells around him and never
+asked where he was looking. First the scan order picked the winner; then distance from his
+chest picked it, which sounds better and is not &mdash; a stack of shelves sits at one spot
+on the floor, so the tier nearest chest height always won, and standing at a stack he got
+the bottom shelf whichever one he aimed at.
+
+Pointing is how everything else in this game chooses a block &mdash; digging, building,
+putting something on a shelf &mdash; so it is what he already expects, and it is the only
+answer that can tell two shelves in one column apart. The aim itself is untouched; this
+only asks it a question it was never asked. Looking at nothing still falls back to the
+nearest thing, which is how the button works when he walks up to a shop and presses it
+without lining anything up.
+
+The old test passed all the way through that bug, because it stood the player at each
+tier's own height &mdash; floating, level with the shelf, which is not something anybody can
+do on a shop floor &mdash; and never set a pitch at all, so it shopped with whatever angle
+an earlier section happened to leave behind. It now stands on the floor and looks up, like
+everything else here.
+
+Its aim is worked out to the **front face** of the column rather than the middle of a tier.
+From that close, a ray aimed at the centre of a high shelf crosses the near face before it
+has climbed that far, so the first version of the new test asked for the top shelf,
+genuinely pointed at the middle one, and would have reported a bug that was not there.
+
+**And the packet only appears when he is eating it.** The first version held the front of
+the bag up in front of his face permanently, so a packet hung there across the whole game
+from the moment he bought anything. Having something in the bag is not the same as having
+it in your hand: it appears when he starts on one and goes when that one is finished. Two
+of the four samples in the bite test are "bag full, nothing started", which is exactly the
+state that has to show nothing.
+
 **A shelf tapped with a shelf in hand stacks instead of spinning.** *"When we try and add
 a shelf on top of a shelf most times it just moves the shelf instead of putting a new one
 on top."* It was turning it: `turnFurniture` runs before placement so that tapping a chair

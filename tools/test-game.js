@@ -2101,19 +2101,36 @@ function slope(pts) {
     out.everyTier = out.placed.every((p, i) => p.stock === goods[i]);
     out.stillShelves = [0, 1, 2].every(t => H.getBlock(px, y + t, pz) === ids.SHELF);
 
-    /* Each one is shoppable from where he stands beside it. */
+    /* Each one is shoppable, standing ON THE FLOOR and looking at it.
+
+       This used to stand him level with each shelf in turn - floating, which is not
+       something anybody can do on a shop floor - and never set a pitch, so it shopped
+       with whatever angle an earlier section happened to leave behind. It passed all
+       the way through the bug where a stack always handed him the bottom shelf, and
+       once the cart started honouring the aim it began failing for a third reason
+       again: from that height, level is the shelf ABOVE.
+
+       Pitch is worked out to the front face of the column rather than the middle of a
+       tier - see the stacked-shelf checks below for why that distinction matters. */
     out.shopped = [];
+    H.movePlayer(px + 1.6, y, pz + 0.5);
+    H.setYaw(Math.PI / 2);
+    const eye = y + 1.34, face = 0.6;
     for (let t = 0; t < 3; t++) {
       H.emptyBasket();
-      H.movePlayer(px + 1.4, y + t, pz + 0.5);
+      H.setPitch(Math.atan2((y + t + 0.5) - eye, face));
       const st = H.shop();
       H.doShop();
       out.shopped.push({action: st.action, got: H.shop().basket[0] || 0,
                         stillStocked: H.stockAt(px, y + t, pz)});
     }
-    /* Putting something else on swaps it rather than refusing. */
+    /* Putting something else on swaps it rather than refusing. Aimed at the bottom
+       shelf on purpose: inheriting whatever angle the loop above finished on is the
+       exact fragility this section has now been bitten by twice, and it would have
+       put the cake on the top shelf. */
     H.selectBlock(ids.CAKE);
     H.movePlayer(px + 1.6, y, pz + 0.5);
+    H.setPitch(Math.atan2((y + 0.5) - eye, face));
     H.build();
     out.swapped = H.stockAt(px, y, pz);
 
@@ -2152,6 +2169,71 @@ function slope(pts) {
   check('and taking from a shelf still does not empty it',
         shelf.shopped.every((p, i) => p.stillStocked === shelf.wanted[i]),
         JSON.stringify(shelf.shopped.map(p => p.stillStocked)));
+  /* "When I try and add something on a shelf on top of a shelf to my cart it pulls
+     the item on the bottom shelf."
+
+     The check above passed all through that bug, because it stands the player at
+     each tier's own height - level with the shelf, which is not a thing anybody can
+     do on a shop floor. Standing ON THE FLOOR and looking up is the real case, and
+     it is the one that was broken: the cart ranked the cells around him and never
+     asked where he was pointing, so in a stack the tier nearest his chest always
+     won.
+
+     Note the aim: the pitch is worked out to the FRONT FACE of the column rather
+     than to the middle of a tier. From this close, a ray aimed at the centre of a
+     high shelf crosses the near face before it has climbed that far, so the first
+     version of this asked for the top shelf and genuinely pointed at the middle one
+     - and would have reported a bug that was not there. */
+  const tiers = await page.evaluate(() => {
+    const H = window.__henrycraft, ids = H.ids, out = {};
+    H.loadSeed(4242);
+    const px = 24, pz = 24, y = 16;
+    for (let a = -3; a < 8; a++) for (let b = -3; b < 8; b++) {
+      for (let yy = y - 3; yy < y; yy++) {
+        H.setBlock(px + a, yy, pz + b, yy === y - 1 ? ids.TILES : ids.STONE);
+      }
+      for (let yy = y; yy < y + 8; yy++) H.setBlock(px + a, yy, pz + b, ids.AIR);
+    }
+    const goods = [ids.BREAD, ids.OREOS, ids.CHEETOS];
+    for (let t = 0; t < 3; t++) {
+      H.setBlock(px, y + t, pz, ids.SHELF);
+      H.setStock(px, y + t, pz, goods[t]);
+    }
+    out.goods = goods.slice();
+    H.movePlayer(px + 1.6, y, pz + 0.5);     /* on the floor, in front of the stack */
+    H.setYaw(Math.PI / 2);
+    const eye = y + 1.34, face = 0.6;
+    out.tries = [0, 1, 2].map(t => {
+      H.setPitch(Math.atan2((y + t + 0.5) - eye, face));
+      const g = H.shop().goods;
+      return {tier: t, wanted: goods[t], got: g ? g.id : 0, atY: g ? g.y - y : null};
+    });
+    /* And the cart really takes the one he was pointing at. */
+    H.emptyBasket();
+    H.setPitch(Math.atan2((y + 2 + 0.5) - eye, face));
+    H.doShop();
+    out.basket = H.shop().basket.slice();
+    /* Turned away from the shelves, the button still finds the nearest thing -
+       which is how it works when he walks up and presses without lining anything
+       up, and that must not regress into "nothing happens". */
+    H.emptyBasket();
+    H.setYaw(-Math.PI / 2); H.setPitch(0);
+    const away = H.shop().goods;
+    out.notAiming = {got: away ? away.id : 0, any: !!away};
+    H.emptyBasket();
+    return out;
+  });
+  check('in a stack, the cart takes the tier he is pointing at',
+        tiers.tries.every(t => t.got === t.wanted),
+        JSON.stringify(tiers.tries));
+  check('and pressing it puts that one in the cart, not the bottom one',
+        tiers.basket.length === 1 && tiers.basket[0] === tiers.goods[2],
+        JSON.stringify({basket: tiers.basket, wanted: tiers.goods[2]}));
+  check('looking away still finds the nearest thing to buy',
+        tiers.notAiming.any, JSON.stringify(tiers.notAiming));
+  note(`three shelves in a column, shopped from the floor: ` +
+       `${tiers.tries.map(t => 'tier ' + t.tier + '→' + t.got).join(', ')}`);
+
   check('putting something else on a shelf swaps it',
         shelf.swapped === 79, `stock is ${shelf.swapped}`);
   check('digging a shelf takes what was on it',
@@ -2359,12 +2441,21 @@ function slope(pts) {
   check('paying for them puts them in his bag instead of nowhere',
         eat.bag.length === 2 && eat.charged === eat.total && eat.bagShown && eat.eatShown,
         JSON.stringify(eat));
-  /* The shape of the thing being eaten: still two in the bag for the first three
-     presses, smaller in his hand each time, and one fewer on the fourth. */
+  /* Having something in the bag is not the same as having it in your hand. The first
+     version showed the front of the bag permanently, so a packet hung in front of his
+     face across the whole game from the moment he bought anything - his dad asked for
+     it to appear only when he is actually eating. Samples 0 and 3 are both "bag full,
+     nothing started", which is exactly the state that must show nothing. */
+  check('nothing is in his hand until he starts eating something',
+        eat.bites[0].held === false && eat.bites[0].bag === 2 &&
+        eat.bites[3].held === false,
+        JSON.stringify(eat.bites));
+  /* The shape of the thing being eaten: still two in the bag while he works through
+     the first one, smaller in his hand each time, and one fewer on the fourth. */
   check('three bites to a packet, and it shrinks in his hand as he goes',
         eat.bites.length === 4 &&
-        eat.bites.slice(0, 3).every(b => b.bag === 2 && b.held) &&
-        eat.bites[1].scale < eat.bites[0].scale &&
+        eat.bites[1].held && eat.bites[2].held &&
+        eat.bites[1].bag === 2 && eat.bites[2].bag === 2 &&
         eat.bites[2].scale < eat.bites[1].scale &&
         eat.bites[3].bag === 1,
         JSON.stringify(eat.bites));
