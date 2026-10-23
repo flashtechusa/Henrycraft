@@ -1019,7 +1019,14 @@ var AIR=0,GRASS=1,DIRT=2,STONE=3,SAND=4,WOOD=5,LEAVES=6,PLANKS=7,
        puffs: what he means, drawn from the game's own colours, with nobody's logo
        on them. Same shape of thing as the bread and the milk, so they stock a
        shelf, fill a basket and get eaten without needing to know anything new. */
-    OREOS=103,CHEETOS=104;
+    OREOS=103,CHEETOS=104,
+    /* A candy cane to build with. He pointed at the red and white kerb round a
+       racing corner and asked for that as a block - and the kerb very nearly is
+       one, but it is angled shallow on purpose so a corner does not read as a
+       staircase, and it is called a kerb. This is its own thing: proper barber
+       stripes at forty-five degrees, which line up with the block above and below
+       so a stack of them makes one long candy cane. */
+    CANDY=105;
 
 /* tiles: [top, bottom, side] indices into the texture atlas */
 var DEFS={};
@@ -1181,6 +1188,7 @@ DEFS[APPLES]   ={name:'Apples', tiles:[83,83,83], prop:'apples', passable:true};
 DEFS[MILK]     ={name:'Milk',   tiles:[84,84,84], prop:'milk',   passable:true};
 DEFS[OREOS]    ={name:'Cookies', tiles:[87,87,87], prop:'oreos',   passable:true};
 DEFS[CHEETOS]  ={name:'Cheese Puffs', tiles:[88,88,88], prop:'cheetos', passable:true};
+DEFS[CANDY]    ={name:'Candy Cane', tiles:[89,89,89]};
 
 /* What things are worth at the till, in coins.
 
@@ -1196,8 +1204,17 @@ PRICE[CAKE]=4;  PRICE[CUP]=1;
 PRICE[DINNER]=5; PRICE[DINNER1]=5; PRICE[DINNER2]=5; PRICE[DINNER3]=5;
 PRICE[PLATE]=1;  PRICE[PLATE1]=1;  PRICE[PLATE2]=1;  PRICE[PLATE3]=1;
 
+/* Twenty now, not nineteen, and that is a decision rather than a drift.
+
+   The rule has been that the blocks row stops growing and anything new goes in a
+   drawer, which is why there are four of them. A candy cane earns a place here all
+   the same: it is a thing you BUILD with - a pole, a fence, an arch over a path -
+   and it would be lost in among the furniture and the shop fittings, which is where
+   a child would never look for it. Twenty still lays out as three rows of the
+   picker (7, 7, 6) and two of the row along the bottom, so it costs no height on a
+   phone either. The test that pins the number has been moved to twenty with it. */
 var PALETTE=[GRASS,DIRT,STONE,SAND,WOOD,LEAVES,PLANKS,BRICK,GLASS,GOLD,DIAMOND,RAINBOW,
-             COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE];
+             COAL,COPPER,LAPIS,EMERALD,OBSIDIAN,ENCHANT,FIRE,CANDY];
 /* The second drawer. Everything that furnishes a building rather than makes one
    goes here, so the row of blocks along the bottom stops growing every time he
    asks for something. */
@@ -2117,6 +2134,32 @@ function buildAtlas(){
       x.fillRect(Math.floor(r()*16),Math.floor(r()*16),1,1);
     }
     x.fillStyle='#fff3d0'; x.fillRect(2,12,12,1);
+  });
+  /* 89 a candy cane: white with red barber stripes.
+
+     Forty-five degrees, so the stripe moves sixteen across in the sixteen it falls -
+     two whole periods of the eight-wide repeat. That is what makes a stack of them
+     line up: the stripe leaving the bottom of one block meets the stripe entering
+     the top of the next, and a column reads as one long cane rather than as a pile
+     of separately striped cubes. Any other angle breaks at every seam. */
+  tile(89,function(x,r){
+    fill(x,'#fbfbf7');
+    for(var i=-16;i<32;i+=8){
+      /* The red band, four of the eight. */
+      x.fillStyle='#d8352c';
+      x.beginPath();
+      x.moveTo(i,0); x.lineTo(i+4,0); x.lineTo(i+4+16,16); x.lineTo(i+16,16);
+      x.closePath(); x.fill();
+      /* A lighter edge down one side of it, so it has a little roundness to it
+         rather than reading as flat tape. */
+      x.fillStyle='#ef5a4f';
+      x.beginPath();
+      x.moveTo(i,0); x.lineTo(i+1,0); x.lineTo(i+1+16,16); x.lineTo(i+16,16);
+      x.closePath(); x.fill();
+    }
+    /* And the faintest shine across the white, which sugar has. */
+    x.fillStyle='rgba(255,255,255,.55)';
+    for(var k=0;k<5;k++) x.fillRect((k*7+2)%16,(k*3+1)%16,1,1);
   });
   /* 33 mushroom stem - pale and fibrous */
   tile(33,function(x,r){
@@ -11414,7 +11457,8 @@ window.__henrycraft={
        HAY:HAY,TROUGH:TROUGH,
        SHELF:SHELF,SHELF1:SHELF1,SHELF2:SHELF2,SHELF3:SHELF3,
        REGISTER:REGISTER,REGISTER1:REGISTER1,REGISTER2:REGISTER2,REGISTER3:REGISTER3,
-       BREAD:BREAD,APPLES:APPLES,MILK:MILK,OREOS:OREOS,CHEETOS:CHEETOS},
+       BREAD:BREAD,APPLES:APPLES,MILK:MILK,OREOS:OREOS,CHEETOS:CHEETOS,
+       CANDY:CANDY},
   /* Every prop's boxes, so a test can check the geometry itself rather than
      looking at a picture and hoping. */
   propShapes:function(){ return JSON.parse(JSON.stringify(PROP_SHAPE)); },

@@ -142,6 +142,8 @@ function slope(pts) {
     SHELF: 92, SHELF1: 93, SHELF2: 94, SHELF3: 95,
     REGISTER: 96, REGISTER1: 97, REGISTER2: 98, REGISTER3: 99,
     BREAD: 100, APPLES: 101, MILK: 102,
+    OREOS: 103, CHEETOS: 104,
+    CANDY: 105,
   };
   const ids = await page.evaluate(() => window.__henrycraft.ids);
   const moved = Object.keys(ID_TABLE).filter(k => ids[k] !== ID_TABLE[k])
@@ -185,6 +187,67 @@ function slope(pts) {
         atlas.bad.length === 0, JSON.stringify(atlas.bad.slice(0, 5)));
   check('every block has its own distinct side tile',
         atlas.dupes.length === 0, atlas.dupes.join('; '));
+
+  /* 1b: the candy cane's stripes line up from one block to the next.
+
+     Henry pointed at the red and white kerb round a racing corner and asked for it
+     as a block to build with. The thing that makes a stack of them read as ONE long
+     candy cane rather than as a pile of separately striped cubes is the angle:
+     forty-five degrees, so the stripe travels exactly the height of the tile
+     sideways while it falls, and the tile's height is a whole number of stripe
+     periods. Any other angle and every seam shows.
+
+     Measured off the drawn tile rather than trusted, because it is a property of the
+     pixels and not of the code that intended them. */
+  const cane = await page.evaluate(async () => {
+    const H = window.__henrycraft;
+    const img = new Image();
+    img.src = H.swatchURL(H.DEFS[H.ids.CANDY].tiles[2]);
+    await img.decode();
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const cx = cv.getContext('2d');
+    cx.drawImage(img, 0, 0);
+    const d = cx.getImageData(0, 0, cv.width, cv.height).data;
+    const red = (x, y) => {
+      const i = (y * cv.width + x) * 4;
+      return d[i] > d[i + 1] + 40 && d[i] > d[i + 2] + 40;
+    };
+    /* Where every white→red edge sits on a row, read round the row rather than
+       across it: the tile wraps, and the first stripe starts at x=0, so a scan that
+       begins at x=1 misses it and reports no repeat at all. */
+    const edgesOf = y => {
+      const out = [];
+      for (let x = 0; x < cv.width; x++) {
+        if (red(x, y) && !red((x - 1 + cv.width) % cv.width, y)) out.push(x);
+      }
+      return out;
+    };
+    const row0 = edgesOf(0);
+    const period = row0.length > 1 ? row0[1] - row0[0] : -1;
+    /* One pixel sideways for every pixel down is forty-five degrees. Compared
+       modulo the repeat, because the stripe walks off one side and back on the
+       other as it descends. */
+    const off = y => {
+      const e = edgesOf(y);
+      return e.length ? e[0] : -1;
+    };
+    const offsets = [];
+    for (let y = 0; y < cv.height; y++) offsets.push(off(y));
+    const slope = period > 0 && offsets.every((e, y) =>
+      e >= 0 && (((e - offsets[0] - y) % period) + period) % period === 0);
+    return {size: cv.width, period, slope, stripesPerRow: row0.length,
+            /* The whole point: a tile's height is a whole number of repeats, so the
+               stripe leaving the bottom meets the one entering the top. */
+            seamless: period > 0 && cv.height % period === 0,
+            redRows: offsets.filter(e => e >= 0).length};
+  });
+  check('the candy cane is striped at forty-five degrees',
+        cane.slope && cane.redRows === cane.size, JSON.stringify(cane));
+  check('and its stripes meet across a seam, so a stack is one long cane',
+        cane.seamless && cane.period > 0, JSON.stringify(cane));
+  note(`candy cane: ${cane.size}px tile, stripe repeats every ${cane.period}px, ` +
+       `${cane.size / cane.period} whole repeats per block`);
 
   // ---- 2: new blocks present and selectable --------------------------------
   console.log('2. the new blocks are in the palette and selectable');
@@ -285,13 +348,16 @@ function slope(pts) {
   check('both the palette and the picker carry the tabs',
         drawers.palTabs.length === 4 && drawers.pickTabs.length === 4,
         `palette ${drawers.palTabs.length}, picker ${drawers.pickTabs.length}`);
-  /* Nineteen, written out rather than read back from PALETTE. Comparing the grid
+  /* Twenty, written out rather than read back from PALETTE. Comparing the grid
      against PALETTE.length only proves the palette renders what it is given - it
-     passed happily at twenty. The number is the requirement: the blocks row stops
-     growing, and anything new goes in a drawer. Changing this line is a decision,
-     which is the point of it being here. */
-  check(`the blocks drawer still holds 19 and no more`,
-        sel.size === 19 && drawers.blocksGrid.length === 19 && drawers.blocksPal.length === 19,
+     passed happily at twenty when the number was nineteen. The number is the
+     requirement: the blocks row does not grow by accident, and anything new goes in
+     a drawer unless somebody decides otherwise. Changing this line is that decision,
+     which is the point of it being here - it went from nineteen to twenty for the
+     candy cane, which is a thing you build with rather than a thing you furnish
+     with. */
+  check(`the blocks drawer still holds 20 and no more`,
+        sel.size === 20 && drawers.blocksGrid.length === 20 && drawers.blocksPal.length === 20,
         `PALETTE ${sel.size}, picker ${drawers.blocksGrid.length}, palette ${drawers.blocksPal.length}`);
   check('the furniture is not in the blocks drawer',
         drawers.inPalette[0] < 0 && drawers.inPalette[1] < 0,
@@ -513,7 +579,7 @@ function slope(pts) {
         'ids: ' + room.chairs.map(c => c.id).join(', '));
   check('only one chair is offered in the drawer, and the blocks row is untouched',
         room.drawer.spares.length === 0 && room.drawer.furniture.length === 16 &&
-        room.drawer.blocks === 19,
+        room.drawer.blocks === 20,
         `spares in a drawer: [${room.drawer.spares}], furniture ${room.drawer.furniture.length}, ` +
         `blocks ${room.drawer.blocks}`);
   check(`table 5 boxes, chair 6, lamp 3, rug 1 ` +
@@ -2799,7 +2865,7 @@ function slope(pts) {
     if (r.overlap) fails.push('palette overlaps the hint line');
     if (r.offTop) fails.push('palette or hint off the top of the window');
     if (!r.onScreen) fails.push('a palette slot is off screen');
-    if (r.slots !== 19) fails.push(`${r.slots} slots, expected 19`);
+    if (r.slots !== 20) fails.push(`${r.slots} slots, expected 20`);
     check(`${v.w}x${v.h}  palette ${r.palH}px tall, hint clear above it`,
           fails.length === 0, fails.join('; '));
     await c3.close();

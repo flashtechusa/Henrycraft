@@ -766,16 +766,33 @@ a server that was already deployed.
 
 ## What's in a district
 
-**19 blocks** to build with: grass, dirt, stone, sand, wood, leaves, planks,
+**20 blocks** to build with: grass, dirt, stone, sand, wood, leaves, planks,
 brick, glass, gold, diamond, rainbow, coal, copper, lapis, emerald, obsidian, an
-enchanting table, and Flint &amp; Steel.
+enchanting table, Flint &amp; Steel, and a candy cane.
 
 **Furniture, in a second drawer.** Henry asked for a furnace and a bed to put
 inside the houses he builds. Rather than make the row of blocks longer again, the
 picker grew two tabs — 🧱 **Blocks** and 🛏️ **For a house** — and the furniture
-lives behind the second one. The blocks row is pinned at nineteen by a test that
-writes the number out rather than reading it back, so the next thing he asks for
-goes in a drawer too.
+lives behind the second one. The blocks row is pinned by a test that writes the
+number out rather than reading it back, so the next thing he asks for goes in a
+drawer unless somebody decides otherwise.
+
+**The candy cane is the one time that decision went the other way.** He pointed at
+the red and white kerb round a racing corner and asked for it as a block. The kerb
+very nearly is one — but it is angled deliberately shallow so a corner does not read
+as a staircase, and it is called a kerb. So the candy cane is its own block, with
+proper barber stripes at forty-five degrees. It went in the **Blocks** drawer rather
+than a fifth tab because it is a thing you build *with* — a pole, an arch over a
+path — and it would be lost in among the furniture and the shop fittings, where a
+child would never look for it. Nineteen became twenty; three picker rows and two
+palette rows either way, so it costs no height on a phone.
+
+Forty-five degrees is the whole of the design. The stripe travels exactly the height
+of the tile sideways while it falls, and the tile is a whole number of stripe
+repeats, so the stripe leaving the bottom of one block meets the one entering the top
+of the next and a stack reads as **one long cane** instead of a pile of separately
+striped cubes. At any other angle every seam shows. A test measures that off the
+drawn pixels rather than trusting the code that meant to draw them.
 
 **The bed is a bed.** The first one was a single cube with a red top, and it read
 as a cake — he said so. So it is built the way Minecraft's is: **two blocks laid
